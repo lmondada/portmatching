@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use bimap::BiBTreeMap;
 use portgraph::{NodeIndex, PortGraph};
@@ -83,7 +83,7 @@ mod tests {
     use portgraph::{Direction, NodeIndex, PortGraph};
 
     use crate::{
-        matcher::{many_patterns::PatternMatch, Matcher},
+        matcher::Matcher,
         pattern::Pattern,
         utils::test_utils::graph,
     };

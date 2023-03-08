@@ -51,7 +51,7 @@ impl Pattern {
         all_lines
     }
 
-    pub(crate) fn get_boundary(&self, root: NodeIndex, graph: &PortGraph) -> PatternBoundaries {
+    pub fn get_boundary(&self, root: NodeIndex, graph: &PortGraph) -> PatternBoundaries {
         let mut out_edges = Vec::new();
         let mut in_edges = Vec::new();
         let mut pattern_to_graph = BTreeMap::from([(self.root, root)]);
@@ -75,16 +75,16 @@ impl Pattern {
             }
         }
         PatternBoundaries {
-            in_edges,
-            out_edges,
+            _in_edges: in_edges,
+            _out_edges: out_edges,
         }
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct PatternBoundaries {
-    in_edges: Vec<PortIndex>,
-    out_edges: Vec<PortIndex>,
+pub struct PatternBoundaries {
+    _in_edges: Vec<PortIndex>,
+    _out_edges: Vec<PortIndex>,
 }
 
 /// Starting at `port`, keep following edges as long as possible

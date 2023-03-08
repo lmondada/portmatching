@@ -1,7 +1,7 @@
 use portgraph::{PortGraph, NodeIndex};
 
-mod single_pattern;
-mod many_patterns;
+pub mod single_pattern;
+pub mod many_patterns;
 
 pub use single_pattern::SinglePatternMatcher;
 

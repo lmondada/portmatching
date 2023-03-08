@@ -1,5 +1,4 @@
-use std::fmt::Debug;
-use std::{cmp, collections::BTreeSet, iter::zip};
+use std::iter::zip;
 
 use portgraph::{Direction, PortGraph, PortIndex};
 use proptest::prelude::*;
@@ -25,14 +24,6 @@ pub(crate) fn graph() -> PortGraph {
     g.link_ports(v2_out0, v3_in1).unwrap();
     g.remove_node(vlol);
     g
-}
-
-/// A strategy with `size` unique values from vals
-fn unique_vec<T: Debug + Clone>(vals: Vec<T>, mut size: usize) -> impl Strategy<Value = Vec<T>> {
-    size = cmp::min(size, vals.len());
-    Just(vals)
-        .prop_shuffle()
-        .prop_map(move |v| v[..size].to_vec())
 }
 
 prop_compose! {
