@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::{self, Debug},
 };
 
@@ -213,12 +213,13 @@ impl PatternTrie {
             let mut new_mapped_nodes = mapped_nodes.clone();
             for next_tree in next_trees {
                 new_mapped_nodes = mapped_nodes.clone();
-                new_next_trees.extend(self.add_line(
+                new_next_trees.append(&mut self.add_line(
                     next_tree,
                     &line,
                     line_ind,
                     graph,
                     &mut new_mapped_nodes,
+                    &BTreeSet::new()
                 ));
             }
             mapped_nodes = new_mapped_nodes;
@@ -240,6 +241,7 @@ impl PatternTrie {
         line_ind: usize,
         graph: &PortGraph,
         mapped_nodes: &mut BTreeMap<NodeIndex, PatternNodeAddress>,
+        non_mapped_addresses: &BTreeSet<PatternNodeAddress>,
     ) -> Vec<TreeNodeID> {
         let Some(first_port) = line.first().map(|e| e.0) else {
             return vec![];
@@ -251,120 +253,112 @@ impl PatternTrie {
         let default_addr = PatternNodeAddress(line_ind, 0);
         let first_addr =
             mapped_nodes.entry(first_node).or_insert(default_addr) as &PatternNodeAddress;
-        let mut root_port_index = self
-            .node_mut(&root)
-            .out_port
-            .get_or_insert(first_port_index.clone())
-            .clone();
-        let mut root_addr = self
-            .node_mut(&root)
-            .address
-            .get_or_insert(first_addr.clone())
-            .clone();
-        while root_port_index != first_port_index || &root_addr != first_addr {
-            root = match self.transition(&root, &NodeTransition::Fail).cloned() {
-                Some(next_tree) => next_tree,
-                None => {
-                    let next_tree = self.add_new_tree();
-                    self.set_transition(&root, &next_tree, &NodeTransition::Fail);
-                    next_tree
-                }
-            };
-            root_port_index = self
-                .node_mut(&root)
-                .out_port
-                .get_or_insert(first_port_index.clone())
-                .clone();
-            root_addr = self
-                .node_mut(&root)
-                .address
-                .get_or_insert(first_addr.clone())
-                .clone();
-            assert!(Self::is_root(&root));
-        }
+        self.find_root(&mut root, first_addr, &first_port_index);
 
-        self.traverse_or_expand(root, line, line_ind, graph, mapped_nodes)
-    }
-
-    fn traverse_or_expand(
-        &mut self,
-        root: TreeNodeID,
-        line: &[Edge],
-        line_ind: usize,
-        graph: &PortGraph,
-        mapped_nodes: &mut BTreeMap<NodeIndex, PatternNodeAddress>,
-    ) -> Vec<TreeNodeID> {
-        let mut ind = 0;
-        let mut tree_node = root;
-        let mut last_transition = NodeTransition::Fail;
-        loop {
-            let Some(&Edge(out_port, in_port)) = line.get(ind) else {
+        // Traverse line
+        let mut curr_nodes = vec![root];
+        let mut last_is_dangling = false;
+        for (ind, &Edge(out_port, in_port)) in line.into_iter().enumerate() {
+            let Some(in_port) = in_port else {
+                // We've reached the last edge of the line -- a dangling edge
+                last_is_dangling = true;
                 break;
             };
-
-            // Check address is valid
-            let graph_node = graph.port_node(out_port).expect("Invalid port");
-            let curr_addr = self
-                .node_mut(&tree_node)
-                .address
-                .get_or_insert(mapped_nodes[&graph_node].clone());
-            assert_eq!(&mapped_nodes[&graph_node], curr_addr);
-
-            // Check out_port is valid
-            let graph_port_index = graph.port_index(out_port).expect("Invalid port");
-            let curr_port = self
-                .node_mut(&tree_node)
-                .out_port
-                .get_or_insert(graph_port_index.clone());
-            assert_eq!(curr_port, &graph_port_index);
-
-            let next_node = match &compute_transition(in_port, graph, |n| {
-                mapped_nodes.get(n).cloned()
-            }) {
-                transition @ NodeTransition::KnownNode(addr, _) => self
-                    .transition(&tree_node, transition)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        let next_node = self.extend_tree(&tree_node);
-                        self.node_mut(&next_node).address = addr.clone().into();
-                        self.set_transition(&tree_node, &next_node, &transition);
-                        next_node
-                    }),
-                transition @ NodeTransition::NewNode(_) => {
-                    let next_graph_node = graph.port_node(in_port.unwrap()).expect("Invalid port");
-                    let next_addr = PatternNodeAddress(line_ind, ind + 1);
-                    mapped_nodes.insert(next_graph_node, next_addr.clone());
-                    self.transition(&tree_node, transition)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            let next_node = self.extend_tree(&tree_node);
-                            self.node_mut(&next_node).address = next_addr.into();
-                            self.set_transition(&tree_node, &next_node, transition);
-                            next_node
-                        })
-                }
-                NodeTransition::NoLinkedNode => {
-                    last_transition = NodeTransition::NoLinkedNode;
-                    break;
-                }
-                NodeTransition::Fail => panic!("This makes no sense"),
-            };
-            tree_node = next_node;
-            ind += 1;
-        }
-        if last_transition == NodeTransition::NoLinkedNode {
-            assert_eq!(ind, line.len() - 1);
-        } else {
-            assert_eq!(ind, line.len());
+            let mut next_nodes = Vec::new();
+            for curr_node in curr_nodes {
+                let next_addr = PatternNodeAddress(line_ind, ind + 1);
+                next_nodes.append(&mut self.traverse_edge(
+                    curr_node,
+                    out_port,
+                    in_port,
+                    next_addr,
+                    graph,
+                    mapped_nodes,
+                    non_mapped_addresses,
+                ));
+            }
+            curr_nodes = next_nodes;
         }
 
+        // Get descendants
+        let mut all_descendents = Vec::new();
+        for node in curr_nodes {
+            all_descendents.append(&mut self.descendents(&node, last_is_dangling));
+        }
+        all_descendents
+    }
+
+    fn traverse_edge(
+        &mut self,
+        node: TreeNodeID,
+        out_port: PortIndex,
+        in_port: PortIndex,
+        next_addr: PatternNodeAddress,
+        graph: &PortGraph,
+        mapped_nodes: &mut BTreeMap<NodeIndex, PatternNodeAddress>,
+        non_mapped_addresses: &BTreeSet<PatternNodeAddress>,
+    ) -> Vec<TreeNodeID> {
+        // Check address is valid
+        let graph_node = graph.port_node(out_port).expect("Invalid port");
+        let curr_addr = self
+            .node_mut(&node)
+            .address
+            .get_or_insert(mapped_nodes[&graph_node].clone());
+        assert_eq!(&mapped_nodes[&graph_node], curr_addr);
+
+        // Check out_port is valid
+        let graph_port_index = graph.port_index(out_port).expect("Invalid port");
+        let curr_port = self
+            .node_mut(&node)
+            .out_port
+            .get_or_insert(graph_port_index.clone());
+        assert_eq!(curr_port, &graph_port_index);
+
+        match &compute_transition(Some(in_port), graph, |n| mapped_nodes.get(n).cloned()) {
+            transition @ NodeTransition::KnownNode(addr, _) => vec![self
+                .transition(&node, transition)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let next_node = self.extend_tree(&node);
+                    self.node_mut(&next_node).address = addr.clone().into();
+                    self.set_transition(&node, &next_node, &transition);
+                    next_node
+                })],
+            transition @ NodeTransition::NewNode(port) => {
+                let next_graph_node = graph.port_node(in_port).expect("Invalid port");
+                mapped_nodes.insert(next_graph_node, next_addr.clone());
+                let mut transitions = Vec::with_capacity(non_mapped_addresses.len() + 1);
+                transitions.push(transition.clone());
+                transitions.extend(
+                    non_mapped_addresses
+                        .iter()
+                        .map(|addr| NodeTransition::KnownNode(addr.clone(), port.clone())),
+                );
+                transitions
+                    .iter()
+                    .map(|transition| {
+                        self.transition(&node, &transition)
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                let next_node = self.extend_tree(&node);
+                                self.node_mut(&next_node).address = next_addr.clone().into();
+                                self.set_transition(&node, &next_node, transition);
+                                next_node
+                            })
+                    })
+                    .collect()
+            }
+            NodeTransition::NoLinkedNode | NodeTransition::Fail => {
+                panic!("compute_transition returned unexpected transition")
+            }
+        }
+    }
+
+    fn descendents(&mut self, root: &TreeNodeID, is_dangling: bool) -> Vec<TreeNodeID> {
         let mut next_trees = Vec::new();
-        for node in self.all_descendents_in_tree(&tree_node) {
+        for node in self.all_descendents_in_tree(root) {
             for transition in [NodeTransition::Fail, NodeTransition::NoLinkedNode] {
-                if transition == NodeTransition::Fail
-                    && node == tree_node
-                    && last_transition == NodeTransition::NoLinkedNode
-                {
+                if transition == NodeTransition::Fail && &node == root && is_dangling {
                     continue;
                 }
                 let next_node = self
@@ -446,6 +440,37 @@ impl PatternTrie {
             in_port.and_then(|in_port| graph.port_node(in_port)),
         )
             .into()
+    }
+
+    fn try_update_node(
+        &mut self,
+        node: &TreeNodeID,
+        addr: &PatternNodeAddress,
+        port_index: &PortOffset,
+    ) -> bool {
+        let node = self.node_mut(node);
+        let res_port_index = node.out_port.get_or_insert(port_index.clone());
+        let res_addr = node.address.get_or_insert(addr.clone());
+        res_port_index == port_index && res_addr == addr
+    }
+
+    fn find_root(
+        &mut self,
+        root: &mut TreeNodeID,
+        addr: &PatternNodeAddress,
+        port_index: &PortOffset,
+    ) {
+        while !self.try_update_node(root, addr, port_index) {
+            *root = match self.transition(&root, &NodeTransition::Fail).cloned() {
+                Some(next_tree) => next_tree,
+                None => {
+                    let next_tree = self.add_new_tree();
+                    self.set_transition(&root, &next_tree, &NodeTransition::Fail);
+                    next_tree
+                }
+            };
+            assert!(Self::is_root(&root));
+        }
     }
 }
 
@@ -808,10 +833,37 @@ mod tests {
         let mut matcher = NaiveManyPatternMatcher::new();
         matcher.add_pattern(Pattern::from_graph(p1).unwrap());
         matcher.add_pattern(Pattern::from_graph(p2).unwrap());
-        dbg!(matcher.find_matches(&g));
         fs::write("graph2.gv", g.dotstring()).unwrap();
         fs::write("patterntrie.gv", matcher.tree.dotstring());
         assert_eq!(matcher.find_matches(&g).len(), 3);
+    }
+
+    #[test]
+    fn two_simple_patterns_2() {
+        let mut p1 = PortGraph::new();
+        let n0 = p1.add_node(1, 0);
+        let n1 = p1.add_node(1, 3);
+        let n2 = p1.add_node(0, 3);
+        let n3 = p1.add_node(1, 3);
+        link(&mut p1, (n1, 0), (n0, 0));
+        link(&mut p1, (n2, 0), (n1, 0));
+        link(&mut p1, (n2, 2), (n3, 0));
+
+        let mut p2 = PortGraph::new();
+        let n0 = p2.add_node(2, 1);
+        let n1 = p2.add_node(3, 0);
+        link(&mut p2, (n0, 0), (n1, 1));
+
+        let mut g = PortGraph::new();
+        let n2 = g.add_node(3, 2);
+        let n3 = g.add_node(3, 1);
+        link(&mut g, (n2, 0), (n3, 1));
+        link(&mut g, (n3, 0), (n2, 0));
+
+        let mut matcher = NaiveManyPatternMatcher::new();
+        matcher.add_pattern(Pattern::from_graph(p1).unwrap());
+        matcher.add_pattern(Pattern::from_graph(p2).unwrap());
+        assert_eq!(matcher.find_matches(&g).len(), 1);
     }
 
     proptest! {
