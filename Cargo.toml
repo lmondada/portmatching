@@ -1,0 +1,17 @@
+[package]
+name = "portmatching"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.65"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bimap = "0.6.2"
+bitvec = "1.0.1"
+portgraph = { git = "https://github.com/zrho/portgraph", version = "0.1.1", branch = "compositional" }
+rand = "0.8.5"
+
+[dev-dependencies]
+itertools = "0.10.5"
+proptest = "1.1.0"
