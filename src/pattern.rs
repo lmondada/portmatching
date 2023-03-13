@@ -10,7 +10,7 @@ pub struct Pattern {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Edge(pub(crate) PortIndex, pub(crate) Option<PortIndex>);
+pub struct Edge(pub(crate) PortIndex, pub(crate) Option<PortIndex>);
 
 impl Pattern {
     pub fn from_graph(graph: PortGraph) -> Result<Self, InvalidPattern> {

@@ -3,7 +3,7 @@ use std::{
     fmt,
 };
 
-use portgraph::{NodeIndex, PortGraph, PortIndex};
+use portgraph::{NodeIndex, PortGraph};
 
 use crate::pattern::{Edge, Pattern};
 
@@ -12,10 +12,15 @@ use super::Matcher;
 mod naive;
 pub use naive::{NaiveGraphTrie, NaiveManyPatternMatcher};
 
+/// A match instance returned by a ManyPatternMatcher instance
+/// 
+/// The PatternID indicates which pattern matches, the root indicates the
+/// location of the match, given by the unique mapping of
+///                  pattern.root => root
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PatternMatch {
-    id: PatternID,
-    root: NodeIndex,
+    pub id: PatternID,
+    pub root: NodeIndex,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -27,6 +32,15 @@ impl fmt::Debug for PatternID {
     }
 }
 
+/// The Graph Trie trait
+/// 
+/// Any struct that implements this trait can be used as a graph trie for
+/// pattern matching.
+/// - `init` should return the root of the trie and an empty match object
+/// - `next_states` should return the set of states that can be obtained
+///    by a single transition from `state`
+/// 
+/// A graph trie is thus a non-deterministic automaton.
 pub trait ReadGraphTrie {
     type StateID;
     type MatchObject: Clone;
@@ -41,13 +55,20 @@ pub trait ReadGraphTrie {
     ) -> Vec<(Self::StateID, Self::MatchObject)>;
 }
 
+/// A Graph Trie that supports the addition of new patterns
+/// 
+/// Writing new patterns to the graph trie requires two functions
+/// - `create_next_states` is the equivalent of `next_states` in write mode
+/// - `create_next_roots` is basically a carriage return, to be called at the
+///   end of the line.
 pub trait WriteGraphTrie: ReadGraphTrie {
-    fn create_next_states(
+    fn create_next_states<F: FnMut(&Self::StateID, &Self::StateID)>(
         &mut self,
         state: &Self::StateID,
-        edge: (PortIndex, PortIndex),
+        edge: &Edge,
         graph: &PortGraph,
         current_match: &Self::MatchObject,
+        clone_state: F,
     ) -> Vec<(Self::StateID, Self::MatchObject)>;
 
     fn create_next_roots(
@@ -82,7 +103,7 @@ impl<T: Default + ReadGraphTrie> ManyPatternMatcher<T> {
 
 impl<T: ReadGraphTrie> Matcher for ManyPatternMatcher<T>
 where
-    T::StateID: Ord,
+    T::StateID: Ord + fmt::Debug,
 {
     type Match = PatternMatch;
 
@@ -111,8 +132,9 @@ where
 
 impl<T: WriteGraphTrie + Default> ManyPatternMatcher<T>
 where
-    T::StateID: Ord,
+    T::StateID: Ord + Clone,
 {
+    /// Construct a Graph Trie from a vector of patterns
     pub fn from_patterns(patterns: Vec<Pattern>) -> Self {
         let mut obj = Self {
             trie: T::default(),
@@ -128,8 +150,9 @@ where
 
 impl<T: WriteGraphTrie> ManyPatternMatcher<T>
 where
-    T::StateID: Ord,
+    T::StateID: Ord + Clone,
 {
+    /// Add a pattern to the graph trie
     pub fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());
@@ -144,44 +167,51 @@ where
         // Decompose a pattern into "lines", which are paths in the pattern
         let all_lines = pattern.all_lines();
 
-        // The only edge that can be "dangling" (i.e. have no second endvertex)
-        // in a line is its last edge.
-        // This is `None` at the beginning (no previous line), and then will
-        // always be Some(true/false)
-        let mut is_previous_line_dangling = None;
         for line in all_lines {
-            // Move on from previous line
-            // We do this at the beginning of the loop and not the end because
-            // we do not want to move on after the last line
-            if let Some(is_dangling) = is_previous_line_dangling {
-                let mut new_states = Vec::new();
-                for (state, current_match) in current_states {
-                    new_states.append(&mut self.trie.create_next_roots(
-                        &state,
-                        &current_match,
-                        is_dangling,
-                    ));
-                }
-                current_states = new_states;
-            }
+            // The only edge that can be "dangling" (i.e. have no second endvertex)
+            // in a line is its last edge.
+            // We store this as it changes how we can proceed to the next line.
+            let mut is_dangling = false;
+
             // Traverse the line
-            is_previous_line_dangling = false.into();
             for edge in line {
-                let Edge(out_port, Some(in_port)) = edge else {
-                    is_previous_line_dangling = true.into();
-                    break;
-                };
                 let mut new_states = Vec::new();
                 for (state, current_match) in current_states {
                     new_states.append(&mut self.trie.create_next_states(
                         &state,
-                        (out_port, in_port),
+                        &edge,
                         graph,
                         &current_match,
+                        |old_state, new_state| {
+                            self.matching_nodes.insert(
+                                new_state.clone(),
+                                self.matching_nodes
+                                    .get(old_state)
+                                    .cloned()
+                                    .unwrap_or_default()
+                            );
+                        },
                     ));
                 }
                 current_states = new_states;
+                if edge.1.is_none() {
+                    is_dangling = true;
+                }
             }
+
+            // Move on to next line
+            // It is important to "move on to next line" even if it is
+            // the last line in the case of dangling edges, to make sure
+            // we match these.
+            let mut new_states = Vec::new();
+            for (state, current_match) in current_states {
+                new_states.append(&mut self.trie.create_next_roots(
+                    &state,
+                    &current_match,
+                    is_dangling,
+                ));
+            }
+            current_states = new_states;
         }
         for (state, _) in current_states {
             self.matching_nodes
