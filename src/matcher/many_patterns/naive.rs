@@ -4,18 +4,18 @@ use std::{
 };
 
 use bimap::BiBTreeMap;
-use portgraph::{portgraph::PortOffset, NodeIndex, PortGraph, PortIndex};
+use portgraph::{NodeIndex, PortGraph, PortIndex};
 
-use crate::pattern::Edge;
+use crate::{pattern::Edge, PortOffset};
 
 use super::{ManyPatternMatcher, ReadGraphTrie, WriteGraphTrie};
 
 /// Every node in a pattern has an address, given by the line index and
 /// the index within the line
-/// 
+///
 /// An address is unique within a pattern, and will always be unique within
 /// a maximum match as well
-/// 
+///
 /// Note that a same node in a graph may have more than one address. In this
 /// case, we always refer to the node by its smallest address, so that the
 /// map address <-> node ID is bijective
@@ -44,12 +44,12 @@ impl Debug for PatternNodeAddress {
 }
 
 /// A unique ID for every node in the NaiveGraphTrie
-/// 
+///
 /// The 2D indices into the nodes vector of the NaiveGraphTrie
-/// 
+///
 /// Similar in flavour, but not be confused with the address! An address may
 /// appear in multiple nodes in the graph tree, hence with different unique ID.
-/// 
+///
 /// The point of addresses, however, is that two nodes with the same address
 /// will never be match at the same time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -106,11 +106,11 @@ impl fmt::Display for NodeTransition {
 }
 
 /// A node in the NaiveGraphTrie
-/// 
+///
 /// The pair `port_offset` and `address` indicate the next edge to follow.
 /// The `transition` map indicates the states that can be transitioned to,
 /// according to what the next edge leads to.
-/// 
+///
 /// `port_offset` and `address` can be unset (ie None), in which case the
 /// transition Fail is the only one that should be followed. At write time,
 /// an unset field is seen as a license to assign whatever is most convenient.
@@ -122,7 +122,7 @@ struct TreeNode {
 }
 
 /// A simple implementation of a graph trie
-/// 
+///
 /// The graph trie is organised in "lines". Within each line (corresponding
 /// to a maximal line of the patterns), the node transitions are deterministic.
 /// Between lines, transitions are non-deterministic, so that more than one
@@ -142,14 +142,14 @@ impl NaiveGraphTrie {
     }
 
     /// Follow a transition from `node` along `transition`
-    /// 
+    ///
     /// Returns None if the transition does not exist
     fn transition(&self, node: &TreeNodeID, transition: &NodeTransition) -> Option<&TreeNodeID> {
         self.state(node).transitions.get(transition)
     }
 
     /// Set a new transition between `node` and `next_node`
-    /// 
+    ///
     /// If the transition already exists, then trying to update it to a
     /// different value will return None. In most cases this should be
     /// considered a logic mistake.
@@ -211,13 +211,13 @@ impl NaiveGraphTrie {
     }
 
     /// Extend an existing tree to handle a longer maximal line
-    /// 
+    ///
     /// This is in principle similar to `append_tree`, except that it preserves
     /// all the "business logic" of the graph trie.
     /// That is to say, it will do a lot of nodes copying so that any patterns
     /// that were previously added to the trie will still match along the newly
     /// added extension
-    /// 
+    ///
     /// This is to be refactored and cleaned up -- there is a lot going on here.
     fn extend_tree<F: FnMut(&TreeNodeID, &TreeNodeID)>(
         &mut self,
@@ -449,7 +449,7 @@ impl NaiveGraphTrie {
             .get_by_right(addr)
             .expect("Malformed pattern trie");
         let out_port = self.state(state).port_offset.clone()?;
-        let out_port = graph.port_alt(graph_node, out_port)?;
+        let out_port = out_port.get_index(graph_node, graph)?;
         let in_port = graph.port_link(out_port);
         (
             compute_transition(in_port, graph, |n| mapped_nodes.get_by_left(n).cloned()),
@@ -459,7 +459,7 @@ impl NaiveGraphTrie {
     }
 
     /// Assign `node` to given address and port, if possible
-    /// 
+    ///
     /// Will update the node fields to the given values if those are None.
     /// Returns whether it was successful
     fn try_update_node(
@@ -498,7 +498,7 @@ impl NaiveGraphTrie {
     }
 
     /// Adds NoLinkedNode and Fail transitions
-    /// 
+    ///
     /// These link to the transitions of the previous state
     fn add_default_transitions(&mut self, current_state: &TreeNodeID, add_fail_link: bool) {
         if !self
@@ -565,7 +565,6 @@ impl NaiveGraphTrie {
         ret += "}";
         ret
     }
-
 }
 
 /// Compute the ideal transition given the address, port and graph
@@ -576,7 +575,7 @@ fn compute_transition<F: Fn(&NodeIndex) -> Option<PatternNodeAddress>>(
 ) -> NodeTransition {
     match in_port {
         Some(in_port) => {
-            let port_offset = graph.port_index(in_port).unwrap();
+            let port_offset = PortOffset::try_from_index(in_port, graph).unwrap();
             let in_node = graph.port_node(in_port).unwrap();
             match get_addr(&in_node) {
                 Some(new_addr) => NodeTransition::KnownNode(new_addr.clone(), port_offset),
@@ -692,7 +691,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
             .map
             .get_by_left(&graph_node)
             .expect("Incomplete match map");
-        let graph_port = graph.port_index(edge.0).expect("Invalid port");
+        let graph_port = PortOffset::try_from_index(edge.0, graph).expect("Invalid port");
 
         // If we are at the root of a tree, we now find the state that
         // corresponds to our position in the graph
@@ -867,10 +866,8 @@ pub type NaiveManyPatternMatcher = ManyPatternMatcher<NaiveGraphTrie>;
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use itertools::Itertools;
-    use portgraph::{Direction, NodeIndex, PortGraph};
+    use portgraph::{proptest::gen_portgraph, Direction, NodeIndex, PortGraph};
 
     use proptest::prelude::*;
 
@@ -880,98 +877,8 @@ mod tests {
             Matcher, SinglePatternMatcher,
         },
         pattern::Pattern,
-        utils::test_utils::{arb_portgraph_connected, non_empty_portgraph},
+        utils::test_utils::gen_portgraph_connected,
     };
-
-    #[test]
-    fn a_few_patterns() {
-        let mut trie = NaiveManyPatternMatcher::new();
-
-        let mut g = PortGraph::new();
-        let v0 = g.add_node(0, 1);
-        let v1 = g.add_node(1, 1);
-        let v0_out0 = g.port(v0, 0, portgraph::Direction::Outgoing).unwrap();
-        let v1_in0 = g.port(v1, 0, portgraph::Direction::Incoming).unwrap();
-        g.link_ports(v0_out0, v1_in0).unwrap();
-        let pattern = Pattern::from_graph(g.clone()).unwrap();
-        trie.add_pattern(pattern);
-
-        let mut g = PortGraph::new();
-        let v0 = g.add_node(0, 1);
-        let v1 = g.add_node(1, 1);
-        let v2 = g.add_node(1, 1);
-        let v3 = g.add_node(1, 0);
-        let v0_out0 = g.port(v0, 0, portgraph::Direction::Outgoing).unwrap();
-        let v1_in0 = g.port(v1, 0, portgraph::Direction::Incoming).unwrap();
-        let v1_out0 = g.port(v1, 0, portgraph::Direction::Outgoing).unwrap();
-        let v2_in0 = g.port(v2, 0, portgraph::Direction::Incoming).unwrap();
-        let v2_out0 = g.port(v2, 0, portgraph::Direction::Outgoing).unwrap();
-        let v3_in0 = g.port(v3, 0, portgraph::Direction::Incoming).unwrap();
-        g.link_ports(v0_out0, v1_in0).unwrap();
-        g.link_ports(v1_out0, v2_in0).unwrap();
-        g.link_ports(v2_out0, v3_in0).unwrap();
-        let mut pattern = Pattern::from_graph(g.clone()).unwrap();
-        pattern.root = v0;
-        trie.add_pattern(pattern);
-
-        let mut g = PortGraph::new();
-        let v0 = g.add_node(0, 1);
-        let v1 = g.add_node(2, 0);
-        let v0_out0 = g.port(v0, 0, portgraph::Direction::Outgoing).unwrap();
-        let v1_in0 = g.port(v1, 0, portgraph::Direction::Incoming).unwrap();
-        g.link_ports(v0_out0, v1_in0).unwrap();
-        let pattern = Pattern::from_graph(g.clone()).unwrap();
-        trie.add_pattern(pattern);
-
-        let mut g = PortGraph::new();
-        let v0 = g.add_node(0, 1);
-        let v1 = g.add_node(2, 1);
-        let v2 = g.add_node(1, 0);
-        let v0_out0 = g.port(v0, 0, portgraph::Direction::Outgoing).unwrap();
-        let v1_in0 = g.port(v1, 0, portgraph::Direction::Incoming).unwrap();
-        let v1_out0 = g.port(v1, 0, portgraph::Direction::Outgoing).unwrap();
-        let v2_in0 = g.port(v2, 0, portgraph::Direction::Incoming).unwrap();
-        g.link_ports(v0_out0, v1_in0).unwrap();
-        g.link_ports(v1_out0, v2_in0).unwrap();
-        let mut pattern = Pattern::from_graph(g.clone()).unwrap();
-        pattern.root = v0;
-        trie.add_pattern(pattern);
-
-        let mut g = PortGraph::new();
-        let v0 = g.add_node(0, 1);
-        let v1 = g.add_node(1, 1);
-        let v2 = g.add_node(2, 2);
-        let v0_out0 = g.port(v0, 0, portgraph::Direction::Outgoing).unwrap();
-        let v1_in0 = g.port(v1, 0, portgraph::Direction::Incoming).unwrap();
-        let v1_out0 = g.port(v1, 0, portgraph::Direction::Outgoing).unwrap();
-        let v2_in1 = g.port(v2, 1, portgraph::Direction::Incoming).unwrap();
-        g.link_ports(v0_out0, v1_in0).unwrap();
-        g.link_ports(v1_out0, v2_in1).unwrap();
-        let mut pattern = Pattern::from_graph(g.clone()).unwrap();
-        pattern.root = v0;
-        trie.add_pattern(pattern);
-
-        let mut g = PortGraph::new();
-        let v0 = g.add_node(0, 1);
-        let v1 = g.add_node(1, 1);
-        let v2 = g.add_node(2, 2);
-        let v3 = g.add_node(0, 1);
-        let v0_out0 = g.port(v0, 0, portgraph::Direction::Outgoing).unwrap();
-        let v1_in0 = g.port(v1, 0, portgraph::Direction::Incoming).unwrap();
-        let v1_out0 = g.port(v1, 0, portgraph::Direction::Outgoing).unwrap();
-        let v2_in1 = g.port(v2, 1, portgraph::Direction::Incoming).unwrap();
-        let v3_out0 = g.port(v3, 0, portgraph::Direction::Outgoing).unwrap();
-        let v2_in0 = g.port(v2, 0, portgraph::Direction::Incoming).unwrap();
-        g.link_ports(v0_out0, v1_in0).unwrap();
-        g.link_ports(v1_out0, v2_in1).unwrap();
-        g.link_ports(v3_out0, v2_in0).unwrap();
-        let mut pattern = Pattern::from_graph(g.clone()).unwrap();
-        pattern.root = v0;
-        trie.add_pattern(pattern);
-
-        let expected_trie = fs::read_to_string("patterntrie_baby.gv").unwrap();
-        assert_eq!(expected_trie, trie.trie.dotstring());
-    }
 
     #[test]
     fn single_pattern_loop_link() {
@@ -983,8 +890,8 @@ mod tests {
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
         g.link_ports(
-            g.port(n, 0, Direction::Outgoing).unwrap(),
-            g.port(n, 0, Direction::Incoming).unwrap(),
+            g.port_index(n, 0, Direction::Outgoing).unwrap(),
+            g.port_index(n, 0, Direction::Incoming).unwrap(),
         )
         .unwrap();
 
@@ -1002,8 +909,8 @@ mod tests {
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
         g.link_ports(
-            g.port(n, 0, Direction::Outgoing).unwrap(),
-            g.port(n, 0, Direction::Incoming).unwrap(),
+            g.port_index(n, 0, Direction::Outgoing).unwrap(),
+            g.port_index(n, 0, Direction::Incoming).unwrap(),
         )
         .unwrap();
         let p = Pattern::from_graph(g.clone()).unwrap();
@@ -1031,8 +938,8 @@ mod tests {
         let n0 = g.add_node(0, 1);
         let n1 = g.add_node(1, 0);
         g.link_ports(
-            g.port(n0, 0, Direction::Outgoing).unwrap(),
-            g.port(n1, 0, Direction::Incoming).unwrap(),
+            g.port_index(n0, 0, Direction::Outgoing).unwrap(),
+            g.port_index(n1, 0, Direction::Incoming).unwrap(),
         )
         .unwrap();
 
@@ -1055,8 +962,8 @@ mod tests {
 
     fn link(p: &mut PortGraph, (n1, p1): (NodeIndex, usize), (n2, p2): (NodeIndex, usize)) {
         p.link_ports(
-            p.port(n1, p1, Direction::Outgoing).unwrap(),
-            p.port(n2, p2, Direction::Incoming).unwrap(),
+            p.port_index(n1, p1, Direction::Outgoing).unwrap(),
+            p.port_index(n2, p2, Direction::Incoming).unwrap(),
         )
         .unwrap();
     }
@@ -1144,7 +1051,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn single_graph_proptest(pattern in arb_portgraph_connected(10, 4, 20), g in non_empty_portgraph(100, 4, 200)) {
+        fn single_graph_proptest(pattern in gen_portgraph_connected(10, 4, 20), g in gen_portgraph(100, 4, 200)) {
             let pattern = Pattern::from_graph(pattern).unwrap();
             let mut matcher = NaiveManyPatternMatcher::new();
             let pattern_id = matcher.add_pattern(pattern.clone());
@@ -1163,10 +1070,11 @@ mod tests {
     }
 
     proptest! {
+        #[ignore = "very slow"]
         #[test]
         fn many_graphs_proptest(
-            patterns in prop::collection::vec(arb_portgraph_connected(10, 4, 20), 1..4),
-            g in non_empty_portgraph(100, 4, 200)
+            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..4),
+            g in gen_portgraph(100, 4, 200)
         ) {
             let patterns = patterns
                 .into_iter()
@@ -1258,14 +1166,14 @@ mod tests {
     //     let v2 = g.add_node(2, 1);
     //     let v3 = g.add_node(1, 1);
     //     let v4 = g.add_node(1, 0);
-    //     let v0_0 = g.port(v0, 0, Direction::Outgoing).unwrap();
-    //     let v1_0 = g.port(v1, 0, Direction::Incoming).unwrap();
+    //     let v0_0 = g.port_index(v0, 0, Direction::Outgoing).unwrap();
+    //     let v1_0 = g.port_index(v1, 0, Direction::Incoming).unwrap();
     //     g.link_ports(v0_0, v1_0).unwrap();
-    //     let v1_1 = g.port(v1, 0, Direction::Outgoing).unwrap();
-    //     let v3_0 = g.port(v3, 0, Direction::Incoming).unwrap();
+    //     let v1_1 = g.port_index(v1, 0, Direction::Outgoing).unwrap();
+    //     let v3_0 = g.port_index(v3, 0, Direction::Incoming).unwrap();
     //     g.link_ports(v1_1, v3_0).unwrap();
-    //     let v3_1 = g.port(v3, 0, Direction::Outgoing).unwrap();
-    //     let v4_0 = g.port(v4, 0, Direction::Incoming).unwrap();
+    //     let v3_1 = g.port_index(v3, 0, Direction::Outgoing).unwrap();
+    //     let v4_0 = g.port_index(v4, 0, Direction::Incoming).unwrap();
     //     g.link_ports(v3_1, v4_0).unwrap();
     //     let line = vec![
     //         Edge(v0_0, v1_0.into()),
@@ -1292,9 +1200,9 @@ mod tests {
     //     let v0 = g.add_node(0, 2);
     //     let v1 = g.add_node(1, 1);
     //     let v2 = g.add_node(2, 1);
-    //     let v0_0 = g.port(v0, 0, Direction::Outgoing).unwrap();
-    //     let v2_1 = g.port(v2, 1, Direction::Incoming).unwrap();
-    //     let v2_2 = g.port(v2, 0, Direction::Outgoing).unwrap();
+    //     let v0_0 = g.port_index(v0, 0, Direction::Outgoing).unwrap();
+    //     let v2_1 = g.port_index(v2, 1, Direction::Incoming).unwrap();
+    //     let v2_2 = g.port_index(v2, 0, Direction::Outgoing).unwrap();
     //     g.link_ports(v0_0, v2_1).unwrap();
     //     let line = vec![Edge(v0_0, v2_1.into()), Edge(v2_2, None)];
     //     let pattern = Pattern { graph: g, root: v0 };

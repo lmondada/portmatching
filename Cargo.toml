@@ -9,9 +9,11 @@ rust-version = "1.65"
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-portgraph = { git = "https://github.com/zrho/portgraph", version = "0.1.1", branch = "compositional" }
-rand = "0.8.5"
+portgraph = { git = "https://github.com/cqcl/portgraph", rev = "0c88373" }
 
 [dev-dependencies]
 itertools = "0.10.5"
 proptest = "1.1.0"
+portgraph = { git = "https://github.com/cqcl/portgraph", rev = "0c88373", features = [
+    "proptest",
+] }

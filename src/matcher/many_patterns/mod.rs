@@ -13,7 +13,7 @@ mod naive;
 pub use naive::{NaiveGraphTrie, NaiveManyPatternMatcher};
 
 /// A match instance returned by a ManyPatternMatcher instance
-/// 
+///
 /// The PatternID indicates which pattern matches, the root indicates the
 /// location of the match, given by the unique mapping of
 ///                  pattern.root => root
@@ -33,13 +33,13 @@ impl fmt::Debug for PatternID {
 }
 
 /// The Graph Trie trait
-/// 
+///
 /// Any struct that implements this trait can be used as a graph trie for
 /// pattern matching.
 /// - `init` should return the root of the trie and an empty match object
 /// - `next_states` should return the set of states that can be obtained
 ///    by a single transition from `state`
-/// 
+///
 /// A graph trie is thus a non-deterministic automaton.
 pub trait ReadGraphTrie {
     type StateID;
@@ -56,7 +56,7 @@ pub trait ReadGraphTrie {
 }
 
 /// A Graph Trie that supports the addition of new patterns
-/// 
+///
 /// Writing new patterns to the graph trie requires two functions
 /// - `create_next_states` is the equivalent of `next_states` in write mode
 /// - `create_next_roots` is basically a carriage return, to be called at the
@@ -188,7 +188,7 @@ where
                                 self.matching_nodes
                                     .get(old_state)
                                     .cloned()
-                                    .unwrap_or_default()
+                                    .unwrap_or_default(),
                             );
                         },
                     ));

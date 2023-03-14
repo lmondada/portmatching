@@ -1,5 +1,5 @@
-mod pre_order;
 mod depth;
+mod pre_order;
 
 pub(crate) use depth::{centre, NoCentreError};
 

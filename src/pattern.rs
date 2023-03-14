@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use crate::utils::{centre, NoCentreError};
-use portgraph::{portgraph::PortOffset, NodeIndex, PortGraph, PortIndex};
+use crate::{
+    utils::{centre, NoCentreError},
+    PortOffset,
+};
+use portgraph::{NodeIndex, PortGraph, PortIndex};
 
 #[derive(Debug, Clone)]
 pub struct Pattern {
@@ -59,8 +62,8 @@ impl Pattern {
             for edge in line {
                 let curr_pattern = self.graph.port_node(edge.0).unwrap();
                 let curr_graph = pattern_to_graph[&curr_pattern];
-                let port_offset = self.graph.port_index(edge.0).unwrap();
-                let port_out = graph.port_alt(curr_graph, port_offset.clone()).unwrap();
+                let port_offset = PortOffset::try_from_index(edge.0, &self.graph).unwrap();
+                let port_out = port_offset.get_index(curr_graph, graph).unwrap();
                 if let Some(next_port) = edge.1 {
                     let next_pattern = self.graph.port_node(next_port).unwrap();
                     let port_in = graph.port_link(port_out).unwrap();
@@ -68,8 +71,8 @@ impl Pattern {
                     pattern_to_graph.insert(next_pattern, next_graph);
                 } else {
                     match &port_offset {
-                        PortOffset::InPort(_) => in_edges.push(port_out),
-                        PortOffset::OutPort(_) => out_edges.push(port_out),
+                        PortOffset::Incoming(_) => in_edges.push(port_out),
+                        PortOffset::Outgoing(_) => out_edges.push(port_out),
                     }
                 }
             }
@@ -192,11 +195,11 @@ mod tests {
         let v2 = g.nodes_iter().nth(2).unwrap();
         let v3 = g.nodes_iter().nth(3).unwrap();
         let v4 = g.add_node(1, 0);
-        let v2_out0 = g.port(v2, 0, portgraph::Direction::Outgoing).unwrap();
-        let v4_in0 = g.port(v4, 0, portgraph::Direction::Incoming).unwrap();
-        let v3_out0 = g.port(v3, 0, portgraph::Direction::Outgoing).unwrap();
-        let v3_in1 = g.port(v3, 1, portgraph::Direction::Incoming).unwrap();
-        let v3_out1 = g.port(v3, 1, portgraph::Direction::Outgoing).unwrap();
+        let v2_out0 = g.port_index(v2, 0, portgraph::Direction::Outgoing).unwrap();
+        let v4_in0 = g.port_index(v4, 0, portgraph::Direction::Incoming).unwrap();
+        let v3_out0 = g.port_index(v3, 0, portgraph::Direction::Outgoing).unwrap();
+        let v3_in1 = g.port_index(v3, 1, portgraph::Direction::Incoming).unwrap();
+        let v3_out1 = g.port_index(v3, 1, portgraph::Direction::Outgoing).unwrap();
         g.link_ports(v3_out0, v4_in0).unwrap();
         assert_eq!(
             get_line(&g, v2_out0, &mut BTreeSet::new()),
@@ -214,14 +217,14 @@ mod tests {
         let v2 = g.nodes_iter().nth(2).unwrap();
         let v3 = g.nodes_iter().nth(3).unwrap();
         let v4 = g.add_node(1, 0);
-        let v0_in0 = g.port(v0, 0, portgraph::Direction::Incoming).unwrap();
-        let v0_out0 = g.port(v0, 0, portgraph::Direction::Outgoing).unwrap();
-        let v2_out0 = g.port(v2, 0, portgraph::Direction::Outgoing).unwrap();
-        let v2_in1 = g.port(v2, 1, portgraph::Direction::Incoming).unwrap();
-        let v4_in0 = g.port(v4, 0, portgraph::Direction::Incoming).unwrap();
-        // let v4_out0 = g.port(v4, 0, portgraph::Direction::Incoming).unwrap();
-        let v3_in1 = g.port(v3, 1, portgraph::Direction::Incoming).unwrap();
-        let v3_out1 = g.port(v3, 1, portgraph::Direction::Outgoing).unwrap();
+        let v0_in0 = g.port_index(v0, 0, portgraph::Direction::Incoming).unwrap();
+        let v0_out0 = g.port_index(v0, 0, portgraph::Direction::Outgoing).unwrap();
+        let v2_out0 = g.port_index(v2, 0, portgraph::Direction::Outgoing).unwrap();
+        let v2_in1 = g.port_index(v2, 1, portgraph::Direction::Incoming).unwrap();
+        let v4_in0 = g.port_index(v4, 0, portgraph::Direction::Incoming).unwrap();
+        // let v4_out0 = g.port_index(v4, 0, portgraph::Direction::Incoming).unwrap();
+        let v3_in1 = g.port_index(v3, 1, portgraph::Direction::Incoming).unwrap();
+        let v3_out1 = g.port_index(v3, 1, portgraph::Direction::Outgoing).unwrap();
         g.link_ports(v3_out1, v4_in0).unwrap();
         assert_eq!(
             get_line(&g, v2_out0, &mut BTreeSet::new()),

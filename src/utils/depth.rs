@@ -27,10 +27,10 @@ pub(crate) fn is_connected(graph: &PortGraph) -> bool {
         return true;
     };
     undirected_depths(&graph, root)
-            .into_iter()
-            .filter(|d| *d < u32::MAX)
-            .count()
-            == graph.node_count()
+        .into_iter()
+        .filter(|d| *d < u32::MAX)
+        .count()
+        == graph.node_count()
 }
 
 #[derive(Debug, PartialEq, Eq)]
