@@ -21,9 +21,9 @@ impl PortOffset {
     }
 
     fn get_index(&self, node: NodeIndex, graph: &PortGraph) -> Option<PortIndex> {
-        match self {
-            &PortOffset::Incoming(offset) => graph.input(node, offset),
-            &PortOffset::Outgoing(offset) => graph.output(node, offset),
+        match *self {
+            PortOffset::Incoming(offset) => graph.input(node, offset),
+            PortOffset::Outgoing(offset) => graph.output(node, offset),
         }
     }
 }

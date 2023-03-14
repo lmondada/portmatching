@@ -38,8 +38,7 @@ impl Pattern {
             while let Some(port) = self
                 .graph
                 .all_ports(node)
-                .filter(|p| !visited_ports.contains(p))
-                .next()
+                .find(|p| !visited_ports.contains(p))
             {
                 let line = get_line(&self.graph, port, &mut visited_ports);
                 for new_node in line

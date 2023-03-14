@@ -216,7 +216,7 @@ where
         for (state, _) in current_states {
             self.matching_nodes
                 .entry(state)
-                .or_insert_with(|| Vec::new())
+                .or_insert_with(Vec::new)
                 .push(pattern_id);
         }
         pattern_id

@@ -3,7 +3,7 @@ use portgraph::{NodeIndex, PortGraph};
 use super::pre_order::{Direction, PreOrder};
 
 fn undirected_depths(graph: &PortGraph, start: NodeIndex) -> Vec<u32> {
-    let preorder = PreOrder::new(&graph, vec![start], Direction::Both);
+    let preorder = PreOrder::new(graph, vec![start], Direction::Both);
     let mut depths = vec![u32::MAX; graph.node_capacity()];
     depths[start.index()] = 1;
     for node in preorder {
@@ -26,7 +26,7 @@ pub(crate) fn is_connected(graph: &PortGraph) -> bool {
         // An empty graph is connected
         return true;
     };
-    undirected_depths(&graph, root)
+    undirected_depths(graph, root)
         .into_iter()
         .filter(|d| *d < u32::MAX)
         .count()

@@ -176,7 +176,7 @@ impl NaiveGraphTrie {
         if old.is_some() && old != Some(next_node) {
             None
         } else {
-            self.transition(node, &transition)
+            self.transition(node, transition)
         }
     }
 
@@ -231,7 +231,7 @@ impl NaiveGraphTrie {
             self.transition(node, &NodeTransition::NoLinkedNode)
         } else {
             self.transition(node, &NodeTransition::NoLinkedNode)
-                .or(self.transition(node, &NodeTransition::Fail))
+                .or_else(|| self.transition(node, &NodeTransition::Fail))
         };
         if let Some(fallback) = fallback {
             // For each NewNode(port) transition in fallback, we need to add the
@@ -244,7 +244,7 @@ impl NaiveGraphTrie {
                     .iter()
                     .filter_map(|(label, subtree)| {
                         if let NodeTransition::NewNode(port) = label {
-                            Some((port.clone(), subtree.clone()))
+                            Some((port.clone(), *subtree))
                         } else {
                             None
                         }
@@ -305,7 +305,7 @@ impl NaiveGraphTrie {
         if Self::is_root(root) {
             line_trees.push_back(root.line_tree);
         } else {
-            let mut curr_nodes = VecDeque::from([root.clone()]);
+            let mut curr_nodes = VecDeque::from([root]);
             while let Some(node) = curr_nodes.pop_front() {
                 for (label, next_node) in self.state(node).transitions.clone() {
                     match label {
@@ -353,7 +353,7 @@ impl NaiveGraphTrie {
             TreeNodeID::new(self.0.len(), 0)
         } else {
             // Clone nodes in current tree
-            let mut curr_tree_nodes = VecDeque::from([old_root.clone()]);
+            let mut curr_tree_nodes = VecDeque::from([old_root]);
             let mut first_new_node = None;
             while let Some(old_node) = curr_tree_nodes.pop_front() {
                 let new_node = self.append_tree(old_node.line_tree);
@@ -379,7 +379,7 @@ impl NaiveGraphTrie {
                                 &transition,
                             )
                             .expect("Changing existing value");
-                            curr_tree_nodes.push_back(next_node.clone());
+                            curr_tree_nodes.push_back(next_node);
                         }
                         transition @ NodeTransition::NoLinkedNode
                         | transition @ NodeTransition::Fail => {
@@ -475,11 +475,10 @@ impl NaiveGraphTrie {
     /// Finds the first line root compatible with address and port
     fn find_root(
         &mut self,
-        root: TreeNodeID,
+        mut root: TreeNodeID,
         addr: &PatternNodeAddress,
         port_index: &PortOffset,
     ) -> TreeNodeID {
-        let mut root = root.clone();
         while !self.try_update_node(root, addr, port_index) {
             root = match self.transition(root, &NodeTransition::Fail) {
                 Some(next_tree) => next_tree,
@@ -576,7 +575,7 @@ fn compute_transition<F: Fn(&NodeIndex) -> Option<PatternNodeAddress>>(
             let port_offset = PortOffset::try_from_index(in_port, graph).unwrap();
             let in_node = graph.port_node(in_port).unwrap();
             match get_addr(&in_node) {
-                Some(new_addr) => NodeTransition::KnownNode(new_addr.clone(), port_offset),
+                Some(new_addr) => NodeTransition::KnownNode(new_addr, port_offset),
                 None => NodeTransition::NewNode(port_offset),
             }
         }
@@ -693,7 +692,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
 
         // If we are at the root of a tree, we now find the state that
         // corresponds to our position in the graph
-        let mut state = state.clone();
+        let mut state = *state;
         if Self::is_root(state) {
             state = self.find_root(state, graph_addr, &graph_port);
         }
@@ -761,20 +760,20 @@ impl WriteGraphTrie for NaiveGraphTrie {
                         let next_addr = current_match.current_addr.next();
                         let mut next_match = current_match.clone();
                         next_match.current_addr = next_addr;
-                        current_states.push((next_state.clone(), next_match));
+                        current_states.push((*next_state, next_match));
                     }
                     NodeTransition::NewNode(_) => {
                         let next_addr = current_match.current_addr.next();
                         let mut next_match = current_match.clone();
                         next_match.current_addr = next_addr.clone();
                         next_match.no_map.insert(next_addr);
-                        current_states.push((next_state.clone(), next_match));
+                        current_states.push((*next_state, next_match));
                     }
                     NodeTransition::NoLinkedNode => {
                         let next_addr = current_match.current_addr.next_root();
                         let mut next_match = current_match.clone();
                         next_match.current_addr = next_addr;
-                        next_states.push((next_state.clone(), next_match));
+                        next_states.push((*next_state, next_match));
                     }
                     NodeTransition::Fail => {
                         if is_dangling && &current_state == state {
@@ -783,7 +782,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
                         let next_addr = current_match.current_addr.next_root();
                         let mut next_match = current_match.clone();
                         next_match.current_addr = next_addr;
-                        next_states.push((next_state.clone(), next_match));
+                        next_states.push((*next_state, next_match));
                     }
                 }
             }
@@ -808,7 +807,7 @@ impl ReadGraphTrie for NaiveGraphTrie {
         current_match: &Self::MatchObject,
     ) -> Vec<(Self::StateID, Self::MatchObject)> {
         let mut next_states = Vec::new();
-        let mut state = Some(state.clone());
+        let mut state = Some(*state);
         while let Some(curr_state) = state {
             // Compute "ideal" transition
             let (mut transition, mut next_node) = self
@@ -831,21 +830,20 @@ impl ReadGraphTrie for NaiveGraphTrie {
             // Add transition to next_states
             if let Some(next_state) = self.transition(curr_state, &transition) {
                 let mut next_match = current_match.clone();
-                match (next_node, &self.state(next_state).address) {
-                    (Some(next_node), Some(next_addr)) => {
-                        next_match
-                            .map
-                            .insert_no_overwrite(next_node, next_addr.clone())
-                            .ok()
-                            .or_else(|| {
-                                (next_match.map.get_by_left(&next_node) == Some(next_addr))
-                                    .then_some(())
-                            })
-                            .expect("Map is not injective");
-                    }
-                    _ => {}
+                if let (Some(next_node), Some(next_addr)) =
+                    (next_node, &self.state(next_state).address)
+                {
+                    next_match
+                        .map
+                        .insert_no_overwrite(next_node, next_addr.clone())
+                        .ok()
+                        .or_else(|| {
+                            (next_match.map.get_by_left(&next_node) == Some(next_addr))
+                                .then_some(())
+                        })
+                        .expect("Map is not injective");
                 }
-                next_states.push((next_state.clone(), next_match));
+                next_states.push((next_state, next_match));
             }
             // Repeat if we are at a root (i.e. non-deterministic)
             if curr_state.ind == 0 {
