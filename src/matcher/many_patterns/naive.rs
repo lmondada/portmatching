@@ -848,7 +848,7 @@ impl ReadGraphTrie for NaiveGraphTrie {
     ) -> Vec<(Self::StateID, Self::MatchObject)> {
         // Compute "ideal" transition
         let mut next_states: Vec<_> = self
-            .get_transition(*state, graph, &current_match, TrieTraversal::ReadOnly)
+            .get_transition(*state, graph, current_match, TrieTraversal::ReadOnly)
             .into_iter()
             .filter_map(|(transition, current_match)| {
                 Some((self.transition(*state, &transition)?, current_match))
