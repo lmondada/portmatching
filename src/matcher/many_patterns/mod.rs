@@ -103,7 +103,7 @@ impl<T: Default + ReadGraphTrie> ManyPatternMatcher<T> {
 
 impl<T: ReadGraphTrie> Matcher for ManyPatternMatcher<T>
 where
-    T::StateID: Ord + fmt::Debug,
+    T::StateID: Ord,
 {
     type Match = PatternMatch;
 
@@ -173,6 +173,18 @@ where
             // We store this as it changes how we can proceed to the next line.
             let mut is_dangling = false;
 
+            // A callback when a state is cloned in the trie
+            // necessary to keep track of the match states
+            let mut clone_state = |old_state: &T::StateID, new_state: &T::StateID| {
+                self.matching_nodes.insert(
+                    new_state.clone(),
+                    self.matching_nodes
+                        .get(old_state)
+                        .cloned()
+                        .unwrap_or_default(),
+                );
+            };
+
             // Traverse the line
             for edge in line {
                 let mut new_states = Vec::new();
@@ -182,15 +194,7 @@ where
                         &edge,
                         graph,
                         &current_match,
-                        |old_state, new_state| {
-                            self.matching_nodes.insert(
-                                new_state.clone(),
-                                self.matching_nodes
-                                    .get(old_state)
-                                    .cloned()
-                                    .unwrap_or_default(),
-                            );
-                        },
+                        &mut clone_state,
                     ));
                 }
                 current_states = new_states;
@@ -213,6 +217,8 @@ where
             }
             current_states = new_states;
         }
+
+        // Record matching pattern in final states
         for (state, _) in current_states {
             self.matching_nodes
                 .entry(state)

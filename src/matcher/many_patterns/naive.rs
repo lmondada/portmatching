@@ -807,49 +807,42 @@ impl ReadGraphTrie for NaiveGraphTrie {
         current_match: &Self::MatchObject,
     ) -> Vec<(Self::StateID, Self::MatchObject)> {
         let mut next_states = Vec::new();
-        let mut state = Some(*state);
-        while let Some(curr_state) = state {
-            // Compute "ideal" transition
-            let (mut transition, mut next_node) = self
-                .compute_transition_for_state(curr_state, graph, &current_match.map)
-                // Default to Fail transition
-                .unwrap_or((NodeTransition::Fail, None));
-            // Fall-back to simpler transitions if non-existent
-            while self.transition(curr_state, &transition).is_none()
-                && transition != NodeTransition::Fail
-            {
-                transition = match transition {
-                    NodeTransition::KnownNode(_, _) | NodeTransition::NewNode(_) => {
-                        NodeTransition::NoLinkedNode
-                    }
-                    NodeTransition::NoLinkedNode => NodeTransition::Fail,
-                    NodeTransition::Fail => unreachable!(),
-                };
-                next_node = None;
-            }
-            // Add transition to next_states
-            if let Some(next_state) = self.transition(curr_state, &transition) {
-                let mut next_match = current_match.clone();
-                if let (Some(next_node), Some(next_addr)) =
-                    (next_node, &self.state(next_state).address)
-                {
-                    next_match
-                        .map
-                        .insert_no_overwrite(next_node, next_addr.clone())
-                        .ok()
-                        .or_else(|| {
-                            (next_match.map.get_by_left(&next_node) == Some(next_addr))
-                                .then_some(())
-                        })
-                        .expect("Map is not injective");
+        // Compute "ideal" transition
+        let (mut transition, mut next_node) = self
+            .compute_transition_for_state(*state, graph, &current_match.map)
+            // Default to Fail transition
+            .unwrap_or((NodeTransition::Fail, None));
+        // Fall-back to simpler transitions if non-existent
+        while self.transition(*state, &transition).is_none() && transition != NodeTransition::Fail {
+            transition = match transition {
+                NodeTransition::KnownNode(_, _) | NodeTransition::NewNode(_) => {
+                    NodeTransition::NoLinkedNode
                 }
-                next_states.push((next_state, next_match));
+                NodeTransition::NoLinkedNode => NodeTransition::Fail,
+                NodeTransition::Fail => unreachable!(),
+            };
+            next_node = None;
+        }
+        // Add transition to next_states
+        if let Some(next_state) = self.transition(*state, &transition) {
+            let mut next_match = current_match.clone();
+            if let (Some(next_node), Some(next_addr)) = (next_node, &self.state(next_state).address)
+            {
+                next_match
+                    .map
+                    .insert_no_overwrite(next_node, next_addr.clone())
+                    .ok()
+                    .or_else(|| {
+                        (next_match.map.get_by_left(&next_node) == Some(next_addr)).then_some(())
+                    })
+                    .expect("Map is not injective");
             }
-            // Repeat if we are at a root (i.e. non-deterministic)
-            if curr_state.ind == 0 {
-                state = self.transition(curr_state, &NodeTransition::Fail);
-            } else {
-                break;
+            next_states.push((next_state, next_match));
+        }
+        // Repeat if we are at a root (i.e. non-deterministic)
+        if state.ind == 0 {
+            if let Some(next_state) = self.transition(*state, &NodeTransition::Fail) {
+                next_states.push((next_state, current_match.clone()));
             }
         }
         next_states
