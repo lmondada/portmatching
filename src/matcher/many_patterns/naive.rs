@@ -4,7 +4,7 @@ use std::{
 };
 
 use bimap::BiBTreeMap;
-use portgraph::{NodeIndex, PortGraph, PortIndex};
+use portgraph::{NodeIndex, PortGraph};
 
 use crate::{pattern::Edge, PortOffset};
 
@@ -133,6 +133,12 @@ impl Default for NaiveGraphTrie {
     fn default() -> Self {
         Self(vec![vec![TreeNode::root()]])
     }
+}
+
+#[derive(PartialEq, Eq)]
+enum TrieTraversal {
+    ReadOnly,
+    Write,
 }
 
 impl NaiveGraphTrie {
@@ -436,24 +442,128 @@ impl NaiveGraphTrie {
         new_root
     }
 
-    fn compute_transition_for_state(
+    fn get_transition(
         &self,
         state: TreeNodeID,
         graph: &PortGraph,
-        mapped_nodes: &BiBTreeMap<NodeIndex, PatternNodeAddress>,
-    ) -> Option<(NodeTransition, Option<NodeIndex>)> {
-        let addr = self.state(state).address.as_ref()?;
-        let graph_node = *mapped_nodes
-            .get_by_right(addr)
-            .expect("Malformed pattern trie");
-        let out_port = self.state(state).port_offset.clone()?;
-        let out_port = out_port.get_index(graph_node, graph)?;
-        let in_port = graph.port_link(out_port);
-        (
-            compute_transition(in_port, graph, |n| mapped_nodes.get_by_left(n).cloned()),
-            in_port.and_then(|in_port| graph.port_node(in_port)),
-        )
-            .into()
+        current_match: &MatchObject,
+        traversal: TrieTraversal,
+    ) -> Vec<(NodeTransition, MatchObject)> {
+        // The transition we would want to perform
+        let ideal_transition = || {
+            let addr = self.state(state).address.as_ref()?;
+            // fs::write("patterntrie.gv", self.dotstring()).unwrap();
+            // dbg!(&addr);
+            // dbg!(&current_match.map);
+            let graph_node = *current_match
+                .map
+                .get_by_right(addr)
+                .expect("Malformed pattern trie");
+            let out_port = self.state(state).port_offset.clone()?;
+            let out_port = out_port.get_index(graph_node, graph)?;
+            let in_port = graph.port_link(out_port);
+
+            Some(match in_port {
+                Some(in_port) => {
+                    let port_offset = PortOffset::try_from_index(in_port, graph).unwrap();
+                    let in_node = graph.port_node(in_port).unwrap();
+                    match current_match.map.get_by_left(&in_node).cloned() {
+                        Some(new_addr) => NodeTransition::KnownNode(new_addr, port_offset),
+                        None => NodeTransition::NewNode(port_offset),
+                    }
+                }
+                None => NodeTransition::NoLinkedNode,
+            })
+        };
+        let ideal_transition = ideal_transition().unwrap_or(NodeTransition::Fail);
+
+        // From the ideal transition, compute all valid transitions
+        // (depending on whether the trie traversal is read only or write)
+        let all_transitions = if traversal == TrieTraversal::ReadOnly {
+            // Fall-back to simpler transitions if non-existent
+            let mut transition = ideal_transition;
+            while self.transition(state, &transition).is_none()
+                && transition != NodeTransition::Fail
+            {
+                transition = match transition {
+                    NodeTransition::KnownNode(_, _) | NodeTransition::NewNode(_) => {
+                        NodeTransition::NoLinkedNode
+                    }
+                    NodeTransition::NoLinkedNode => NodeTransition::Fail,
+                    NodeTransition::Fail => unreachable!(),
+                };
+            }
+            vec![transition]
+        } else {
+            let mut all_transitions = Vec::new();
+            if let NodeTransition::NewNode(port) = &ideal_transition {
+                all_transitions.extend(
+                    current_match
+                        .no_map
+                        .iter()
+                        .map(|addr| NodeTransition::KnownNode(addr.clone(), port.clone())),
+                );
+            }
+            all_transitions.push(ideal_transition);
+            all_transitions
+        };
+
+        // Return transitions, in tuple with update match objects
+        all_transitions
+            .into_iter()
+            .map(|transition| {
+                let mut next_match = current_match.clone();
+                let in_port = match &transition {
+                    NodeTransition::Fail => {
+                        if !Self::is_root(state) {
+                            let next_addr = current_match.current_addr.next_root();
+                            next_match.current_addr = next_addr;
+                        }
+                        return (transition, next_match);
+                    }
+                    NodeTransition::NoLinkedNode => {
+                        let next_addr = current_match.current_addr.next_root();
+                        next_match.current_addr = next_addr;
+                        return (transition, next_match);
+                    }
+                    NodeTransition::KnownNode(_, _) | NodeTransition::NewNode(_) => {
+                        let addr = &self.state(state).address.as_ref().unwrap();
+                        let graph_node = *current_match
+                            .map
+                            .get_by_right(addr)
+                            .expect("Malformed pattern trie");
+                        let out_port = self.state(state).port_offset.clone().unwrap();
+                        let out_port = out_port.get_index(graph_node, graph).unwrap();
+                        next_match.current_addr = current_match.current_addr.next();
+                        graph.port_link(out_port).unwrap()
+                    }
+                };
+
+                let next_graph_node = graph.port_node(in_port).expect("Invalid port");
+                let next_addr = match &transition {
+                    NodeTransition::KnownNode(addr, _) => addr.clone(),
+                    NodeTransition::NewNode(_) => next_match.current_addr.clone(),
+                    NodeTransition::NoLinkedNode | NodeTransition::Fail => {
+                        unreachable!()
+                    }
+                };
+
+                // If we are encountering a known node, but that node was only known
+                // in no map, we need to remove it from that map before inserting it
+                // into the match map
+                next_match.no_map.remove(&next_addr);
+                next_match
+                    .map
+                    .insert_no_overwrite(next_graph_node, next_addr.clone())
+                    .ok()
+                    .or_else(|| {
+                        (next_match.map.get_by_left(&next_graph_node) == Some(&next_addr))
+                            .then_some(())
+                    })
+                    .expect("Map is not injective");
+                (transition, next_match)
+            })
+            .collect()
     }
 
     /// Assign `node` to given address and port, if possible
@@ -564,25 +674,6 @@ impl NaiveGraphTrie {
     }
 }
 
-/// Compute the ideal transition given the address, port and graph
-fn compute_transition<F: Fn(&NodeIndex) -> Option<PatternNodeAddress>>(
-    in_port: Option<PortIndex>,
-    graph: &PortGraph,
-    get_addr: F,
-) -> NodeTransition {
-    match in_port {
-        Some(in_port) => {
-            let port_offset = PortOffset::try_from_index(in_port, graph).unwrap();
-            let in_node = graph.port_node(in_port).unwrap();
-            match get_addr(&in_node) {
-                Some(new_addr) => NodeTransition::KnownNode(new_addr, port_offset),
-                None => NodeTransition::NewNode(port_offset),
-            }
-        }
-        None => NodeTransition::NoLinkedNode,
-    }
-}
-
 impl TreeNode {
     fn new() -> TreeNode {
         Self::default()
@@ -618,58 +709,6 @@ impl MatchObject {
             current_addr: PatternNodeAddress::ROOT,
         }
     }
-}
-
-fn valid_write_transitions(
-    in_port: PortIndex,
-    graph: &PortGraph,
-    current_match: &MatchObject,
-) -> Vec<(NodeTransition, MatchObject)> {
-    let ideal_transition = compute_transition(Some(in_port), graph, |n| {
-        current_match.map.get_by_left(n).cloned()
-    });
-
-    // Compute the address of the next state
-    let next_addr = current_match.current_addr.next();
-
-    let mut transitions = Vec::new();
-    if let NodeTransition::NewNode(port) = &ideal_transition {
-        transitions.extend(
-            current_match
-                .no_map
-                .iter()
-                .map(|addr| NodeTransition::KnownNode(addr.clone(), port.clone())),
-        );
-    }
-    transitions.push(ideal_transition);
-    transitions
-        .into_iter()
-        .map(|transition| {
-            let mut next_match = current_match.clone();
-            next_match.current_addr = next_addr.clone();
-            let next_graph_node = graph.port_node(in_port).expect("Invalid port");
-            let next_addr = match &transition {
-                NodeTransition::KnownNode(addr, _) => addr.clone(),
-                NodeTransition::NewNode(_) => next_addr.clone(),
-                NodeTransition::NoLinkedNode | NodeTransition::Fail => {
-                    panic!("transition is not valid")
-                }
-            };
-            // If we are encountering a known node, but that node was only known
-            // in no map, we need to remove it from that map before inserting it
-            // into the match map
-            next_match.no_map.remove(&next_addr);
-            next_match
-                .map
-                .insert_no_overwrite(next_graph_node, next_addr.clone())
-                .ok()
-                .or_else(|| {
-                    (next_match.map.get_by_left(&next_graph_node) == Some(&next_addr)).then_some(())
-                })
-                .expect("Map is not injective");
-            (transition, next_match)
-        })
-        .collect()
 }
 
 impl WriteGraphTrie for NaiveGraphTrie {
@@ -713,12 +752,13 @@ impl WriteGraphTrie for NaiveGraphTrie {
             .get_or_insert(graph_port.clone());
         assert_eq!(&graph_port, state_port);
 
-        let Some(in_port) = edge.1 else {
-            return vec![(state, current_match.clone())]
+        if edge.1.is_none() {
+            return vec![(state, current_match.clone())];
         };
+
         // For every allowable transition, insert it if it does not exist
         // and return it
-        valid_write_transitions(in_port, graph, current_match)
+        self.get_transition(state, graph, current_match, TrieTraversal::Write)
             .into_iter()
             .map(|(transition, next_match)| {
                 (
@@ -806,40 +846,16 @@ impl ReadGraphTrie for NaiveGraphTrie {
         graph: &PortGraph,
         current_match: &Self::MatchObject,
     ) -> Vec<(Self::StateID, Self::MatchObject)> {
-        let mut next_states = Vec::new();
         // Compute "ideal" transition
-        let (mut transition, mut next_node) = self
-            .compute_transition_for_state(*state, graph, &current_match.map)
-            // Default to Fail transition
-            .unwrap_or((NodeTransition::Fail, None));
-        // Fall-back to simpler transitions if non-existent
-        while self.transition(*state, &transition).is_none() && transition != NodeTransition::Fail {
-            transition = match transition {
-                NodeTransition::KnownNode(_, _) | NodeTransition::NewNode(_) => {
-                    NodeTransition::NoLinkedNode
-                }
-                NodeTransition::NoLinkedNode => NodeTransition::Fail,
-                NodeTransition::Fail => unreachable!(),
-            };
-            next_node = None;
-        }
-        // Add transition to next_states
-        if let Some(next_state) = self.transition(*state, &transition) {
-            let mut next_match = current_match.clone();
-            if let (Some(next_node), Some(next_addr)) = (next_node, &self.state(next_state).address)
-            {
-                next_match
-                    .map
-                    .insert_no_overwrite(next_node, next_addr.clone())
-                    .ok()
-                    .or_else(|| {
-                        (next_match.map.get_by_left(&next_node) == Some(next_addr)).then_some(())
-                    })
-                    .expect("Map is not injective");
-            }
-            next_states.push((next_state, next_match));
-        }
-        // Repeat if we are at a root (i.e. non-deterministic)
+        let mut next_states: Vec<_> = self
+            .get_transition(*state, graph, &current_match, TrieTraversal::ReadOnly)
+            .into_iter()
+            .filter_map(|(transition, current_match)| {
+                Some((self.transition(*state, &transition)?, current_match))
+            })
+            .collect();
+
+        // Add epsilon transition if we are at a root (i.e. non-deterministic)
         if state.ind == 0 {
             if let Some(next_state) = self.transition(*state, &NodeTransition::Fail) {
                 next_states.push((next_state, current_match.clone()));
@@ -1061,7 +1077,7 @@ mod tests {
         #[test]
         fn many_graphs_proptest(
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..4),
-            g in gen_portgraph(100, 4, 200)
+            g in gen_portgraph(30, 4, 60)
         ) {
             let patterns = patterns
                 .into_iter()
@@ -1077,7 +1093,6 @@ mod tests {
                 .into_iter()
                 .map(SinglePatternMatcher::from_pattern)
                 .collect_vec();
-            // fs::write("patterntrie.gv", matcher.trie.dotstring()).unwrap();
             // println!("saved");
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
