@@ -582,28 +582,6 @@ impl NaiveGraphTrie {
         res_port_index == port_index && res_addr == addr
     }
 
-    /// Finds the first line root compatible with address and port
-    fn find_root(
-        &mut self,
-        mut root: TreeNodeID,
-        addr: &PatternNodeAddress,
-        port_index: &PortOffset,
-    ) -> TreeNodeID {
-        while !self.try_update_node(root, addr, port_index) {
-            root = match self.transition(root, &NodeTransition::Fail) {
-                Some(next_tree) => next_tree,
-                None => {
-                    let next_tree = self.add_new_tree();
-                    self.set_transition(root, next_tree, &NodeTransition::Fail)
-                        .expect("Changing existing value");
-                    next_tree
-                }
-            };
-            assert!(Self::is_root(root));
-        }
-        root
-    }
-
     /// Adds NoLinkedNode and Fail transitions
     ///
     /// These link to the transitions of the previous state
@@ -629,6 +607,116 @@ impl NaiveGraphTrie {
                 .transitions
                 .insert(NodeTransition::Fail, new_root);
         }
+    }
+
+    /// Finds all possible new lines to transition to
+    ///
+    /// When inserting "lines" from a pattern into the graph trie, at every
+    /// new line one must find all possible transitions that lead to new line;
+    /// the "carriage return" operation.
+    fn carriage_return(
+        &mut self,
+        state: TreeNodeID,
+        current_match: MatchObject,
+        is_dangling: bool,
+    ) -> Vec<(TreeNodeID, MatchObject)> {
+        let mut current_states = vec![(state, current_match)];
+        let mut next_states = Vec::new();
+        assert!(!Self::is_root(state) || is_dangling);
+
+        while let Some((current_state, current_match)) = current_states.pop() {
+            // Insert empty NoSuchLink and Fail transitions if they do not exist
+            self.add_default_transitions(current_state, !is_dangling || current_state != state);
+            for (transition, next_state) in &self.state(current_state).transitions {
+                match transition {
+                    NodeTransition::KnownNode(_, _) => {
+                        let next_addr = current_match.current_addr.next();
+                        let mut next_match = current_match.clone();
+                        next_match.current_addr = next_addr;
+                        current_states.push((*next_state, next_match));
+                    }
+                    NodeTransition::NewNode(_) => {
+                        let next_addr = current_match.current_addr.next();
+                        let mut next_match = current_match.clone();
+                        next_match.current_addr = next_addr.clone();
+                        next_match.no_map.insert(next_addr);
+                        current_states.push((*next_state, next_match));
+                    }
+                    NodeTransition::NoLinkedNode => {
+                        let next_addr = current_match.current_addr.next_root();
+                        let mut next_match = current_match.clone();
+                        next_match.current_addr = next_addr;
+                        next_states.push((*next_state, next_match));
+                    }
+                    NodeTransition::Fail => {
+                        if is_dangling && current_state == state {
+                            continue;
+                        }
+                        let next_addr = current_match.current_addr.next_root();
+                        let mut next_match = current_match.clone();
+                        next_match.current_addr = next_addr;
+                        next_states.push((*next_state, next_match));
+                    }
+                }
+            }
+        }
+        next_states
+    }
+
+    /// Follow Fail transitions to find state with `out_port`
+    fn valid_start_states(
+        &mut self,
+        (state, current_match): (TreeNodeID, MatchObject),
+        out_port: portgraph::PortIndex,
+        graph: &PortGraph,
+    ) -> Vec<(TreeNodeID, MatchObject)> {
+        // We start by finding where we are in the graph, using the outgoing
+        // port
+        let graph_node = graph.port_node(out_port).expect("Invalid port");
+        let graph_port = PortOffset::try_from_index(out_port, graph).expect("Invalid port");
+
+        // Process carriage returns where necessary
+        let mut states_post_carriage_return = Vec::new();
+        let graph_addr = current_match
+            .map
+            .get_by_left(&graph_node)
+            .expect("Incomplete match map");
+        // Follow fail edges until we find the state that
+        // corresponds to our position in the graph
+        if !self.try_update_node(state, graph_addr, &graph_port) && !Self::is_root(state) {
+            states_post_carriage_return.append(&mut self.carriage_return(
+                state,
+                current_match,
+                false,
+            ));
+        } else {
+            states_post_carriage_return.push((state, current_match));
+        }
+
+        // Finally we obtain the states where we are meant to be,
+        // such that state_addr == edge_addr and state_port == edge_port
+        states_post_carriage_return
+            .into_iter()
+            .map(|(mut state, current_match)| {
+                let graph_addr = current_match
+                    .map
+                    .get_by_left(&graph_node)
+                    .expect("Incomplete match map");
+                while !self.try_update_node(state, graph_addr, &graph_port) {
+                    state = match self.transition(state, &NodeTransition::Fail) {
+                        Some(next_node) => next_node,
+                        None => {
+                            let next_node = self.add_new_tree();
+                            self.set_transition(state, next_node, &NodeTransition::Fail)
+                                .expect("Changing existing value");
+                            next_node
+                        }
+                    };
+                    assert!(Self::is_root(state));
+                }
+                (state, current_match)
+            })
+            .collect()
     }
 
     /// Output trie graph in dotstring format
@@ -714,118 +802,54 @@ impl MatchObject {
 impl WriteGraphTrie for NaiveGraphTrie {
     fn create_next_states<F: FnMut(&Self::StateID, &Self::StateID)>(
         &mut self,
-        state: &Self::StateID,
-        edge: &Edge,
+        states: Vec<(Self::StateID, Self::MatchObject)>,
+        &Edge(out_port, _): &Edge,
         graph: &PortGraph,
-        current_match: &Self::MatchObject,
         mut clone_state: F,
     ) -> Vec<(Self::StateID, Self::MatchObject)> {
-        // We start by finding where we are in the graph, using the outgoing
-        // port edge.0
-        let graph_node = graph.port_node(edge.0).expect("Invalid port");
-        let graph_addr = current_match
-            .map
-            .get_by_left(&graph_node)
-            .expect("Incomplete match map");
-        let graph_port = PortOffset::try_from_index(edge.0, graph).expect("Invalid port");
-
-        // If we are at the root of a tree, we now find the state that
-        // corresponds to our position in the graph
-        let mut state = *state;
-        if Self::is_root(state) {
-            state = self.find_root(state, graph_addr, &graph_port);
-        }
-
-        // Check that the address in the graph and the address in the trie
-        // are identical.
-        // If the state has no address, then we can set it to the one we need
-        let state_addr = self
-            .state_mut(state)
-            .address
-            .get_or_insert(graph_addr.clone());
-        assert_eq!(graph_addr, state_addr);
-
-        // Same for the port offset
-        let state_port = self
-            .state_mut(state)
-            .port_offset
-            .get_or_insert(graph_port.clone());
-        assert_eq!(&graph_port, state_port);
-
-        if edge.1.is_none() {
-            return vec![(state, current_match.clone())];
-        };
-
-        // For every allowable transition, insert it if it does not exist
-        // and return it
-        self.get_transition(state, graph, current_match, TrieTraversal::Write)
+        // Find the states that correspond to out_port
+        let states: Vec<_> = states
             .into_iter()
-            .map(|(transition, next_match)| {
-                (
-                    self.transition(state, &transition).unwrap_or_else(|| {
-                        let next_addr = match &transition {
-                            NodeTransition::KnownNode(addr, _) => addr.clone(),
-                            NodeTransition::NewNode(_) => next_match.current_addr.clone(),
-                            NodeTransition::NoLinkedNode | NodeTransition::Fail => {
-                                panic!("transition is not valid")
-                            }
-                        };
-                        let next_state = self.extend_tree(state, next_addr, &mut clone_state);
-                        self.set_transition(state, next_state, &transition)
-                            .expect("Changing existing value");
-                        next_state
-                    }),
-                    next_match,
-                )
-            })
-            .collect()
-    }
+            .flat_map(|state| self.valid_start_states(state, out_port, graph))
+            .collect();
 
-    fn create_next_roots(
-        &mut self,
-        state: &Self::StateID,
-        current_match: &Self::MatchObject,
-        is_dangling: bool,
-    ) -> Vec<(Self::StateID, Self::MatchObject)> {
-        let mut current_states = vec![(*state, current_match.clone())];
         let mut next_states = Vec::new();
-        assert!(!Self::is_root(*state) || is_dangling);
-
-        while let Some((current_state, current_match)) = current_states.pop() {
-            // Insert empty NoSuchLink and Fail transitions if they do not exist
-            self.add_default_transitions(current_state, !is_dangling || &current_state != state);
-            for (transition, next_state) in &self.state(current_state).transitions {
-                match transition {
-                    NodeTransition::KnownNode(_, _) => {
-                        let next_addr = current_match.current_addr.next();
-                        let mut next_match = current_match.clone();
-                        next_match.current_addr = next_addr;
-                        current_states.push((*next_state, next_match));
-                    }
-                    NodeTransition::NewNode(_) => {
-                        let next_addr = current_match.current_addr.next();
-                        let mut next_match = current_match.clone();
-                        next_match.current_addr = next_addr.clone();
-                        next_match.no_map.insert(next_addr);
-                        current_states.push((*next_state, next_match));
-                    }
-                    NodeTransition::NoLinkedNode => {
-                        let next_addr = current_match.current_addr.next_root();
-                        let mut next_match = current_match.clone();
-                        next_match.current_addr = next_addr;
-                        next_states.push((*next_state, next_match));
-                    }
-                    NodeTransition::Fail => {
-                        if is_dangling && &current_state == state {
-                            continue;
+        for (state, current_match) in states {
+            // For every allowable transition, insert it if it does not exist
+            // and return it
+            next_states.append(
+                &mut self
+                    .get_transition(state, graph, &current_match, TrieTraversal::Write)
+                    .into_iter()
+                    .flat_map(|(transition, next_match)| {
+                        if let NodeTransition::NoLinkedNode = &transition {
+                            self.carriage_return(state, current_match.clone(), true)
+                        } else {
+                            [(
+                                self.transition(state, &transition).unwrap_or_else(|| {
+                                    let next_addr = match &transition {
+                                        NodeTransition::KnownNode(addr, _) => addr.clone(),
+                                        NodeTransition::NewNode(_) => {
+                                            next_match.current_addr.clone()
+                                        }
+                                        NodeTransition::NoLinkedNode => unreachable!(),
+                                        NodeTransition::Fail => {
+                                            panic!("transition is not valid")
+                                        }
+                                    };
+                                    let next_state =
+                                        self.extend_tree(state, next_addr, &mut clone_state);
+                                    self.set_transition(state, next_state, &transition)
+                                        .expect("Changing existing value");
+                                    next_state
+                                }),
+                                next_match,
+                            )]
+                            .into()
                         }
-                        let next_addr = current_match.current_addr.next_root();
-                        let mut next_match = current_match.clone();
-                        next_match.current_addr = next_addr;
-                        next_states.push((*next_state, next_match));
-                    }
-                }
-            }
+                    })
+                    .collect(),
+            );
         }
         next_states
     }

@@ -64,18 +64,10 @@ pub trait ReadGraphTrie {
 pub trait WriteGraphTrie: ReadGraphTrie {
     fn create_next_states<F: FnMut(&Self::StateID, &Self::StateID)>(
         &mut self,
-        state: &Self::StateID,
+        states: Vec<(Self::StateID, Self::MatchObject)>,
         edge: &Edge,
         graph: &PortGraph,
-        current_match: &Self::MatchObject,
         clone_state: F,
-    ) -> Vec<(Self::StateID, Self::MatchObject)>;
-
-    fn create_next_roots(
-        &mut self,
-        state: &Self::StateID,
-        current_match: &Self::MatchObject,
-        is_dangling: bool,
     ) -> Vec<(Self::StateID, Self::MatchObject)>;
 }
 
@@ -168,11 +160,6 @@ where
         let all_lines = pattern.all_lines();
 
         for line in all_lines {
-            // The only edge that can be "dangling" (i.e. have no second endvertex)
-            // in a line is its last edge.
-            // We store this as it changes how we can proceed to the next line.
-            let mut is_dangling = false;
-
             // A callback when a state is cloned in the trie
             // necessary to keep track of the match states
             let mut clone_state = |old_state: &T::StateID, new_state: &T::StateID| {
@@ -187,35 +174,10 @@ where
 
             // Traverse the line
             for edge in line {
-                let mut new_states = Vec::new();
-                for (state, current_match) in current_states {
-                    new_states.append(&mut self.trie.create_next_states(
-                        &state,
-                        &edge,
-                        graph,
-                        &current_match,
-                        &mut clone_state,
-                    ));
-                }
-                current_states = new_states;
-                if edge.1.is_none() {
-                    is_dangling = true;
-                }
+                current_states =
+                    self.trie
+                        .create_next_states(current_states, &edge, graph, &mut clone_state);
             }
-
-            // Move on to next line
-            // It is important to "move on to next line" even if it is
-            // the last line in the case of dangling edges, to make sure
-            // we match these.
-            let mut new_states = Vec::new();
-            for (state, current_match) in current_states {
-                new_states.append(&mut self.trie.create_next_roots(
-                    &state,
-                    &current_match,
-                    is_dangling,
-                ));
-            }
-            current_states = new_states;
         }
 
         // Record matching pattern in final states
