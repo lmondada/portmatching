@@ -2,6 +2,8 @@ pub mod matcher;
 pub mod pattern;
 mod utils;
 
+use std::fmt::Display;
+
 use portgraph::{Direction, NodeIndex, PortGraph, PortIndex};
 
 /// A data layout-independent ID for the edges incident in a node
@@ -9,6 +11,15 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex};
 enum PortOffset {
     Incoming(usize),
     Outgoing(usize),
+}
+
+impl Display for PortOffset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            PortOffset::Incoming(offset) => write!(f, "In{}", offset),
+            PortOffset::Outgoing(offset) => write!(f, "Out{}", offset),
+        }
+    }
 }
 
 impl PortOffset {

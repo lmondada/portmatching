@@ -5,8 +5,8 @@ use bitvec::prelude::*;
 use portgraph::{NodeIndex, PortGraph};
 
 pub enum Direction {
-    _Incoming = 0,
-    _Outgoing = 1,
+    Incoming = 0,
+    Outgoing = 1,
     Both = 2,
 }
 
@@ -44,8 +44,8 @@ impl<'graph> Iterator for PreOrder<'graph> {
             next = self.queue.pop_front()?;
         }
         let link_ports = match self.direction {
-            Direction::_Incoming => self.graph.links(next, portgraph::Direction::Incoming),
-            Direction::_Outgoing => self.graph.links(next, portgraph::Direction::Outgoing),
+            Direction::Incoming => self.graph.links(next, portgraph::Direction::Incoming),
+            Direction::Outgoing => self.graph.links(next, portgraph::Direction::Outgoing),
             Direction::Both => self.graph.all_links(next),
         };
         for neigh in link_ports.filter_map(|p| p.and_then(|p| self.graph.port_node(p))) {
@@ -69,13 +69,13 @@ mod tests {
         let g = graph();
         let (v0, v1, v2, v3) = g.nodes_iter().collect_tuple().unwrap();
 
-        let it = PreOrder::new(&g, vec![v2], Direction::_Outgoing);
+        let it = PreOrder::new(&g, vec![v2], Direction::Outgoing);
         assert_eq!(it.collect::<Vec<_>>(), vec![v2, v3]);
 
-        let it = PreOrder::new(&g, vec![v2], Direction::_Incoming);
+        let it = PreOrder::new(&g, vec![v2], Direction::Incoming);
         assert_eq!(it.collect::<Vec<_>>(), vec![v2, v1, v0]);
 
-        let it = PreOrder::new(&g, vec![v0], Direction::_Outgoing);
+        let it = PreOrder::new(&g, vec![v0], Direction::Outgoing);
         assert_eq!(it.collect::<Vec<_>>(), vec![v0, v2, v3]);
 
         let it = PreOrder::new(&g, vec![v0], Direction::Both);

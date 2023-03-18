@@ -5,6 +5,9 @@ use std::{
 
 use portgraph::{NodeIndex, PortGraph};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::pattern::{Edge, Pattern};
 
 use super::Matcher;
@@ -18,17 +21,25 @@ pub use naive::{NaiveGraphTrie, NaiveManyPatternMatcher};
 /// location of the match, given by the unique mapping of
 ///                  pattern.root => root
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct PatternMatch {
     pub id: PatternID,
     pub root: NodeIndex,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PatternID(usize);
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct PatternID(pub usize);
 
 impl fmt::Debug for PatternID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.0)
+    }
+}
+
+impl fmt::Display for PatternID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ID({})", self.0)
     }
 }
 
@@ -42,7 +53,7 @@ impl fmt::Debug for PatternID {
 ///
 /// A graph trie is thus a non-deterministic automaton.
 pub trait ReadGraphTrie {
-    type StateID;
+    type StateID: Copy;
     type MatchObject: Clone;
 
     fn init(&self, root: NodeIndex) -> (Self::StateID, Self::MatchObject);
@@ -62,7 +73,7 @@ pub trait ReadGraphTrie {
 /// - `create_next_roots` is basically a carriage return, to be called at the
 ///   end of the line.
 pub trait WriteGraphTrie: ReadGraphTrie {
-    fn create_next_states<F: FnMut(&Self::StateID, &Self::StateID)>(
+    fn create_next_states<F: FnMut(Self::StateID, Self::StateID)>(
         &mut self,
         states: Vec<(Self::StateID, Self::MatchObject)>,
         edge: &Edge,
@@ -162,11 +173,11 @@ where
         for line in all_lines {
             // A callback when a state is cloned in the trie
             // necessary to keep track of the match states
-            let mut clone_state = |old_state: &T::StateID, new_state: &T::StateID| {
+            let mut clone_state = |old_state: T::StateID, new_state: T::StateID| {
                 self.matching_nodes.insert(
                     new_state.clone(),
                     self.matching_nodes
-                        .get(old_state)
+                        .get(&old_state)
                         .cloned()
                         .unwrap_or_default(),
                 );
@@ -188,5 +199,11 @@ where
                 .push(pattern_id);
         }
         pattern_id
+    }
+}
+
+impl ManyPatternMatcher<NaiveGraphTrie> {
+    pub fn dotstring(&self) -> String {
+        self.trie.dotstring_with(&self.matching_nodes)
     }
 }

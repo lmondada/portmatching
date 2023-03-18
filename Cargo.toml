@@ -9,11 +9,22 @@ rust-version = "1.65"
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-portgraph = { git = "https://github.com/cqcl/portgraph", rev = "0c88373" }
+portgraph = { git = "https://github.com/cqcl/portgraph", rev = "f35e8e2" }
+serde = { version = "1.0.152", features = ["derive"], optional = true}
+
+[features]
+serde = ["dep:serde"]
 
 [dev-dependencies]
 itertools = "0.10.5"
 proptest = "1.1.0"
-portgraph = { git = "https://github.com/cqcl/portgraph", rev = "0c88373", features = [
+portgraph = { git = "https://github.com/cqcl/portgraph", rev = "f35e8e2", features = [
     "proptest",
+    "serde",
 ] }
+rmp-serde = "1.1.1"
+serde = "1.0.156"
+
+[[test]]
+name = "from_saved_patterns"
+required-features = ["serde"]
