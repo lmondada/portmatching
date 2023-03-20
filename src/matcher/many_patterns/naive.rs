@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Display},
     fs,
 };
@@ -811,7 +811,11 @@ impl NaiveGraphTrie {
         mut is_dead: bool,
         to_delete: &mut BTreeSet<NodeIndex>,
         to_keep: &BTreeSet<NodeIndex>,
+        visited: &mut BTreeMap<NodeIndex, bool>,
     ) -> bool {
+        if visited.contains_key(&node) {
+            return visited[&node];
+        }
         if let Some(addr) = &self.state(node).address {
             if !known_addresses.contains(addr) {
                 is_dead = true;
@@ -829,7 +833,14 @@ impl NaiveGraphTrie {
                     known_addresses.insert(addr.clone());
                 }
             }
-            all_dead &= self.recurse(next_node, known_addresses, is_dead, to_delete, to_keep);
+            all_dead &= self.recurse(
+                next_node,
+                known_addresses,
+                is_dead,
+                to_delete,
+                to_keep,
+                visited,
+            );
         }
         if all_dead && !to_keep.contains(&node) {
             is_dead = true;
@@ -837,6 +848,7 @@ impl NaiveGraphTrie {
         if is_dead {
             to_delete.insert(node);
         }
+        visited.insert(node, is_dead);
         is_dead
     }
 }
@@ -955,7 +967,9 @@ impl WriteGraphTrie for NaiveGraphTrie {
         &'a mut self,
         keep_states: I,
     ) {
+        fs::write("patterntrie_bef.bin", self.dotstring()).unwrap();
         let mut to_delete = Default::default();
+        let mut visited = Default::default();
         let to_keep = BTreeSet::from_iter(keep_states.copied());
         self.recurse(
             self.root(),
@@ -963,6 +977,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
             false,
             &mut to_delete,
             &to_keep,
+            &mut visited,
         );
         for node in to_delete {
             // Remove dictionary entries of node
@@ -979,6 +994,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
             }
             self.graph.remove_node(node);
         }
+        fs::write("patterntrie_aft.bin", self.dotstring()).unwrap();
     }
 }
 
@@ -1020,7 +1036,7 @@ pub type NaiveManyPatternMatcher = ManyPatternMatcher<NaiveGraphTrie>;
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    // use std::fs;
 
     #[cfg(feature = "serde")]
     use itertools::Itertools;
@@ -1248,10 +1264,10 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..4),
             g in gen_portgraph(30, 4, 60)
         ) {
-            for (i, p) in patterns.iter().enumerate() {
-                fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
-            }
-            fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
+            // for (i, p) in patterns.iter().enumerate() {
+            //     fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
+            // }
+            // fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
             let patterns = patterns
                 .into_iter()
                 .map(|p| Pattern::from_graph(p).unwrap())
@@ -1274,7 +1290,7 @@ mod tests {
                         .collect_vec()
                 })
                 .collect_vec();
-            fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
+            // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
             let matcher = NaiveManyPatternMatcher::from_patterns(patterns.clone());
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
