@@ -74,7 +74,7 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
 #[test]
 fn from_saved_patterns() {
     let testcases = [
-        "first", "second", "third", "fourth", "fifth", "sixth", "seventh",
+        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
     ];
     for test in testcases {
         println!("{test}...");

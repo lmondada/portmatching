@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::{self, Debug, Display},
     fs,
 };
@@ -799,6 +799,46 @@ impl NaiveGraphTrie {
         }
         transition.into()
     }
+
+    fn root(&self) -> NodeIndex {
+        NodeIndex::new(0)
+    }
+
+    fn recurse(
+        &self,
+        node: NodeIndex,
+        known_addresses: BTreeSet<PatternNodeAddress>,
+        mut is_dead: bool,
+        to_delete: &mut BTreeSet<NodeIndex>,
+        to_keep: &BTreeSet<NodeIndex>,
+    ) -> bool {
+        if let Some(addr) = &self.state(node).address {
+            if !known_addresses.contains(addr) {
+                is_dead = true;
+            }
+        }
+        let mut all_dead = true;
+        for (transition, next_node) in self.transitions(node) {
+            let mut known_addresses = known_addresses.clone();
+            if let NodeTransition::NewNode(_) = transition {
+                if let Some(addr) = &self.state(next_node).address {
+                    known_addresses.insert(addr.clone());
+                }
+            } else if let NodeTransition::KnownNode(_, _) = transition {
+                if let Some(addr) = &self.state(next_node).address {
+                    known_addresses.insert(addr.clone());
+                }
+            }
+            all_dead &= self.recurse(next_node, known_addresses, is_dead, to_delete, to_keep);
+        }
+        if all_dead && !to_keep.contains(&node) {
+            is_dead = true;
+        }
+        if is_dead {
+            to_delete.insert(node);
+        }
+        is_dead
+    }
 }
 
 // fn rekey<'w>(
@@ -846,6 +886,9 @@ impl WriteGraphTrie for NaiveGraphTrie {
         graph: &PortGraph,
         clone_state: F,
     ) -> Vec<(Self::StateID, Self::MatchObject)> {
+        // Technically unnecessary
+        self.reset_perm_ports();
+
         // Find the states that correspond to out_port
         let prev_states: Vec<_> = states.iter().map(|(state, _)| state.clone()).collect();
         let states = self.valid_start_states(states, out_port, graph);
@@ -904,7 +947,38 @@ impl WriteGraphTrie for NaiveGraphTrie {
         // Finally, wherever not all inputs come from known nodes, split the
         // state into two
         self.to_owned_states(prev_states, self.all_perm_ports(), clone_state);
+
         next_states.into_iter().collect()
+    }
+
+    fn remove_dead_branches<'a, I: Iterator<Item = &'a Self::StateID>>(
+        &'a mut self,
+        keep_states: I,
+    ) {
+        let mut to_delete = Default::default();
+        let to_keep = BTreeSet::from_iter(keep_states.copied());
+        self.recurse(
+            self.root(),
+            BTreeSet::from_iter([PatternNodeAddress::ROOT]),
+            false,
+            &mut to_delete,
+            &to_keep,
+        );
+        for node in to_delete {
+            // Remove dictionary entries of node
+            for out_port in self.graph.input_links(node).flatten() {
+                let prev_node = self.graph.port_node(out_port).expect("Invalid port");
+                let transitions = &mut self.weights[prev_node].transitions;
+                if let Some(k) = transitions
+                    .iter()
+                    .find(|(_, &v)| v == out_port)
+                    .map(|(k, _)| k.clone())
+                {
+                    transitions.remove(&k);
+                }
+            }
+            self.graph.remove_node(node);
+        }
     }
 }
 
