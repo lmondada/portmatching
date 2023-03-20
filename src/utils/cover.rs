@@ -200,9 +200,7 @@ mod tests {
         let all_ports = [n0_0, n0_1, n1_0, n2]
             .into_iter()
             .flat_map(|n| g.inputs(n))
-            .chain([
-                g.input(n1_1, 0).unwrap()
-            ])
+            .chain([g.input(n1_1, 0).unwrap()])
             .collect();
         cover_nodes(
             &mut g,

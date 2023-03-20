@@ -302,6 +302,7 @@ impl NaiveGraphTrie {
         node: NodeIndex,
         addr: PatternNodeAddress,
         new_node: &mut Option<NodeIndex>,
+        is_new_node: bool,
     ) -> NodeIndex {
         let new_node = *new_node.get_or_insert_with(|| self.add_node(false));
         if self.weights[new_node].address.as_ref() < Some(&addr) {
@@ -314,27 +315,29 @@ impl NaiveGraphTrie {
                 .or_else(|| self.transition(node, &NodeTransition::Fail))
         };
         if let Some(fallback) = fallback {
-            // For each NewNode(port) transition in fallback, we need to add the
-            // KnownNode(addr, port) transition for the new addr
-            let descendants: Vec<_> = self.all_nodes_in(fallback).collect();
-            for node in descendants {
-                let new_node_transitions: Vec<_> = self
-                    .transitions(node)
-                    .filter_map(|(label, next_node)| {
-                        if let NodeTransition::NewNode(port) = label {
-                            Some((port.clone(), next_node))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                for (port, next_node) in new_node_transitions {
-                    self.set_transition(
-                        node,
-                        next_node,
-                        NodeTransition::KnownNode(addr.clone(), port.clone()),
-                    )
-                    .unwrap();
+            if is_new_node {
+                // For each NewNode(port) transition in fallback, we need to add the
+                // KnownNode(addr, port) transition for the new addr
+                let descendants: Vec<_> = self.all_nodes_in(fallback).collect();
+                for node in descendants {
+                    let new_node_transitions: Vec<_> = self
+                        .transitions(node)
+                        .filter_map(|(label, next_node)| {
+                            if let NodeTransition::NewNode(port) = label {
+                                Some((port.clone(), next_node))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    for (port, next_node) in new_node_transitions {
+                        self.set_transition(
+                            node,
+                            next_node,
+                            NodeTransition::KnownNode(addr.clone(), port.clone()),
+                        )
+                        .unwrap();
+                    }
                 }
             }
             self.set_transition(new_node, fallback, NodeTransition::Fail)
@@ -363,8 +366,11 @@ impl NaiveGraphTrie {
         traversal: TrieTraversal,
     ) -> Vec<(NodeTransition, MatchObject)> {
         // The transition we would want to perform
+        dbg!(self.state(state));
         let ideal_transition = || {
             let addr = self.state(state).address.as_ref()?;
+            dbg!(&current_match.map);
+            dbg!(&addr);
             let graph_node = *current_match
                 .map
                 .get_by_right(addr)
@@ -866,7 +872,16 @@ impl WriteGraphTrie for NaiveGraphTrie {
                                         panic!("transition is not valid")
                                     }
                                 };
-                                let next_state = self.extend_tree(state, next_addr, &mut new_node);
+                                let next_state = self.extend_tree(
+                                    state,
+                                    next_addr,
+                                    &mut new_node,
+                                    if let NodeTransition::NewNode(_) = transition {
+                                        true
+                                    } else {
+                                        false
+                                    },
+                                );
                                 let port = self
                                     .set_transition(state, next_state, transition)
                                     .expect("Changing existing value");
