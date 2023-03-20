@@ -165,7 +165,7 @@ impl NaiveGraphTrie {
     ) -> Option<PermPortIndex> {
         let out_port = self.weights[node].get_port(transition)?;
         let in_port = self.graph.port_link(out_port)?;
-        self.get_perm_port_index(in_port).into()
+        self.create_perm_port(in_port).into()
     }
 
     fn transitions(&self, node: NodeIndex) -> impl Iterator<Item = (&NodeTransition, NodeIndex)> {
@@ -187,7 +187,7 @@ impl NaiveGraphTrie {
             .iter()
             .filter_map(|(transition, &out_port)| {
                 let in_port = self.graph.port_link(out_port)?;
-                (transition, self.get_perm_port_index(in_port)).into()
+                (transition, self.create_perm_port(in_port)).into()
             })
     }
 
@@ -223,7 +223,7 @@ impl NaiveGraphTrie {
         (self.graph.port_node(in_port).expect("Invalid port") == next_node).then_some(in_port)
     }
 
-    fn get_perm_port_index(&self, port: PortIndex) -> PermPortIndex {
+    fn create_perm_port(&self, port: PortIndex) -> PermPortIndex {
         let next_ind = self
             .perm_indices
             .borrow()
@@ -235,6 +235,14 @@ impl NaiveGraphTrie {
         next_ind
     }
 
+    fn reset_perm_ports(&mut self) {
+        self.perm_indices = Default::default();
+    }
+
+    fn all_perm_ports(&self) -> Vec<PermPortIndex> {
+        self.perm_indices.borrow().keys().copied().collect()
+    }
+
     fn get_state(&self, port: PermPortIndex) -> Option<NodeIndex> {
         let &port = self.perm_indices.borrow().get(&port)?;
         self.graph.port_node(port)
@@ -242,11 +250,6 @@ impl NaiveGraphTrie {
 
     fn free(&self, port: PermPortIndex) -> Option<PortIndex> {
         self.perm_indices.borrow_mut().remove(&port)
-    }
-
-    fn free_node(&self, port: PermPortIndex) -> Option<NodeIndex> {
-        let port = self.perm_indices.borrow_mut().remove(&port)?;
-        self.graph.port_node(port)
     }
 
     fn add_port(&mut self, node: NodeIndex, dir: Direction) {
@@ -540,7 +543,7 @@ impl NaiveGraphTrie {
         is_dangling: bool,
     ) -> Vec<(PermPortIndex, MatchObject)> {
         let mut current_states = vec![(state, current_match)];
-        let mut next_states = Vec::new();
+        let mut next_ports = Vec::new();
         assert!(!self.is_root(state) || is_dangling);
 
         while let Some((current_state, current_match)) = current_states.pop() {
@@ -557,7 +560,7 @@ impl NaiveGraphTrie {
                         let mut next_match = current_match.clone();
                         next_match.current_addr = next_addr;
                         current_states
-                            .push((self.free_node(next_port).expect("Invalid port"), next_match));
+                            .push((self.get_state(next_port).expect("Invalid port"), next_match));
                     }
                     NodeTransition::NewNode(_) => {
                         let next_addr = current_match.current_addr.next();
@@ -565,27 +568,28 @@ impl NaiveGraphTrie {
                         next_match.current_addr = next_addr.clone();
                         next_match.no_map.insert(next_addr);
                         current_states
-                            .push((self.free_node(next_port).expect("Invalid port"), next_match));
+                            .push((self.get_state(next_port).expect("Invalid port"), next_match));
                     }
                     NodeTransition::NoLinkedNode => {
                         let next_addr = current_match.current_addr.next_root();
                         let mut next_match = current_match.clone();
                         next_match.current_addr = next_addr;
-                        next_states.push((next_port, next_match));
+                        next_ports.push((next_port, next_match));
                     }
                     NodeTransition::Fail => {
                         if is_dangling && current_state == state {
+                            self.free(next_port);
                             continue;
                         }
                         let next_addr = current_match.current_addr.next_root();
                         let mut next_match = current_match.clone();
                         next_match.current_addr = next_addr;
-                        next_states.push((next_port, next_match));
+                        next_ports.push((next_port, next_match));
                     }
                 }
             }
         }
-        next_states
+        next_ports
     }
 
     /// Follow Fail transitions to find state with `out_port`
@@ -594,7 +598,7 @@ impl NaiveGraphTrie {
         states: Vec<(NodeIndex, MatchObject)>,
         out_port: portgraph::PortIndex,
         graph: &PortGraph,
-    ) -> (Vec<(NodeIndex, MatchObject)>, Vec<PermPortIndex>) {
+    ) -> Vec<(NodeIndex, MatchObject)> {
         // We start by finding where we are in the graph, using the outgoing
         // port
         let graph_node = graph.port_node(out_port).expect("Invalid port");
@@ -602,9 +606,6 @@ impl NaiveGraphTrie {
 
         // Process carriage returns where necessary
         let mut states_post_carriage_return = Vec::new();
-        // All in-ports that are traversed - useful to split graph into owned
-        // states
-        let mut all_ports = Vec::new();
 
         // If the current state does not correspond to our position and we
         // are in a deterministic state, follow the FAIL transition (aka do a
@@ -616,17 +617,16 @@ impl NaiveGraphTrie {
                 .get_by_left(&graph_node)
                 .expect("Incomplete match map");
             if !self.try_update_node(state, graph_addr, &graph_port) && !self.is_root(state) {
-                let (mut ports, matches): (Vec<_>, Vec<_>) = self
+                let (ports, matches): (Vec<_>, Vec<_>) = self
                     .carriage_return(state, current_match.clone(), &mut new_fail_state, false)
                     .into_iter()
                     .unzip();
                 states_post_carriage_return.extend(
                     ports
                         .iter()
-                        .zip(matches)
-                        .map(|(p, m)| (self.get_state(*p).expect("Invalid port"), m)),
+                        .map(|&p| self.get_state(p).expect("Invalid port"))
+                        .zip(matches),
                 );
-                all_ports.append(&mut ports);
             } else {
                 states_post_carriage_return.push((state, current_match));
             }
@@ -650,18 +650,16 @@ impl NaiveGraphTrie {
                             let port = self
                                 .set_transition(state, new_node, NodeTransition::Fail)
                                 .expect("Changing existing value");
-                            self.get_perm_port_index(port)
-                            // new_node
+                            self.create_perm_port(port)
                         }
                     };
-                    all_ports.push(port);
                     state = self.get_state(port).expect("Invalid port");
                     assert!(self.is_root(state));
                 }
                 (state, current_match)
             })
             .collect();
-        (states, all_ports)
+        states
     }
 
     fn add_node(&mut self, non_deterministic: bool) -> NodeIndex {
@@ -844,14 +842,14 @@ impl WriteGraphTrie for NaiveGraphTrie {
     ) -> Vec<(Self::StateID, Self::MatchObject)> {
         // Find the states that correspond to out_port
         let prev_states: Vec<_> = states.iter().map(|(state, _)| state.clone()).collect();
-        let (states, mut all_ports) = self.valid_start_states(states, out_port, graph);
+        let states = self.valid_start_states(states, out_port, graph);
 
         let mut next_states = BTreeSet::new();
         let mut new_node = None;
         for (state, current_match) in states {
             // For every allowable transition, insert it if it does not exist
             // and return it
-            let (mut next_ports, next_matches): (Vec<_>, Vec<_>) = self
+            let (next_ports, next_matches): (Vec<_>, Vec<_>) = self
                 .get_transition(state, graph, &current_match, TrieTraversal::Write)
                 .into_iter()
                 .flat_map(|(transition, next_match)| {
@@ -872,7 +870,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
                                 let port = self
                                     .set_transition(state, next_state, transition)
                                     .expect("Changing existing value");
-                                self.get_perm_port_index(port)
+                                self.create_perm_port(port)
                             }),
                             next_match,
                         )]
@@ -886,12 +884,11 @@ impl WriteGraphTrie for NaiveGraphTrie {
                     .map(|&p| self.get_state(p).expect("Invalid port"))
                     .zip(next_matches),
             );
-            all_ports.append(&mut next_ports);
         }
 
         // Finally, wherever not all inputs come from known nodes, split the
         // state into two
-        self.to_owned_states(prev_states, all_ports, clone_state);
+        self.to_owned_states(prev_states, self.all_perm_ports(), clone_state);
         next_states.into_iter().collect()
     }
 }
@@ -938,7 +935,7 @@ mod tests {
 
     #[cfg(feature = "serde")]
     use itertools::Itertools;
-    use portgraph::{dot::dot_string, proptest::gen_portgraph, Direction, NodeIndex, PortGraph};
+    use portgraph::{proptest::gen_portgraph, Direction, NodeIndex, PortGraph};
 
     use proptest::prelude::*;
 

@@ -197,15 +197,17 @@ mod tests {
         }
 
         let mut new_nodes = BTreeMap::new();
-        let ports = [
-            g.port_index(n2, 0, Direction::Outgoing).unwrap(),
-            g.port_index(n2, 1, Direction::Incoming).unwrap(),
-        ]
-        .into();
+        let all_ports = [n0_0, n0_1, n1_0, n2]
+            .into_iter()
+            .flat_map(|n| g.inputs(n))
+            .chain([
+                g.input(n1_1, 0).unwrap()
+            ])
+            .collect();
         cover_nodes(
             &mut g,
             &[n0_0, n0_1].into(),
-            ports,
+            all_ports,
             |old_n, new_n, _| {
                 new_nodes.insert(old_n, new_n);
             },

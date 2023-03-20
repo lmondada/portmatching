@@ -73,8 +73,17 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
 
 #[test]
 fn from_saved_patterns() {
-    let testcases = ["first", "second", "third", "fourth", "fifth", "sixth"];
+    let testcases = [
+        "first",
+        "second",
+        "third",
+        "fourth",
+        "fifth",
+        "sixth",
+        "seventh"
+    ];
     for test in testcases {
+        println!("{test}...");
         let path: PathBuf = ["tests", "saved_patterns", test].iter().collect();
         let patterns = load_patterns(&path).unwrap();
         let graph = load_graph(&path).unwrap();
