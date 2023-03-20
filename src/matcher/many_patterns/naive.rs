@@ -235,6 +235,11 @@ impl NaiveGraphTrie {
         next_ind
     }
 
+    fn get_state(&self, port: PermPortIndex) -> Option<NodeIndex> {
+        let &port = self.perm_indices.borrow().get(&port)?;
+        self.graph.port_node(port)
+    }
+
     fn free(&self, port: PermPortIndex) -> Option<PortIndex> {
         self.perm_indices.borrow_mut().remove(&port)
     }
@@ -584,61 +589,53 @@ impl NaiveGraphTrie {
     }
 
     /// Follow Fail transitions to find state with `out_port`
-    fn valid_start_states<F: FnMut(NodeIndex, NodeIndex)>(
+    fn valid_start_states(
         &mut self,
         states: Vec<(NodeIndex, MatchObject)>,
         out_port: portgraph::PortIndex,
         graph: &PortGraph,
-        clone_state: F,
-    ) -> Vec<(NodeIndex, MatchObject)> {
+    ) -> (Vec<(NodeIndex, MatchObject)>, Vec<PermPortIndex>) {
         // We start by finding where we are in the graph, using the outgoing
         // port
         let graph_node = graph.port_node(out_port).expect("Invalid port");
         let graph_port = PortOffset::try_from_index(out_port, graph).expect("Invalid port");
 
         // Process carriage returns where necessary
-        let mut ports_post_carriage_return = Vec::new();
-        let mut states_no_carriage_return = Vec::new();
+        let mut states_post_carriage_return = Vec::new();
+        // All in-ports that are traversed - useful to split graph into owned
+        // states
+        let mut all_ports = Vec::new();
 
         // If the current state does not correspond to our position and we
         // are in a deterministic state, follow the FAIL transition (aka do a
         // carriage return)
         let mut new_fail_state = None;
-        let prev_states = states.clone();
         for (state, current_match) in states {
             let graph_addr = current_match
                 .map
                 .get_by_left(&graph_node)
                 .expect("Incomplete match map");
             if !self.try_update_node(state, graph_addr, &graph_port) && !self.is_root(state) {
-                ports_post_carriage_return.append(
-                    &mut self
-                        .carriage_return(state, current_match.clone(), &mut new_fail_state, false)
-                        .into_iter()
-                        .collect(),
+                let (mut ports, matches): (Vec<_>, Vec<_>) = self
+                    .carriage_return(state, current_match.clone(), &mut new_fail_state, false)
+                    .into_iter()
+                    .unzip();
+                states_post_carriage_return.extend(
+                    ports
+                        .iter()
+                        .zip(matches)
+                        .map(|(p, m)| (self.get_state(*p).expect("Invalid port"), m)),
                 );
+                all_ports.append(&mut ports);
             } else {
-                states_no_carriage_return.push((state, current_match));
+                states_post_carriage_return.push((state, current_match));
             }
         }
 
-        // TODO do we need to call to_owned_states here?
-        let states: Vec<_> = states_no_carriage_return
-            .into_iter()
-            .chain(
-                self.to_owned_states(
-                    prev_states.into_iter().map(|(s, _)| s.clone()),
-                    ports_post_carriage_return.iter().map(|(s, _)| s.clone()),
-                    clone_state,
-                )
-                .into_iter()
-                .zip(ports_post_carriage_return.into_iter().map(|(_, m)| m)),
-            )
-            .collect();
         // Finally we obtain the states where we are meant to be,
         // such that state_addr == edge_addr and state_port == edge_port
         let mut new_node = None;
-        states
+        let states = states_post_carriage_return
             .into_iter()
             .map(|(mut state, current_match)| {
                 let graph_addr = current_match
@@ -657,12 +654,14 @@ impl NaiveGraphTrie {
                             // new_node
                         }
                     };
-                    state = self.free_node(port).expect("Invalid port");
+                    all_ports.push(port);
+                    state = self.get_state(port).expect("Invalid port");
                     assert!(self.is_root(state));
                 }
                 (state, current_match)
             })
-            .collect()
+            .collect();
+        (states, all_ports)
     }
 
     fn add_node(&mut self, non_deterministic: bool) -> NodeIndex {
@@ -727,31 +726,22 @@ impl NaiveGraphTrie {
     ///
     /// Ports are all incoming ports -- split states so that a state
     /// is incident to one of the port iff all ports are within `ports`
-    fn to_owned_states<F, I1, I2>(
-        &mut self,
-        prev_states: I1,
-        next_ports: I2,
-        mut clone_state: F,
-    ) -> Vec<NodeIndex>
+    fn to_owned_states<F, I1, I2>(&mut self, prev_states: I1, all_ports: I2, mut clone_state: F)
     where
         F: FnMut(NodeIndex, NodeIndex),
         I1: IntoIterator<Item = NodeIndex>,
         I2: IntoIterator<Item = PermPortIndex>,
     {
         let cover = prev_states.into_iter().collect();
-        let ports: BTreeSet<_> = next_ports
+        let all_ports = all_ports
             .into_iter()
             .map(|p| self.free(p).expect("Invalid port"))
-            .collect();
-        let ret_nodes = ports
-            .iter()
-            .map(|&p| self.graph.port_node(p).expect("Invalid port"))
             .collect();
         let weights = RefCell::new(&mut self.weights);
         cover_nodes(
             &mut self.graph,
             &cover,
-            &ports,
+            all_ports,
             |state, new_state, graph| {
                 let mut weights = weights.borrow_mut();
                 weights[new_state] = weights[state].clone();
@@ -785,7 +775,6 @@ impl NaiveGraphTrie {
                 }
             },
         );
-        ret_nodes
     }
 
     /// Finds the first existing transition that is compatible with `transition`
@@ -851,61 +840,59 @@ impl WriteGraphTrie for NaiveGraphTrie {
         states: Vec<(Self::StateID, Self::MatchObject)>,
         &Edge(out_port, _): &Edge,
         graph: &PortGraph,
-        mut clone_state: F,
+        clone_state: F,
     ) -> Vec<(Self::StateID, Self::MatchObject)> {
         // Find the states that correspond to out_port
         let prev_states: Vec<_> = states.iter().map(|(state, _)| state.clone()).collect();
-        let states: Vec<_> = self.valid_start_states(states, out_port, graph, &mut clone_state);
+        let (states, mut all_ports) = self.valid_start_states(states, out_port, graph);
 
         let mut next_states = BTreeSet::new();
         let mut new_node = None;
         for (state, current_match) in states {
             // For every allowable transition, insert it if it does not exist
             // and return it
+            let (mut next_ports, next_matches): (Vec<_>, Vec<_>) = self
+                .get_transition(state, graph, &current_match, TrieTraversal::Write)
+                .into_iter()
+                .flat_map(|(transition, next_match)| {
+                    if let NodeTransition::NoLinkedNode = &transition {
+                        self.carriage_return(state, current_match.clone(), &mut new_node, true)
+                    } else {
+                        [(
+                            self.transition_port(state, &transition).unwrap_or_else(|| {
+                                let next_addr = match &transition {
+                                    NodeTransition::KnownNode(addr, _) => addr.clone(),
+                                    NodeTransition::NewNode(_) => next_match.current_addr.clone(),
+                                    NodeTransition::NoLinkedNode => unreachable!(),
+                                    NodeTransition::Fail => {
+                                        panic!("transition is not valid")
+                                    }
+                                };
+                                let next_state = self.extend_tree(state, next_addr, &mut new_node);
+                                let port = self
+                                    .set_transition(state, next_state, transition)
+                                    .expect("Changing existing value");
+                                self.get_perm_port_index(port)
+                            }),
+                            next_match,
+                        )]
+                        .into()
+                    }
+                })
+                .unzip();
             next_states.extend(
-                self.get_transition(state, graph, &current_match, TrieTraversal::Write)
-                    .into_iter()
-                    .flat_map(|(transition, next_match)| {
-                        if let NodeTransition::NoLinkedNode = &transition {
-                            self.carriage_return(state, current_match.clone(), &mut new_node, true)
-                        } else {
-                            [(
-                                self.transition_port(state, &transition).unwrap_or_else(|| {
-                                    let next_addr = match &transition {
-                                        NodeTransition::KnownNode(addr, _) => addr.clone(),
-                                        NodeTransition::NewNode(_) => {
-                                            next_match.current_addr.clone()
-                                        }
-                                        NodeTransition::NoLinkedNode => unreachable!(),
-                                        NodeTransition::Fail => {
-                                            panic!("transition is not valid")
-                                        }
-                                    };
-                                    let next_state =
-                                        self.extend_tree(state, next_addr, &mut new_node);
-                                    let port = self
-                                        .set_transition(state, next_state, transition)
-                                        .expect("Changing existing value");
-                                    self.get_perm_port_index(port)
-                                }),
-                                next_match,
-                            )]
-                            .into()
-                        }
-                    }),
+                next_ports
+                    .iter()
+                    .map(|&p| self.get_state(p).expect("Invalid port"))
+                    .zip(next_matches),
             );
+            all_ports.append(&mut next_ports);
         }
 
         // Finally, wherever not all inputs come from known nodes, split the
         // state into two
-        self.to_owned_states(
-            prev_states,
-            next_states.iter().map(|(s, _)| s.clone()),
-            clone_state,
-        )
-        .into_iter()
-        .zip(next_states.into_iter().map(|(_, m)| m))
-        .collect()
+        self.to_owned_states(prev_states, all_ports, clone_state);
+        next_states.into_iter().collect()
     }
 }
 

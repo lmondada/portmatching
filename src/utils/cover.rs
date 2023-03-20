@@ -1,73 +1,69 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use portgraph::{Direction, NodeIndex, PortGraph, PortIndex};
-
-use crate::utils::pre_order::{self, PreOrder};
-
-// TODO be smart so that not entire tree must be traversed
-fn get_cone(
-    graph: &PortGraph,
-    from: &BTreeSet<NodeIndex>,
-    direction: pre_order::Direction,
-) -> BTreeSet<NodeIndex> {
-    let mut cone = BTreeSet::new();
-    for node in PreOrder::new(graph, from.into_iter().copied(), direction) {
-        cone.insert(node);
-    }
-    cone
-}
 
 /// Split `nodes` so that all its predecessors "go through" cover
 pub fn cover_nodes<F, G>(
     graph: &mut PortGraph,
     cover: &BTreeSet<NodeIndex>,
-    partition: &BTreeSet<PortIndex>,
+    mut all_ports: BTreeSet<PortIndex>,
     mut clone_state: G,
     mut rekey: F,
 ) where
     F: FnMut(PortIndex, Option<PortIndex>, &PortGraph),
     G: FnMut(NodeIndex, NodeIndex, &PortGraph),
 {
-    let nodes: BTreeSet<_> = partition
+    let nodes: BTreeSet<_> = all_ports
         .iter()
         .map(|&p| graph.port_node(p).expect("Invalid port"))
         .collect();
 
-    // Compute the nodes between cover and nodes (inclusive)
-    let cone_down = get_cone(graph, cover, pre_order::Direction::Outgoing);
-    let cone_up = get_cone(graph, &nodes, pre_order::Direction::Incoming);
-    let mut nodes_between: BTreeSet<_> = cone_down.intersection(&cone_up).copied().collect();
-
-    // Start by splitting the nodes using the partition
-    for &node in nodes.iter() {
-        let (within, without): (Vec<_>, Vec<_>) =
-            graph.inputs(node).partition(|p| partition.contains(p));
-    }
-
-    let mut nodes_to_split: BTreeSet<_> = nodes_between
+    let mut curr_nodes: VecDeque<_> = cover
         .iter()
-        .copied()
-        .filter(|&node| !cover.contains(&node) && to_be_split(graph, node, &nodes_between))
-        .collect();
-
-    while let Some(node) = nodes_to_split.pop_last() {
-        let (within, without): (Vec<_>, Vec<_>) = graph.inputs(node).partition(|&p| {
-            let in_node = graph.port_link(p).and_then(|p| graph.port_node(p));
-            in_node.is_none() || nodes_between.contains(&in_node.unwrap())
-        });
-        let (within, without) =
-            split_node(graph, node, within, without, &mut clone_state, &mut rekey);
-        nodes_between.insert(within);
-        nodes_to_split.extend(
+        .flat_map(|&n| {
             graph
-                .output_links(without)
+                .output_links(n)
                 .flatten()
                 .map(|p| graph.port_node(p).expect("Invalid port"))
-                .filter(|node| nodes_between.contains(&node)),
+        })
+        .filter(|n| nodes.contains(n))
+        .collect();
+    let mut visited = BTreeSet::new();
+
+    while let Some(node) = curr_nodes.pop_front() {
+        if visited.contains(&node) {
+            continue;
+        } else {
+            visited.insert(node);
+        }
+        let (within, without): (Vec<_>, Vec<_>) =
+            graph.inputs(node).partition(|p| all_ports.contains(p));
+        if !without.is_empty() {
+            split_node(
+                graph,
+                node,
+                within,
+                without,
+                &mut clone_state,
+                |old, new, graph| {
+                    if all_ports.remove(&old) {
+                        all_ports.insert(new.expect("Removed port"));
+                    }
+                    rekey(old, new, graph)
+                },
+            );
+        }
+        curr_nodes.extend(
+            graph
+                .output_links(node)
+                .flatten()
+                .map(|p| graph.port_node(p).expect("Invalid port"))
+                .filter(|n| nodes.contains(n)),
         );
     }
 }
 
+/// Splits node1 into (node1, node2) according to partition
 fn split_node<F, G>(
     graph: &mut PortGraph,
     node1: NodeIndex,
@@ -83,16 +79,18 @@ where
     let n_out = graph.num_outputs(node1);
     let node2 = graph.add_node(in_ports2.len(), n_out);
 
-    // Re-link input port for node2
+    // TODO maybe use compact_ports would be more concise, but would
+    // require a refactor of portgraph to e.g. only compact input ports
     for (new_port_offset, in_port) in in_ports2.into_iter().enumerate() {
         let new_port = graph
             .port_index(node2, new_port_offset, Direction::Incoming)
             .expect("Just created");
         if let Some(out_port) = graph.unlink_port(in_port) {
             graph.link_ports(out_port, new_port).unwrap();
+            rekey(in_port, new_port.into(), graph);
         }
     }
-    // Compactify input ports for node1
+    // Compact input ports for node1
     let mut new_port_offset = 0;
     in_ports1.sort_unstable();
     let num_in_ports1 = in_ports1.len();
@@ -104,6 +102,7 @@ where
             // invariant: new_port < port
             if let Some(out_port) = graph.unlink_port(in_port) {
                 graph.link_ports(out_port, new_port).unwrap();
+                rekey(in_port, new_port.into(), graph);
             }
         }
         new_port_offset += 1;
@@ -155,13 +154,6 @@ where
     (node1, node2)
 }
 
-fn to_be_split(graph: &PortGraph, node: NodeIndex, cone: &BTreeSet<NodeIndex>) -> bool {
-    graph.input_links(node).flatten().any(|port| {
-        let in_node = graph.port_node(port).expect("Invalid port");
-        !cone.contains(&in_node)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -206,13 +198,14 @@ mod tests {
 
         let mut new_nodes = BTreeMap::new();
         let ports = [
-                g.port_index(n2, 0, Direction::Outgoing).unwrap(),
-                g.port_index(n2, 1, Direction::Incoming).unwrap(),
-        ].into();
+            g.port_index(n2, 0, Direction::Outgoing).unwrap(),
+            g.port_index(n2, 1, Direction::Incoming).unwrap(),
+        ]
+        .into();
         cover_nodes(
             &mut g,
             &[n0_0, n0_1].into(),
-            &ports,
+            ports,
             |old_n, new_n, _| {
                 new_nodes.insert(old_n, new_n);
             },

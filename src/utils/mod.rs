@@ -1,6 +1,6 @@
+pub(crate) mod cover;
 mod depth;
 mod pre_order;
-pub(crate) mod cover;
 
 pub(crate) use depth::{centre, NoCentreError};
 
