@@ -2,12 +2,14 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Display},
+    mem,
 };
 
 use bimap::BiBTreeMap;
 use portgraph::{
-    algorithms::postorder, dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex,
-    SecondaryMap, Weights,
+    algorithms::postorder,
+    dot::{dot_string_weighted, dot_string_with},
+    Direction, NodeIndex, PortGraph, PortIndex, SecondaryMap, Weights,
 };
 
 use crate::{
@@ -104,14 +106,41 @@ impl fmt::Display for NodeTransition {
 struct NodeWeight {
     port_offset: Option<PortOffset>,
     address: Option<PatternNodeAddress>,
-    transitions: BTreeMap<NodeTransition, PortIndex>,
     non_deterministic: bool,
 }
-impl NodeWeight {
-    fn get_port(&self, transition: &NodeTransition) -> Option<PortIndex> {
-        self.transitions.get(transition).copied()
+
+impl Display for NodeWeight {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(addr) = &self.address {
+            write!(f, "({}, {})", addr.0, addr.1)?;
+        } else {
+            write!(f, "None")?;
+        }
+        if let Some(port) = &self.port_offset {
+            write!(f, "[{port}]")?;
+        }
+        Ok(())
     }
 }
+
+#[derive(Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct PortWeight(Option<NodeTransition>);
+
+impl Display for PortWeight {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(t) = &self.0 {
+            write!(f, "{t}")
+        } else {
+            Ok(())
+        }
+    }
+}
+
+// impl NodeWeight {
+//     fn get_port(&self, transition: &NodeTransition) -> Option<PortIndex> {
+//         self.transitions.get(transition).copied()
+//     }
+// }
 
 /// A simple implementation of a graph trie
 ///
@@ -121,14 +150,14 @@ impl NodeWeight {
 /// line may have to be traversed concurrently at any one time.
 pub struct NaiveGraphTrie {
     graph: PortGraph,
-    weights: SecondaryMap<NodeIndex, NodeWeight>,
+    weights: Weights<NodeWeight, PortWeight>,
     perm_indices: RefCell<BTreeMap<PermPortIndex, PortIndex>>,
 }
 
 impl Default for NaiveGraphTrie {
     fn default() -> Self {
-        let graph = PortGraph::default();
-        let weights = SecondaryMap::default();
+        let graph = Default::default();
+        let weights = Default::default();
         let perm_indices = Default::default();
         let mut ret = Self {
             graph,
@@ -156,7 +185,10 @@ impl NaiveGraphTrie {
     ///
     /// Returns None if the transition does not exist
     fn transition(&self, node: NodeIndex, transition: &NodeTransition) -> Option<NodeIndex> {
-        let out_port = self.weights[node].get_port(transition)?;
+        let out_port = self
+            .graph
+            .outputs(node)
+            .find(|&p| self.weights[p].0.as_ref() == Some(transition))?;
         let in_port = self.graph.port_link(out_port)?;
         self.graph.port_node(in_port)
     }
@@ -166,32 +198,32 @@ impl NaiveGraphTrie {
         node: NodeIndex,
         transition: &NodeTransition,
     ) -> Option<PermPortIndex> {
-        let out_port = self.weights[node].get_port(transition)?;
+        let out_port = self
+            .graph
+            .outputs(node)
+            .find(|&p| self.weights[p].0.as_ref() == Some(transition))?;
         let in_port = self.graph.port_link(out_port)?;
         self.create_perm_port(in_port).into()
     }
 
     fn transitions(&self, node: NodeIndex) -> impl Iterator<Item = (&NodeTransition, NodeIndex)> {
-        self.weights[node]
-            .transitions
-            .iter()
-            .filter_map(|(transition, &out_port)| {
-                let in_port = self.graph.port_link(out_port)?;
-                self.graph.port_node(in_port).map(|node| (transition, node))
-            })
+        self.graph.outputs(node).filter_map(|p| {
+            let n = self
+                .graph
+                .port_node(self.graph.port_link(p)?)
+                .expect("Invalid port");
+            (self.weights[p].0.as_ref()?, n).into()
+        })
     }
 
     fn transitions_port(
         &self,
         node: NodeIndex,
     ) -> impl Iterator<Item = (&NodeTransition, PermPortIndex)> {
-        self.weights[node]
-            .transitions
-            .iter()
-            .filter_map(|(transition, &out_port)| {
-                let in_port = self.graph.port_link(out_port)?;
-                (transition, self.create_perm_port(in_port)).into()
-            })
+        self.graph.outputs(node).filter_map(|p| {
+            let in_port = self.graph.port_link(p)?;
+            (self.weights[p].0.as_ref()?, self.create_perm_port(in_port)).into()
+        })
     }
 
     /// Set a new transition between `node` and `next_node`
@@ -206,15 +238,14 @@ impl NaiveGraphTrie {
         next_node: NodeIndex,
         transition: NodeTransition,
     ) -> Option<PortIndex> {
-        // Cannot use .entry because of borrow checker
-        let out_port = self.weights[node]
-            .transitions
-            .get(&transition)
-            .copied()
+        let out_port = self
+            .graph
+            .outputs(node)
+            .find(|&p| self.weights[p].0.as_ref() == Some(&transition))
             .unwrap_or_else(|| {
                 self.add_port(node, Direction::Outgoing);
                 let out_port = self.graph.outputs(node).last().expect("Just added");
-                self.weights[node].transitions.insert(transition, out_port);
+                self.weights[out_port] = PortWeight(transition.into());
                 out_port
             });
         let in_port = self.graph.port_link(out_port).unwrap_or_else(|| {
@@ -266,12 +297,11 @@ impl NaiveGraphTrie {
 
     fn set_num_ports(&mut self, node: NodeIndex, incoming: usize, outgoing: usize) {
         self.graph
-            .set_num_ports(node, incoming, outgoing, |old, new, graph| {
-                let node = graph.port_node(old).expect("Invalid port");
-                for val in self.weights[node].transitions.values_mut() {
-                    if &old == val {
-                        *val = new.expect("A linked port was deleted!");
-                    }
+            .set_num_ports(node, incoming, outgoing, |old, new, _| {
+                if let Some(new) = new {
+                    self.weights[new] = mem::take(&mut self.weights[old]);
+                } else {
+                    self.weights[old] = Default::default();
                 }
                 for val in self.perm_indices.borrow_mut().values_mut() {
                     if &old == val {
@@ -694,7 +724,8 @@ impl NaiveGraphTrie {
 
     /// Output trie graph in dotstring format
     pub fn dotstring(&self) -> String {
-        self.dotstring_with(&BTreeMap::<_, Vec<String>>::new())
+        dot_string_weighted(&self.graph, &self.weights)
+        // self.dotstring_with(&BTreeMap::<_, Vec<String>>::new())
     }
 
     /// Output trie graph in dotstring format
@@ -703,17 +734,8 @@ impl NaiveGraphTrie {
         matching_nodes: &BTreeMap<NodeIndex, Vec<D>>,
     ) -> String {
         let mut node_weights = SecondaryMap::new();
-        let mut port_weights = SecondaryMap::new();
         for node in self.graph.nodes_iter() {
             let mut fmt_str = String::new();
-            if let Some(addr) = &self.weights[node].address {
-                fmt_str += &format!("({}, {})", addr.0, addr.1);
-            } else {
-                fmt_str += "None";
-            }
-            if let Some(port) = &self.weights[node].port_offset {
-                fmt_str += &format!("[{}]", port);
-            }
             if let Some(matches) = matching_nodes.get(&node) {
                 if !matches.is_empty() {
                     fmt_str += " [[";
@@ -725,23 +747,13 @@ impl NaiveGraphTrie {
                     fmt_str += "]]";
                 }
             }
-            node_weights[node] = fmt_str;
-
-            for port in self.graph.outputs(node) {
-                if let Some((transition, _)) = self.weights[node]
-                    .transitions
-                    .iter()
-                    .find(|(_, p)| port == **p)
-                {
-                    port_weights[port] = transition.to_string();
-                }
-            }
+            node_weights[node] = format!("{} [[{}]]", self.weights[node], fmt_str);
         }
-        let weights = Weights {
-            nodes: node_weights,
-            ports: port_weights,
-        };
-        dot_string_weighted(&self.graph, &weights)
+        dot_string_with(
+            &self.graph,
+            |n| node_weights[n].clone(),
+            |p| (self.weights.ports[p].to_string(), None),
+        )
     }
 
     /// Split states so that all incoming links are within ports
@@ -768,27 +780,18 @@ impl NaiveGraphTrie {
                 let mut weights = weights.borrow_mut();
                 weights[new_state] = weights[state].clone();
                 // update transition pointers
-                let [old_weight, new_weight] =
-                    weights.get_disjoint_mut([state, new_state]).unwrap();
-                for (&out_port, new_out_port) in old_weight
-                    .transitions
-                    .values()
-                    .zip(new_weight.transitions.values_mut())
-                {
-                    let offset = graph.port_offset(out_port).expect("Invalid port");
-                    *new_out_port = graph
-                        .port_index(new_state, offset, Direction::Outgoing)
-                        .unwrap();
+                for (out_port, new_out_port) in graph.outputs(state).zip(graph.outputs(new_state)) {
+                    weights[new_out_port] = weights[out_port].clone();
                 }
                 // callback
                 clone_state(state, new_state);
             },
-            |old, new, graph| {
-                let node = graph.port_node(old).expect("Invalid port");
-                for val in weights.borrow_mut()[node].transitions.values_mut() {
-                    if &old == val {
-                        *val = new.expect("A linked port was deleted!");
-                    }
+            |old, new, _| {
+                let mut weights = weights.borrow_mut();
+                if let Some(new) = new {
+                    weights[new] = mem::take(&mut weights[old]);
+                } else {
+                    weights[old] = Default::default();
                 }
                 for val in self.perm_indices.borrow_mut().values_mut() {
                     if &old == val {
@@ -980,15 +983,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
         for node in is_dead {
             // Remove dictionary entries of node
             for out_port in self.graph.input_links(node).flatten() {
-                let prev_node = self.graph.port_node(out_port).expect("Invalid port");
-                let transitions = &mut self.weights[prev_node].transitions;
-                if let Some(k) = transitions
-                    .iter()
-                    .find(|(_, &v)| v == out_port)
-                    .map(|(k, _)| k.clone())
-                {
-                    transitions.remove(&k);
-                }
+                self.weights[out_port] = Default::default();
             }
             self.graph.remove_node(node);
             self.weights[node] = Default::default();
