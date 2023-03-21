@@ -20,19 +20,23 @@ fn valid_binary_file(s: &str, pattern: &str) -> bool {
 
 fn load_patterns(dir: &Path) -> io::Result<Vec<Pattern>> {
     let mut patterns = Vec::new();
-    for entry in fs::read_dir(dir)? {
-        let Ok(entry) = entry else { continue };
-        let file_name = entry.file_name().to_str().unwrap().to_string();
-        let path = entry.path();
-        if valid_binary_file(&file_name, "pattern") {
-            let p: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
-            // {
-            //     let mut path = path;
-            //     path.set_extension("gv");
-            //     fs::write(path, dot_string(&p)).unwrap();
-            // }
-            patterns.push(Pattern::from_graph(p).unwrap());
-        }
+    let mut all_patterns: Vec<_> = fs::read_dir(dir)?
+        .filter_map(|entry| {
+            let Ok(entry) = entry else { return None };
+            let file_name = entry.file_name().to_str().unwrap().to_string();
+            let path = entry.path();
+            valid_binary_file(&file_name, "pattern").then_some(path)
+        })
+        .collect();
+    all_patterns.sort_unstable();
+    for path in all_patterns {
+        let p: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
+        // {
+        //     let mut path = path;
+        //     path.set_extension("gv");
+        //     fs::write(path, dot_string(&p)).unwrap();
+        // }
+        patterns.push(Pattern::from_graph(p).unwrap());
     }
 
     Ok(patterns)
