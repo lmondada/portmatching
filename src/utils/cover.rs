@@ -38,7 +38,7 @@ pub fn cover_nodes<F, G>(
         }
         let (within, without): (Vec<_>, Vec<_>) =
             graph.inputs(node).partition(|p| all_ports.contains(p));
-        if !without.is_empty() {
+        if !without.is_empty() && !within.is_empty() {
             split_node(
                 graph,
                 node,
@@ -120,11 +120,6 @@ where
         .map(|&node| (node, graph.num_inputs(node)))
         .collect();
     for (&node, &add_port) in cnts.iter() {
-        println!(
-            "[adding {add_port} in] setting {node:?} to ({}, {})",
-            graph.num_inputs(node) + add_port,
-            graph.num_outputs(node)
-        );
         graph.set_num_ports(
             node,
             graph.num_inputs(node) + add_port,

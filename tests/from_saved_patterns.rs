@@ -7,7 +7,7 @@ use itertools::Itertools;
 use portgraph::{dot::dot_string, PortGraph};
 use portmatching::{
     matcher::{
-        many_patterns::{NaiveManyPatternMatcher, PatternID, PatternMatch, WriteGraphTrie},
+        many_patterns::{NaiveManyPatternMatcher, PatternID, PatternMatch},
         Matcher,
     },
     pattern::Pattern,
@@ -75,7 +75,7 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
 fn from_saved_patterns() {
     let testcases = [
         "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
-        "tenth",
+        "tenth", "eleventh",
     ];
     for test in testcases {
         println!("{test}...");

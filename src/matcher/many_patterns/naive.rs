@@ -2,14 +2,12 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Display},
-    fs,
 };
 
 use bimap::BiBTreeMap;
 use portgraph::{
-    algorithms::{postorder, PostOrder},
-    dot::dot_string_weighted,
-    Direction, NodeIndex, PortGraph, PortIndex, SecondaryMap, Weights,
+    algorithms::postorder, dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex,
+    SecondaryMap, Weights,
 };
 
 use crate::{
@@ -305,14 +303,10 @@ impl NaiveGraphTrie {
     fn extend_tree(
         &mut self,
         node: NodeIndex,
-        addr: PatternNodeAddress,
+        new_addr: PatternNodeAddress,
         new_node: &mut Option<NodeIndex>,
         is_new_node: bool,
     ) -> NodeIndex {
-        let new_node = *new_node.get_or_insert_with(|| self.add_node(false));
-        if self.weights[new_node].address.as_ref() < Some(&addr) {
-            self.weights[new_node].address = addr.clone().into();
-        }
         let fallback = if self.weights[node].non_deterministic {
             self.transition(node, &NodeTransition::NoLinkedNode)
         } else {
@@ -339,14 +333,28 @@ impl NaiveGraphTrie {
                         self.set_transition(
                             node,
                             next_node,
-                            NodeTransition::KnownNode(addr.clone(), port.clone()),
+                            NodeTransition::KnownNode(new_addr.clone(), port.clone()),
                         )
                         .unwrap();
                     }
                 }
             }
-            self.set_transition(new_node, fallback, NodeTransition::Fail)
-                .expect("Changing existing transition");
+            while {
+                let new_node = *new_node.get_or_insert_with(|| self.add_node(false));
+                self.set_transition(new_node, fallback, NodeTransition::Fail)
+                    .is_none()
+            } {
+                println!("Resetting new_node");
+                *new_node = None;
+            }
+        }
+        let new_node = *new_node.get_or_insert_with(|| self.add_node(false));
+        if self.weights[new_node]
+            .address
+            .get_or_insert_with(|| new_addr.clone())
+            != &new_addr
+        {
+            panic!("overwriting address");
         }
         new_node
     }
@@ -371,11 +379,11 @@ impl NaiveGraphTrie {
         traversal: TrieTraversal,
     ) -> Vec<(NodeTransition, MatchObject)> {
         // The transition we would want to perform
-        dbg!(self.state(state));
+        // dbg!(self.state(state));
         let ideal_transition = || {
             let addr = self.state(state).address.as_ref()?;
-            dbg!(&current_match.map);
-            dbg!(&addr);
+            // dbg!(&current_match.map);
+            // dbg!(&addr);
             let graph_node = *current_match
                 .map
                 .get_by_right(addr)
@@ -436,13 +444,15 @@ impl NaiveGraphTrie {
             NodeTransition::Fail => {
                 if !self.is_root(state) {
                     let next_addr = current_match.current_addr.next_root();
-                    next_match.current_addr = next_addr;
+                    next_match.current_addr = next_addr.clone();
+                    next_match.current_addr_eff = next_addr;
                 }
                 return next_match;
             }
             NodeTransition::NoLinkedNode => {
                 let next_addr = current_match.current_addr.next_root();
-                next_match.current_addr = next_addr;
+                next_match.current_addr = next_addr.clone();
+                next_match.current_addr_eff = next_addr;
                 return next_match;
             }
             NodeTransition::KnownNode(_, _) | NodeTransition::NewNode(_) => {
@@ -491,6 +501,7 @@ impl NaiveGraphTrie {
                 (next_match.map.get_by_left(&next_graph_node) == Some(&next_addr)).then_some(())
             })
             .expect("Map is not injective");
+        next_match.current_addr_eff = next_addr;
         next_match
     }
 
@@ -835,6 +846,7 @@ pub struct MatchObject {
     // Entries in `no_map` are in `map` but are irrelevant
     no_map: BTreeSet<PatternNodeAddress>,
     current_addr: PatternNodeAddress,
+    current_addr_eff: PatternNodeAddress,
 }
 
 impl MatchObject {
@@ -843,6 +855,7 @@ impl MatchObject {
             map: BiBTreeMap::from_iter([(left_root, PatternNodeAddress::ROOT)]),
             no_map: BTreeSet::new(),
             current_addr: PatternNodeAddress::ROOT,
+            current_addr_eff: PatternNodeAddress::ROOT,
         }
     }
 }
@@ -879,14 +892,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
                     } else {
                         [(
                             self.transition_port(state, &transition).unwrap_or_else(|| {
-                                let next_addr = match &transition {
-                                    NodeTransition::KnownNode(addr, _) => addr.clone(),
-                                    NodeTransition::NewNode(_) => next_match.current_addr.clone(),
-                                    NodeTransition::NoLinkedNode => unreachable!(),
-                                    NodeTransition::Fail => {
-                                        panic!("transition is not valid")
-                                    }
-                                };
+                                let next_addr = next_match.current_addr_eff.clone();
                                 let next_state = self.extend_tree(
                                     state,
                                     next_addr,
@@ -927,7 +933,6 @@ impl WriteGraphTrie for NaiveGraphTrie {
         &'a mut self,
         keep_states: I,
     ) {
-        fs::write("patterntrie_bef.bin", self.dotstring()).unwrap();
         // let mut to_delete = Default::default();
         let to_keep = BTreeSet::from_iter(keep_states.copied());
         let mut known_addresses =
@@ -956,6 +961,11 @@ impl WriteGraphTrie for NaiveGraphTrie {
                     .and_modify(|e| e.retain(|addr| new_known_addresses.contains(addr)))
                     .or_insert(new_known_addresses);
             }
+            if is_dead.contains(&node) {
+                for (_, next_node) in self.transitions(node) {
+                    is_dead.insert(next_node);
+                }
+            }
         }
 
         // propagate is_dead
@@ -981,8 +991,8 @@ impl WriteGraphTrie for NaiveGraphTrie {
                 }
             }
             self.graph.remove_node(node);
+            self.weights[node] = Default::default();
         }
-        fs::write("patterntrie_aft.bin", self.dotstring()).unwrap();
     }
 }
 
@@ -1159,6 +1169,8 @@ mod tests {
         let mut matcher = NaiveManyPatternMatcher::new();
         matcher.add_pattern(Pattern::from_graph(p1).unwrap());
         matcher.add_pattern(Pattern::from_graph(p2).unwrap());
+        fs::write("patterntrie.gv", matcher.dotstring());
+        dbg!(matcher.find_matches(&g));
         assert_eq!(matcher.find_matches(&g).len(), 3);
     }
 
