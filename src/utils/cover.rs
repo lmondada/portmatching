@@ -91,10 +91,9 @@ where
         }
     }
     // Compact input ports for node1
-    let mut new_port_offset = 0;
     in_ports1.sort_unstable();
     let num_in_ports1 = in_ports1.len();
-    for in_port in in_ports1 {
+    for (new_port_offset, in_port) in in_ports1.into_iter().enumerate() {
         let new_port = graph
             .port_index(node1, new_port_offset, Direction::Incoming)
             .expect("At most num_inputs iterations");
@@ -105,7 +104,6 @@ where
                 rekey(in_port, new_port.into(), graph);
             }
         }
-        new_port_offset += 1;
     }
     graph.set_num_ports(node1, num_in_ports1, graph.num_outputs(node1), &mut rekey);
 

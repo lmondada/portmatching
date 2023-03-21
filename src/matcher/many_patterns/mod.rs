@@ -180,7 +180,7 @@ where
             // necessary to keep track of the match states
             let mut clone_state = |old_state: T::StateID, new_state: T::StateID| {
                 self.matching_nodes.insert(
-                    new_state.clone(),
+                    new_state,
                     self.matching_nodes
                         .get(&old_state)
                         .cloned()
@@ -197,7 +197,9 @@ where
         }
 
         // Record matching pattern in final states
-        for (state, _) in current_states {
+        let final_states: BTreeSet<_> =
+            current_states.into_iter().map(|(state, _)| state).collect();
+        for state in final_states {
             self.matching_nodes
                 .entry(state)
                 .or_insert_with(Vec::new)

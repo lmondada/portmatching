@@ -4,7 +4,8 @@ use std::{
 };
 
 use itertools::Itertools;
-use portgraph::{dot::dot_string, PortGraph};
+// use portgraph::dot::dot_string;
+use portgraph::PortGraph;
 use portmatching::{
     matcher::{
         many_patterns::{NaiveManyPatternMatcher, PatternID, PatternMatch},
@@ -25,11 +26,11 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<Pattern>> {
         let path = entry.path();
         if valid_binary_file(&file_name, "pattern") {
             let p: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
-            {
-                let mut path = path;
-                path.set_extension("gv");
-                fs::write(path, dot_string(&p)).unwrap();
-            }
+            // {
+            //     let mut path = path;
+            //     path.set_extension("gv");
+            //     fs::write(path, dot_string(&p)).unwrap();
+            // }
             patterns.push(Pattern::from_graph(p).unwrap());
         }
     }
@@ -44,11 +45,11 @@ fn load_graph(dir: &Path) -> io::Result<PortGraph> {
         let path = entry.path();
         if valid_binary_file(&file_name, "graph") {
             let graph: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
-            {
-                let mut path = path;
-                path.set_extension("gv");
-                fs::write(path, dot_string(&graph)).unwrap();
-            }
+            // {
+            //     let mut path = path;
+            //     path.set_extension("gv");
+            //     fs::write(path, dot_string(&graph)).unwrap();
+            // }
             return Ok(graph);
         }
     }
@@ -76,21 +77,20 @@ fn from_saved_patterns() {
     let testcases = [
         "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
         "tenth", "eleventh",
+        "twelveth"
     ];
     for test in testcases {
-        println!("{test}...");
         let path: PathBuf = ["tests", "saved_patterns", test].iter().collect();
         let patterns = load_patterns(&path).unwrap();
         let graph = load_graph(&path).unwrap();
         let exp = load_results(&path).unwrap();
 
         let matcher = NaiveManyPatternMatcher::from_patterns(patterns.clone());
-        println!("built");
-        {
-            let mut path = path;
-            path.push("patterntrie.gv");
-            fs::write(path, matcher.dotstring()).unwrap();
-        }
+        // {
+        //     let mut path = path;
+        //     path.push("patterntrie.gv");
+        //     fs::write(path, matcher.dotstring()).unwrap();
+        // }
         let many_matches = matcher.find_matches(&graph);
         let many_matches = (0..patterns.len())
             .map(|i| {
