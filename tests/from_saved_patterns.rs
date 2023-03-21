@@ -75,6 +75,7 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
 fn from_saved_patterns() {
     let testcases = [
         "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
+        "tenth",
     ];
     for test in testcases {
         println!("{test}...");
@@ -83,7 +84,7 @@ fn from_saved_patterns() {
         let graph = load_graph(&path).unwrap();
         let exp = load_results(&path).unwrap();
 
-        let mut matcher = NaiveManyPatternMatcher::from_patterns(patterns.clone());
+        let matcher = NaiveManyPatternMatcher::from_patterns(patterns.clone());
         println!("built");
         {
             let mut path = path;

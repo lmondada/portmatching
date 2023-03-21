@@ -7,11 +7,16 @@ use std::{
 
 use bimap::BiBTreeMap;
 use portgraph::{
-    algorithms::postorder, dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex,
-    SecondaryMap, Weights,
+    algorithms::{postorder, PostOrder},
+    dot::dot_string_weighted,
+    Direction, NodeIndex, PortGraph, PortIndex, SecondaryMap, Weights,
 };
 
-use crate::{pattern::Edge, utils::cover::cover_nodes, PortOffset};
+use crate::{
+    pattern::Edge,
+    utils::{cover::cover_nodes, pre_order, PreOrder},
+    PortOffset,
+};
 
 use super::{ManyPatternMatcher, ReadGraphTrie, WriteGraphTrie};
 
@@ -803,54 +808,6 @@ impl NaiveGraphTrie {
     fn root(&self) -> NodeIndex {
         NodeIndex::new(0)
     }
-
-    fn recurse(
-        &self,
-        node: NodeIndex,
-        known_addresses: BTreeSet<PatternNodeAddress>,
-        mut is_dead: bool,
-        to_delete: &mut BTreeSet<NodeIndex>,
-        to_keep: &BTreeSet<NodeIndex>,
-        visited: &mut BTreeMap<NodeIndex, bool>,
-    ) -> bool {
-        if visited.contains_key(&node) {
-            return visited[&node];
-        }
-        if let Some(addr) = &self.state(node).address {
-            if !known_addresses.contains(addr) {
-                is_dead = true;
-            }
-        }
-        let mut all_dead = true;
-        for (transition, next_node) in self.transitions(node) {
-            let mut known_addresses = known_addresses.clone();
-            if let NodeTransition::NewNode(_) = transition {
-                if let Some(addr) = &self.state(next_node).address {
-                    known_addresses.insert(addr.clone());
-                }
-            } else if let NodeTransition::KnownNode(_, _) = transition {
-                if let Some(addr) = &self.state(next_node).address {
-                    known_addresses.insert(addr.clone());
-                }
-            }
-            all_dead &= self.recurse(
-                next_node,
-                known_addresses,
-                is_dead,
-                to_delete,
-                to_keep,
-                visited,
-            );
-        }
-        if all_dead && !to_keep.contains(&node) {
-            is_dead = true;
-        }
-        if is_dead {
-            to_delete.insert(node);
-        }
-        visited.insert(node, is_dead);
-        is_dead
-    }
 }
 
 // fn rekey<'w>(
@@ -896,7 +853,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
         states: Vec<(Self::StateID, Self::MatchObject)>,
         &Edge(out_port, _): &Edge,
         graph: &PortGraph,
-        clone_state: F,
+        mut clone_state: F,
     ) -> Vec<(Self::StateID, Self::MatchObject)> {
         // Technically unnecessary
         self.reset_perm_ports();
@@ -904,6 +861,9 @@ impl WriteGraphTrie for NaiveGraphTrie {
         // Find the states that correspond to out_port
         let prev_states: Vec<_> = states.iter().map(|(state, _)| state.clone()).collect();
         let states = self.valid_start_states(states, out_port, graph);
+
+        self.to_owned_states(prev_states, self.all_perm_ports(), &mut clone_state);
+        let prev_states: Vec<_> = states.iter().map(|(state, _)| state.clone()).collect();
 
         let mut next_states = BTreeSet::new();
         let mut new_node = None;
@@ -968,18 +928,46 @@ impl WriteGraphTrie for NaiveGraphTrie {
         keep_states: I,
     ) {
         fs::write("patterntrie_bef.bin", self.dotstring()).unwrap();
-        let mut to_delete = Default::default();
-        let mut visited = Default::default();
+        // let mut to_delete = Default::default();
         let to_keep = BTreeSet::from_iter(keep_states.copied());
-        self.recurse(
-            self.root(),
-            BTreeSet::from_iter([PatternNodeAddress::ROOT]),
-            false,
-            &mut to_delete,
-            &to_keep,
-            &mut visited,
-        );
-        for node in to_delete {
+        let mut known_addresses =
+            BTreeMap::from_iter([(self.root(), BTreeSet::from_iter([PatternNodeAddress::ROOT]))]);
+        let mut is_dead = BTreeSet::new();
+
+        // Mark as dead nodes that use inexsistant addresses
+        for node in PreOrder::new(&self.graph, [self.root()], pre_order::Direction::_Outgoing) {
+            if let Some(addr) = &self.state(node).address {
+                if !known_addresses[&node].contains(addr) {
+                    is_dead.insert(node);
+                }
+            }
+            for (transition, next_node) in self.transitions(node) {
+                let mut new_known_addresses = known_addresses[&node].clone();
+                match transition {
+                    NodeTransition::KnownNode(_, _) | NodeTransition::NewNode(_) => {
+                        if let Some(addr) = &self.state(next_node).address {
+                            new_known_addresses.insert(addr.clone());
+                        }
+                    }
+                    _ => {}
+                }
+                known_addresses
+                    .entry(next_node)
+                    .and_modify(|e| e.retain(|addr| new_known_addresses.contains(addr)))
+                    .or_insert(new_known_addresses);
+            }
+        }
+
+        // propagate is_dead
+        for node in postorder(&self.graph, [self.root()], Direction::Outgoing) {
+            let all_dead = self.transitions(node).all(|(_, n)| is_dead.contains(&n));
+            if all_dead && !to_keep.contains(&node) {
+                is_dead.insert(node);
+            }
+        }
+
+        // Remove dead nodes
+        for node in is_dead {
             // Remove dictionary entries of node
             for out_port in self.graph.input_links(node).flatten() {
                 let prev_node = self.graph.port_node(out_port).expect("Invalid port");
@@ -1036,7 +1024,7 @@ pub type NaiveManyPatternMatcher = ManyPatternMatcher<NaiveGraphTrie>;
 
 #[cfg(test)]
 mod tests {
-    // use std::fs;
+    use std::fs;
 
     #[cfg(feature = "serde")]
     use itertools::Itertools;
@@ -1264,10 +1252,10 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..4),
             g in gen_portgraph(30, 4, 60)
         ) {
-            // for (i, p) in patterns.iter().enumerate() {
-            //     fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
-            // }
-            // fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
+            for (i, p) in patterns.iter().enumerate() {
+                fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
+            }
+            fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
             let patterns = patterns
                 .into_iter()
                 .map(|p| Pattern::from_graph(p).unwrap())
@@ -1290,7 +1278,7 @@ mod tests {
                         .collect_vec()
                 })
                 .collect_vec();
-            // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
+            fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
             let matcher = NaiveManyPatternMatcher::from_patterns(patterns.clone());
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())

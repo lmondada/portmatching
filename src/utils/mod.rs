@@ -1,8 +1,9 @@
 pub(crate) mod cover;
 mod depth;
-mod pre_order;
+pub(crate) mod pre_order;
 
 pub(crate) use depth::{centre, NoCentreError};
+pub(crate) use pre_order::PreOrder;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
