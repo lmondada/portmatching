@@ -76,8 +76,7 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
 fn from_saved_patterns() {
     let testcases = [
         "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
-        "tenth", "eleventh",
-        "twelveth"
+        "tenth", "eleventh", "twelveth",
     ];
     for test in testcases {
         let path: PathBuf = ["tests", "saved_patterns", test].iter().collect();
