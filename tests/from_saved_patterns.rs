@@ -95,6 +95,7 @@ fn from_saved_patterns() {
         "fourteenth",
         "fifteenth",
         "sixteenth",
+        "seventeenth",
     ];
     for test in testcases {
         // println!("{test}...");
