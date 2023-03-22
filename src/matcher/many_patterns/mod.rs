@@ -206,7 +206,7 @@ where
                 .push(pattern_id);
         }
 
-        self.trie.remove_dead_branches(self.matching_nodes.keys());
+        // self.trie.remove_dead_branches(self.matching_nodes.keys());
 
         pattern_id
     }
