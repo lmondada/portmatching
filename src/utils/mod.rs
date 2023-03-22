@@ -1,5 +1,6 @@
 pub(crate) mod cover;
 mod depth;
+pub(crate) mod ninj_map;
 pub(crate) mod pre_order;
 
 pub(crate) use depth::{centre, NoCentreError};
