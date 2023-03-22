@@ -82,7 +82,8 @@ impl<L: Ord + Clone, R: Ord + Clone> NInjMap<L, R> {
     /// Returns whether the insertion was successful, i.e. if the key
     /// `left` was not already present
     pub fn insert(&mut self, left: L, right: R) -> bool {
-        if self.left.insert(left.clone(), right.clone()).is_some() {
+        let old_val = self.left.insert(left.clone(), right.clone());
+        if old_val.is_some() && old_val.unwrap() != right {
             return false;
         }
         self.right.entry(right).or_default().insert(left);

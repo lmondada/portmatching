@@ -1,6 +1,5 @@
 use std::{
     cell::RefCell,
-    cmp,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Display},
     mem,
@@ -428,12 +427,11 @@ impl NaiveGraphTrie {
             }
         }
         let new_node = *new_node.get_or_insert_with(|| self.add_node(false));
-        if self.weights[new_node]
+        let addr = self.weights[new_node]
             .address
-            .get_or_insert_with(|| new_addr.clone())
-            != &new_addr
-        {
-            panic!("overwriting address");
+            .get_or_insert_with(|| new_addr.clone());
+        if &new_addr > addr {
+            *addr = new_addr;
         }
         new_node
     }
@@ -601,6 +599,14 @@ impl NaiveGraphTrie {
         };
 
         let next_graph_node = graph.port_node(in_port).expect("Invalid port");
+        if let NodeTransition::KnownNode(addr, _) = &transition {
+            if !next_match
+                .map
+                .insert(addr.clone(), next_graph_node)
+            {
+                panic!("Address conflict");
+            }
+        }
         if !next_match
             .map
             .insert(next_match.current_addr.clone(), next_graph_node)
@@ -1018,7 +1024,9 @@ impl WriteGraphTrie for NaiveGraphTrie {
             curr_addrs
                 .entry(state)
                 .and_modify(|addr| {
-                    *addr = cmp::max(addr as &_, &next_match.current_addr).clone();
+                    if &next_match.current_addr > addr {
+                        *addr = next_match.current_addr.clone();
+                    }
                 })
                 .or_insert_with(|| next_match.current_addr.clone());
         }
