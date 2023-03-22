@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    cmp,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Display},
     mem,
@@ -1018,11 +1019,12 @@ impl WriteGraphTrie for NaiveGraphTrie {
                 .and_modify(|map: &mut NInjMap<_, _>| map.intersect(&next_match.map))
                 .or_insert(next_match.map);
             // states must all coincide on curr_addr
-            if let Some(addr) = curr_addrs.get(&state) {
-                assert_eq!(addr, &next_match.current_addr);
-            } else {
-                curr_addrs.insert(state, next_match.current_addr);
-            }
+            curr_addrs
+                .entry(state)
+                .and_modify(|addr| {
+                    *addr = cmp::max(addr as &_, &next_match.current_addr).clone();
+                })
+                .or_insert_with(|| next_match.current_addr.clone());
         }
 
         no_maps
