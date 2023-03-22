@@ -1081,7 +1081,7 @@ impl WriteGraphTrie for NaiveGraphTrie {
                 .filter(|(_, n)| !is_dead.contains(n))
                 .collect();
             // Kill if no children are left over (unless marked to_keep)
-            if !to_keep.contains(&node) && children.len() == 0 {
+            if !to_keep.contains(&node) && children.is_empty() {
                 is_dead.insert(node);
             }
             // Update known_addresses of the children
