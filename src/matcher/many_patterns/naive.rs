@@ -1054,15 +1054,36 @@ impl WriteGraphTrie for NaiveGraphTrie {
 
         // Mark as dead nodes that use inexsistant addresses
         for node in PreOrder::new(&self.graph, [self.root()], pre_order::Direction::_Outgoing) {
-            if self.transitions(node).count() == 0 {
+            // If already dead, kill children and move on
+            if is_dead.contains(&node) {
+                is_dead.extend(self.transitions(node).map(|(_, n)| n));
                 continue;
             }
+            // If the address is nonsensical, most children cannot be reached
             if let Some(addr) = &self.state(node).address {
                 if !known_addresses[&node].contains(addr) {
-                    is_dead.insert(node);
+                    // Remove useless address
+                    self.weights[node].address = None;
+                    self.weights[node].port_offset = None;
+                    // Remove any transition other than fail, as it cannot be reached
+                    is_dead.extend(
+                        self.transitions(node)
+                            .filter(|&(transition, _)| transition != &NodeTransition::Fail)
+                            .map(|(_, next_node)| next_node),
+                    );
                 }
             }
-            for (transition, next_node) in self.transitions(node) {
+            // Living children
+            let children: Vec<_> = self
+                .transitions(node)
+                .filter(|(_, n)| !is_dead.contains(n))
+                .collect();
+            // Kill if no children are left over (unless marked to_keep)
+            if !to_keep.contains(&node) && children.len() == 0 {
+                is_dead.insert(node);
+            }
+            // Update known_addresses of the children
+            for (transition, next_node) in children {
                 let mut new_known_addresses = known_addresses[&node].clone();
                 if matches!(
                     transition,
@@ -1076,13 +1097,6 @@ impl WriteGraphTrie for NaiveGraphTrie {
                     .entry(next_node)
                     .and_modify(|e| e.retain(|addr| new_known_addresses.contains(addr)))
                     .or_insert(new_known_addresses);
-            }
-            if is_dead.contains(&node) {
-                is_dead.extend(
-                    self.transitions(node)
-                        .map(|(_, n)| n)
-                        .filter(|next_node| !to_keep.contains(next_node)),
-                );
             }
         }
 
