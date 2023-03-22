@@ -457,12 +457,7 @@ impl NaiveGraphTrie {
         traversal: TrieTraversal,
     ) -> Vec<(NodeTransition, MatchObject)> {
         let addr = self.state(state).address.as_ref();
-        let graph_node = addr.map(|addr| {
-            *current_match
-                .map
-                .get_by_left(addr)
-                .expect("Malformed pattern trie")
-        });
+        let graph_node = addr.and_then(|addr| current_match.map.get_by_left(addr).copied());
         let out_port = self
             .state(state)
             .port_offset
@@ -1059,6 +1054,9 @@ impl WriteGraphTrie for NaiveGraphTrie {
 
         // Mark as dead nodes that use inexsistant addresses
         for node in PreOrder::new(&self.graph, [self.root()], pre_order::Direction::_Outgoing) {
+            if self.transitions(node).count() == 0 {
+                continue;
+            }
             if let Some(addr) = &self.state(node).address {
                 if !known_addresses[&node].contains(addr) {
                     is_dead.insert(node);
