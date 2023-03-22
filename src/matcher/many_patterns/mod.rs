@@ -80,11 +80,6 @@ pub trait WriteGraphTrie: ReadGraphTrie {
         graph: &PortGraph,
         clone_state: F,
     ) -> Vec<(Self::StateID, Self::MatchObject)>;
-
-    fn remove_dead_branches<'a, I: Iterator<Item = &'a Self::StateID>>(
-        &'a mut self,
-        keep_states: I,
-    );
 }
 
 pub struct ManyPatternMatcher<T: ReadGraphTrie> {
@@ -205,8 +200,6 @@ where
                 .or_insert_with(Vec::new)
                 .push(pattern_id);
         }
-
-        // self.trie.remove_dead_branches(self.matching_nodes.keys());
 
         pattern_id
     }

@@ -14,7 +14,7 @@ use portgraph::{
 
 use crate::{
     pattern::Edge,
-    utils::{cover::cover_nodes, ninj_map::NInjMap, pre_order, PreOrder},
+    utils::{cover::cover_nodes, ninj_map::NInjMap},
     PortOffset,
 };
 
@@ -879,10 +879,6 @@ impl NaiveGraphTrie {
             },
         );
     }
-
-    fn root(&self) -> NodeIndex {
-        NodeIndex::new(0)
-    }
 }
 
 fn rekey(
@@ -1042,83 +1038,6 @@ impl WriteGraphTrie for NaiveGraphTrie {
                 )
             })
             .collect()
-    }
-
-    fn remove_dead_branches<'a, I: Iterator<Item = &'a Self::StateID>>(
-        &'a mut self,
-        keep_states: I,
-    ) {
-        // let mut to_delete = Default::default();
-        let to_keep = BTreeSet::from_iter(keep_states.copied());
-        let mut known_addresses =
-            BTreeMap::from_iter([(self.root(), BTreeSet::from_iter([PatternNodeAddress::ROOT]))]);
-        let mut is_dead = BTreeSet::new();
-
-        // Mark as dead nodes that use inexsistant addresses
-        for node in PreOrder::new(&self.graph, [self.root()], pre_order::Direction::_Outgoing) {
-            // If already dead, kill children and move on
-            if is_dead.contains(&node) {
-                is_dead.extend(self.transitions(node).map(|(_, n)| n));
-                continue;
-            }
-            // If the address is nonsensical, most children cannot be reached
-            if let Some(addr) = &self.state(node).address {
-                if !known_addresses[&node].contains(addr) {
-                    // Remove useless address
-                    self.weights[node].address = None;
-                    self.weights[node].port_offset = None;
-                    // Remove any transition other than fail, as it cannot be reached
-                    is_dead.extend(
-                        self.transitions(node)
-                            .filter(|&(transition, _)| transition != &NodeTransition::Fail)
-                            .map(|(_, next_node)| next_node),
-                    );
-                }
-            }
-            // Living children
-            let children: Vec<_> = self
-                .transitions(node)
-                .filter(|(_, n)| !is_dead.contains(n))
-                .collect();
-            // Kill if no children are left over (unless marked to_keep)
-            if !to_keep.contains(&node) && children.is_empty() {
-                is_dead.insert(node);
-            }
-            // Update known_addresses of the children
-            for (transition, next_node) in children {
-                let mut new_known_addresses = known_addresses[&node].clone();
-                if matches!(
-                    transition,
-                    NodeTransition::KnownNode(_, _) | NodeTransition::NewNode(_)
-                ) {
-                    if let Some(addr) = &self.state(next_node).address {
-                        new_known_addresses.insert(addr.clone());
-                    }
-                }
-                known_addresses
-                    .entry(next_node)
-                    .and_modify(|e| e.retain(|addr| new_known_addresses.contains(addr)))
-                    .or_insert(new_known_addresses);
-            }
-        }
-
-        // propagate is_dead
-        for node in postorder(&self.graph, [self.root()], Direction::Outgoing) {
-            let all_dead = self.transitions(node).all(|(_, n)| is_dead.contains(&n));
-            if all_dead && !to_keep.contains(&node) {
-                is_dead.insert(node);
-            }
-        }
-
-        // Remove dead nodes
-        for node in is_dead {
-            // Remove dictionary entries of node
-            for out_port in self.graph.input_links(node).flatten() {
-                self.weights[out_port] = Default::default();
-            }
-            self.graph.remove_node(node);
-            self.weights[node] = Default::default();
-        }
     }
 }
 
@@ -1380,7 +1299,7 @@ mod tests {
     }
 
     proptest! {
-        #[ignore = "very slow"]
+        #[ignore = "a bit slow"]
         // #[cfg(feature = "serde")]
         #[test]
         fn many_graphs_proptest(
