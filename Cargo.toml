@@ -13,7 +13,7 @@ portgraph = { git = "https://github.com/cqcl/portgraph", rev = "f35e8e2" }
 serde = { version = "1.0.152", features = ["derive"], optional = true}
 
 [features]
-serde = ["dep:serde"]
+serde = ["dep:serde", "portgraph/serde"]
 
 [dev-dependencies]
 itertools = "0.10.5"
