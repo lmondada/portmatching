@@ -77,6 +77,14 @@ impl<L: Ord + Clone, R: Ord + Clone> NInjMap<L, R> {
         self.right.contains_key(right_key)
     }
 
+    pub fn retain<F: Fn(&L, &R) -> bool>(&mut self, predicate: F) {
+        self.left.retain(|l, r| predicate(l, r));
+        self.right.retain(|r, l| {
+            l.retain(|l| predicate(l, r));
+            !l.is_empty()
+        });
+    }
+
     /// Insert pair (l, r) in map
     ///
     /// Returns whether the insertion was successful, i.e. if the key
@@ -91,8 +99,6 @@ impl<L: Ord + Clone, R: Ord + Clone> NInjMap<L, R> {
     }
 
     pub fn intersect(&mut self, other: &Self) {
-        for (l, r) in other.iter() {
-            self.insert(l.clone(), r.clone());
-        }
+        self.retain(|l, r| other.get_by_left(l) == Some(r));
     }
 }

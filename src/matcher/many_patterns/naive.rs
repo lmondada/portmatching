@@ -600,10 +600,7 @@ impl NaiveGraphTrie {
 
         let next_graph_node = graph.port_node(in_port).expect("Invalid port");
         if let NodeTransition::KnownNode(addr, _) = &transition {
-            if !next_match
-                .map
-                .insert(addr.clone(), next_graph_node)
-            {
+            if !next_match.map.insert(addr.clone(), next_graph_node) {
                 panic!("Address conflict");
             }
         }
