@@ -240,7 +240,7 @@ impl NaiveGraphTrie {
     ///
     /// If the transition already exists, then trying to update it to a
     /// different value will return None. In most cases this should be
-    /// considered a logic mistake.
+    /// considered a logic error.
     #[must_use]
     fn set_transition(
         &mut self,
@@ -370,8 +370,6 @@ impl NaiveGraphTrie {
     /// That is to say, it will do a lot of nodes copying so that any patterns
     /// that were previously added to the trie will still match along the newly
     /// added extension
-    ///
-    /// This is to be refactored and cleaned up -- there is a lot going on here.
     fn extend_tree(
         &mut self,
         node: NodeIndex,
@@ -402,12 +400,16 @@ impl NaiveGraphTrie {
                         })
                         .collect();
                     for (port, next_node) in new_node_transitions {
-                        self.set_transition(
-                            node,
-                            next_node,
-                            NodeTransition::KnownNode(new_addr.clone(), port.clone()),
-                        )
-                        .unwrap();
+                        if self
+                            .set_transition(
+                                node,
+                                next_node,
+                                NodeTransition::KnownNode(new_addr.clone(), port.clone()),
+                            )
+                            .is_none()
+                        {
+                            // ignore
+                        }
                     }
                 }
             }
