@@ -593,7 +593,6 @@ impl NaiveGraphTrie {
                     .expect("Malformed pattern trie");
                 let out_port = self.state(state).port_offset.clone().unwrap();
                 let out_port = out_port.get_index(graph_node, graph).unwrap();
-                next_match.current_addr = current_match.current_addr.next();
                 graph.port_link(out_port).unwrap()
             }
         };
@@ -603,13 +602,14 @@ impl NaiveGraphTrie {
             if !next_match.map.insert(addr.clone(), next_graph_node) {
                 panic!("Address conflict");
             }
+            next_match.no_map.remove(addr);
         }
-        if !next_match
-            .map
-            .insert(next_match.current_addr.clone(), next_graph_node)
-        {
+        let next_addr = current_match.current_addr.next();
+        if !next_match.map.insert(next_addr.clone(), next_graph_node) {
             panic!("New address not unique");
         }
+        next_match.no_map.remove(&next_addr);
+        next_match.current_addr = next_addr;
         next_match
     }
 
