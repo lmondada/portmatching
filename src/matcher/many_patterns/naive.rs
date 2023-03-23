@@ -1310,7 +1310,7 @@ mod tests {
         // #[cfg(feature = "serde")]
         #[test]
         fn many_graphs_proptest(
-            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..4),
+            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
             // for (i, p) in patterns.iter().enumerate() {
