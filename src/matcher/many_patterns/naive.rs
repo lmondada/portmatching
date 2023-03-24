@@ -615,6 +615,12 @@ impl NaiveGraphTrie {
             panic!("New address not unique");
         }
         next_match.no_map.remove(&next_addr);
+        if let Some(next_state) = self.transition(state, transition) {
+            if let Some(next_addr) = self.state(next_state).address.as_ref() {
+                next_match.map.insert(next_addr.clone(), next_graph_node);
+                next_match.no_map.remove(next_addr);
+            }
+        }
         next_match.current_addr = next_addr;
         next_match
     }
@@ -1008,48 +1014,61 @@ impl WriteGraphTrie for NaiveGraphTrie {
         self.create_owned_states(prev_states, self.all_perm_ports(), clone_state);
 
         // Merge next states
-        let mut no_maps = BTreeMap::new();
-        let mut maps = BTreeMap::new();
-        let mut curr_addrs = BTreeMap::new();
-        for (state, mut next_match) in next_states {
-            // no_map is the union of no_maps
-            no_maps
-                .entry(state)
-                .and_modify(|no_map: &mut BTreeSet<PatternNodeAddress>| {
-                    no_map.append(&mut next_match.no_map)
-                })
-                .or_insert(next_match.no_map);
-            // map is the intersection of maps
-            maps.entry(state)
-                .and_modify(|map: &mut NInjMap<_, _>| map.intersect(&next_match.map))
-                .or_insert(next_match.map);
-            // states must all coincide on curr_addr
-            curr_addrs
-                .entry(state)
-                .and_modify(|addr| {
-                    if &next_match.current_addr > addr {
-                        *addr = next_match.current_addr.clone();
-                    }
-                })
-                .or_insert_with(|| next_match.current_addr.clone());
-        }
-
-        no_maps
-            .into_iter()
-            .map(|(state, no_map)| {
-                let map = maps.remove(&state).unwrap();
-                let current_addr = curr_addrs.remove(&state).unwrap();
-                (
-                    state,
-                    MatchObject {
-                        no_map,
-                        map,
-                        current_addr,
-                    },
-                )
-            })
-            .collect()
+        merge_states(next_states)
     }
+}
+
+fn merge_states(next_states: BTreeSet<(NodeIndex, MatchObject)>) -> Vec<(NodeIndex, MatchObject)> {
+    let mut no_maps = BTreeMap::new();
+    let mut maps = BTreeMap::new();
+    let mut curr_addrs = BTreeMap::new();
+    for &(state, ref next_match) in next_states.iter() {
+        // states must all coincide on curr_addr
+        curr_addrs
+            .entry(state)
+            .and_modify(|addr| {
+                if &next_match.current_addr > addr {
+                    *addr = next_match.current_addr.clone();
+                }
+            })
+            .or_insert_with(|| next_match.current_addr.clone());
+    }
+    for (state, mut next_match) in next_states {
+        // states must all coincide on curr_addr
+        if curr_addrs[&state] > next_match.current_addr {
+            if let Some(&next_node) = next_match.map.get_by_left(&next_match.current_addr) {
+                // clone node also to the new address
+                next_match.map.insert(curr_addrs[&state].clone(), next_node);
+            }
+        }
+        // no_map is the union of no_maps
+        no_maps
+            .entry(state)
+            .and_modify(|no_map: &mut BTreeSet<PatternNodeAddress>| {
+                no_map.append(&mut next_match.no_map)
+            })
+            .or_insert(next_match.no_map);
+        // map is the intersection of maps
+        maps.entry(state)
+            .and_modify(|map: &mut NInjMap<_, _>| map.intersect(&next_match.map))
+            .or_insert(next_match.map);
+    }
+
+    no_maps
+        .into_iter()
+        .map(|(state, no_map)| {
+            let map = maps.remove(&state).unwrap();
+            let current_addr = curr_addrs.remove(&state).unwrap();
+            (
+                state,
+                MatchObject {
+                    no_map,
+                    map,
+                    current_addr,
+                },
+            )
+        })
+        .collect()
 }
 
 impl ReadGraphTrie for NaiveGraphTrie {
