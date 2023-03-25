@@ -282,9 +282,12 @@ impl NaiveGraphTrie {
                 out_port
             });
         let in_port = self.graph.port_link(out_port).unwrap_or_else(|| {
+            let out_port = self.create_perm_port(out_port);
             self.add_port(next_node, Direction::Incoming);
             let in_port = self.graph.inputs(next_node).last().expect("Just added");
-            self.graph.link_ports(out_port, in_port).unwrap();
+            self.graph
+                .link_ports(self.free(out_port).expect("Just created"), in_port)
+                .unwrap();
             in_port
         });
         (self.graph.port_node(in_port).expect("Invalid port") == next_node).then_some(in_port)
@@ -757,12 +760,25 @@ impl NaiveGraphTrie {
         // If the current state does not correspond to our position and we
         // are in a deterministic state, follow the FAIL transition (aka do a
         // carriage return)
-        let mut new_fail_state = None;
-        for (state, current_match) in states {
-            let graph_addresses = current_match
+        let first_addresses = states.first().map(|(_, first_match)| {
+            first_match
                 .map
                 .get_by_right(&graph_node)
-                .expect("Incomplete match");
+                .expect("Incomplete match")
+                .clone()
+        });
+        let graph_addresses = states
+            .iter()
+            .map(|(_, m)| m.map.get_by_right(&graph_node).expect("Incomplete match"))
+            .fold(first_addresses, |acc, e| {
+                acc.map(|acc| acc.intersection(e).cloned().collect())
+            });
+        let mut new_fail_state = None;
+        for (state, current_match) in states {
+            let graph_addresses = graph_addresses.as_ref().expect("States is not empty");
+            if graph_addresses.is_empty() {
+                panic!("Could not find shared address");
+            }
             if !self.try_update_node(state, graph_addresses, &graph_port) && !self.is_root(state) {
                 let (ports, matches): (Vec<_>, Vec<_>) = self
                     .carriage_return(state, current_match.clone(), &mut new_fail_state, false)
@@ -781,14 +797,27 @@ impl NaiveGraphTrie {
 
         // Finally we obtain the states where we are meant to be,
         // such that state_addr == edge_addr and state_port == edge_port
+        let first_addresses = states_post_carriage_return.first().map(|(_, first_match)| {
+            first_match
+                .map
+                .get_by_right(&graph_node)
+                .expect("Incomplete match")
+                .clone()
+        });
+        let graph_addresses = states_post_carriage_return
+            .iter()
+            .map(|(_, m)| m.map.get_by_right(&graph_node).expect("Incomplete match"))
+            .fold(first_addresses, |acc, e| {
+                acc.map(|acc| acc.intersection(e).cloned().collect())
+            });
         let mut new_node = None;
         states_post_carriage_return
             .into_iter()
             .map(|(mut state, current_match)| {
-                let graph_addresses = current_match
-                    .map
-                    .get_by_right(&graph_node)
-                    .expect("Incomplete match");
+                let graph_addresses = graph_addresses.as_ref().expect("states is not empty");
+                if graph_addresses.is_empty() {
+                    panic!("Could not find shared address");
+                }
                 while !self.try_update_node(state, graph_addresses, &graph_port) {
                     let port = match self.transition_port(state, &NodeTransition::Fail) {
                         Some(next_port) => next_port,
