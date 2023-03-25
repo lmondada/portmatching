@@ -28,10 +28,21 @@ pub fn cover_nodes<F, G>(
         })
         .filter(|n| nodes.contains(n))
         .collect();
-    let mut visited = BTreeSet::new();
+    let mut visited = cover.clone();
 
     while let Some(node) = curr_nodes.pop_front() {
         if visited.contains(&node) {
+            continue;
+        } else if graph
+            .input_links(node)
+            .flatten()
+            .map(|p| graph.port_node(p).expect("Invalid port"))
+            .filter(|n| nodes.contains(n) && !visited.contains(n))
+            .next()
+            .is_some()
+        {
+            // there is a predecessor in nodes that was not yet visited, so wait
+            curr_nodes.push_back(node);
             continue;
         } else {
             visited.insert(node);
