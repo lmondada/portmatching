@@ -1138,7 +1138,7 @@ pub type NaiveManyPatternMatcher = ManyPatternMatcher<NaiveGraphTrie>;
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    // use std::fs;
 
     use itertools::Itertools;
     use portgraph::{proptest::gen_portgraph, Direction, NodeIndex, PortGraph};
@@ -1359,16 +1359,16 @@ mod tests {
 
     proptest! {
         #[ignore = "a bit slow"]
-        #[cfg(feature = "serde")]
+        // #[cfg(feature = "serde")]
         #[test]
         fn many_graphs_proptest(
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
-            for (i, p) in patterns.iter().enumerate() {
-                fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
-            }
-            fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
+            // for (i, p) in patterns.iter().enumerate() {
+            //     fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
+            // }
+            // fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
             let patterns = patterns
                 .into_iter()
                 .map(|p| Pattern::from_graph(p).unwrap())
@@ -1391,7 +1391,7 @@ mod tests {
                         .collect_vec()
                 })
                 .collect_vec();
-            fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
+            // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
             let matcher = NaiveManyPatternMatcher::from_patterns(patterns.clone());
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
