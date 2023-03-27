@@ -67,7 +67,7 @@ impl Debug for PatternNodeAddress {
 enum NodeTransition {
     /// Following the current edge leads to a known node, with the given addr
     /// and coming in through `port`
-    KnownNode(PatternNodeAddress, PortOffset),
+    KnownNode(Vec<PatternNodeAddress>, PortOffset),
     /// Following the current edge leads to an unknown node, and coming in
     /// through `port`
     NewNode(PortOffset),
@@ -92,8 +92,11 @@ impl NodeTransition {
 impl fmt::Display for NodeTransition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NodeTransition::KnownNode(PatternNodeAddress(i, j), port) => {
-                write!(f, "({}, {})[{}]", i, j, port)
+            NodeTransition::KnownNode(addrs, port) => {
+                for PatternNodeAddress(i, j) in addrs {
+                    write!(f, "({}, {})", i, j)?;
+                }
+                write!(f, "[{}]", port)
             }
             NodeTransition::NewNode(port) => {
                 write!(f, "X[{}]", port)
@@ -407,7 +410,7 @@ impl NaiveGraphTrie {
                             .set_transition(
                                 node,
                                 next_node,
-                                NodeTransition::KnownNode(new_addr.clone(), port.clone()),
+                                NodeTransition::KnownNode(vec![new_addr.clone()], port.clone()),
                             )
                             .is_none()
                         {
@@ -486,16 +489,15 @@ impl NaiveGraphTrie {
                     if let Some(graph_next_node) = graph_next_node {
                         if graph_next_offset.as_ref().unwrap() == offset {
                             #[allow(clippy::if_same_then_else)]
-                            if current_match
+                            let mut known_addresses = current_match
                                 .map
                                 .get_by_right(&graph_next_node)
-                                .map(|right_set| right_set.contains(next_addr))
-                                == Some(true)
-                            {
-                                all_transitions.push(transition.clone());
-                            } else if traversal == TrieTraversal::Write
-                                && current_match.no_map.contains(next_addr)
-                            {
+                                .cloned()
+                                .unwrap_or_default();
+                            if traversal == TrieTraversal::Write {
+                                known_addresses.extend(current_match.no_map.iter().cloned());
+                            }
+                            if next_addr.iter().all(|addr| known_addresses.contains(addr)) {
                                 all_transitions.push(transition.clone());
                             }
                         }
@@ -542,25 +544,24 @@ impl NaiveGraphTrie {
                     current_match
                         .map
                         .get_by_right_iter(&node)
-                        .next()
-                        .expect("No valid address")
-                        .clone(),
+                        .cloned()
+                        .collect(),
                     graph_next_offset.clone().unwrap(),
                 ),
                 Some(_) => NodeTransition::NewNode(graph_next_offset.clone().unwrap()),
             };
-            if !all_transitions.contains(&ideal_transition) {
-                if matches!(&ideal_transition, NodeTransition::NewNode(_)) {
-                    for addr in current_match.no_map.iter() {
-                        let known_transition = NodeTransition::KnownNode(
-                            addr.clone(),
-                            graph_next_offset.clone().unwrap(),
-                        );
-                        if !all_transitions.contains(&known_transition) {
-                            all_transitions.push(known_transition);
-                        }
+            if matches!(&ideal_transition, NodeTransition::NewNode(_)) {
+                for addr in current_match.no_map.iter() {
+                    let known_transition = NodeTransition::KnownNode(
+                        vec![addr.clone()],
+                        graph_next_offset.clone().unwrap(),
+                    );
+                    if !all_transitions.contains(&known_transition) {
+                        all_transitions.push(known_transition);
                     }
                 }
+            }
+            if !all_transitions.contains(&ideal_transition) {
                 all_transitions.push(ideal_transition);
             }
         }
@@ -607,11 +608,13 @@ impl NaiveGraphTrie {
         };
 
         let next_graph_node = graph.port_node(in_port).expect("Invalid port");
-        if let NodeTransition::KnownNode(addr, _) = &transition {
-            if !next_match.map.insert(addr.clone(), next_graph_node) {
-                panic!("Address conflict");
+        if let NodeTransition::KnownNode(addrs, _) = &transition {
+            for addr in addrs {
+                if !next_match.map.insert(addr.clone(), next_graph_node) {
+                    panic!("Address conflict");
+                }
+                next_match.no_map.remove(addr);
             }
-            next_match.no_map.remove(addr);
         }
         let next_addr = current_match.current_addr.next();
         if !next_match.map.insert(next_addr.clone(), next_graph_node) {
