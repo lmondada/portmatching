@@ -256,31 +256,53 @@ impl NaiveGraphTrie {
             .outputs(node)
             .find(|&p| self.weights[p].0.as_ref() == Some(&transition))
             .unwrap_or_else(|| {
-                let mut offset = self.graph.num_outputs(node);
-                self.add_port(node, Direction::Outgoing);
-                // now shift ports until we have a space in the right place
-                let out_port = loop {
-                    // invariant: out_port is always a free port
-                    let out_port = self
+                // find the right position
+                let mut index = 0;
+                while index < self.graph.num_outputs(node) {
+                    let curr_port = self
                         .graph
-                        .output(node, offset)
+                        .output(node, index)
                         .expect("0 <= offset < num_outputs");
-                    if offset == 0 {
-                        break out_port;
-                    }
-                    let next_port = self
-                        .graph
-                        .output(node, offset - 1)
-                        .expect("0 < offset < num_outputs");
-                    if let Some(next_transition) = &self.weights[next_port].0 {
-                        if next_transition.group_index() > transition.group_index() {
-                            self.move_out_port(next_port, out_port);
-                        } else {
-                            break out_port;
+                    if let Some(curr_transition) = &self.weights[curr_port].0 {
+                        match &transition {
+                            NodeTransition::KnownNode(addrs, port) => {
+                                let NodeTransition::KnownNode(other_addrs, other_port) = curr_transition else {
+                                    break;
+                                };
+                                if port == other_port && other_addrs.iter().all(|addr| {
+                                    addrs.contains(addr)
+                                }) {
+                                    break;
+                                }
+                            },
+                            _ => {
+                                if curr_transition.group_index() > transition.group_index() {
+                                    break;
+                                }
+                            }
                         }
                     }
-                    offset -= 1;
-                };
+                    index += 1;
+                }
+                // now shift ports until we have a space in the right place
+                let mut free_index = self.graph.num_outputs(node);
+                self.add_port(node, Direction::Outgoing);
+                while index < free_index {
+                    let old = self
+                        .graph
+                        .output(node, free_index - 1)
+                        .expect("0 <= index < free_index < num_outputs");
+                    let new = self
+                        .graph
+                        .output(node, free_index)
+                        .expect("0 <= index < free_index < num_outputs");
+                    self.move_out_port(old, new);
+                    free_index -= 1;
+                }
+                let out_port = self
+                    .graph
+                    .output(node, free_index)
+                    .expect("0 <= free_index < num_outputs");
                 self.weights[out_port] = PortWeight(transition.into());
                 out_port
             });
@@ -393,6 +415,7 @@ impl NaiveGraphTrie {
             if is_new_node {
                 // For each NewNode(port) transition in fallback, we need to add the
                 // KnownNode(addr, port) transition for the new addr
+                // TODO: this is a hack that will break at some point
                 let descendants: Vec<_> = self.all_nodes_in(fallback).collect();
                 for node in descendants {
                     let new_node_transitions: Vec<_> = self
@@ -460,6 +483,69 @@ impl NaiveGraphTrie {
         postorder(&self.graph, [root], Direction::Outgoing)
     }
 
+    fn expand_addrs(
+        &mut self,
+        transition: &mut NodeTransition,
+        state: NodeIndex,
+        graph: &PortGraph,
+        current_match: &MatchObject,
+    ) {
+        if !matches!(transition, NodeTransition::KnownNode(_, _)) {
+            return;
+        };
+        let Some(next_state) = self
+            .graph
+            .outputs(state)
+            .find_map(|p| {
+                let w = self.weights[p].0.as_ref()?;
+                (w == transition).then(|| {
+                    let in_port = self.graph.port_link(p).expect("Found unlinked node");
+                    self.graph.port_node(in_port).expect("Invalid port")
+                })
+            }) else { return };
+        let NodeTransition::KnownNode(trans_addrs, _) = transition else {
+            unreachable!()
+        };
+        let addr = self
+            .state(state)
+            .address
+            .as_ref()
+            .expect("A KnownTransition exists");
+        let graph_node = current_match
+            .map
+            .get_by_left(addr)
+            .copied()
+            .expect("A KnownTransition exists");
+        let out_port = self
+            .state(state)
+            .port_offset
+            .as_ref()
+            .expect("A KnownTransition exists")
+            .get_index(graph_node, graph)
+            .expect("A KnownTransition exists");
+        let in_port = graph.port_link(out_port).expect("A KnownTransition exists");
+        let graph_next_node = graph.port_node(in_port).expect("Invalid port");
+        let known_addresses = current_match
+            .map
+            .get_by_right(&graph_next_node)
+            .cloned()
+            .unwrap_or_default();
+        if !trans_addrs
+            .iter()
+            .all(|addr| known_addresses.contains(addr))
+        {
+            // This is a transition that we do not understand (fallback hack)
+            return;
+        }
+        if trans_addrs.len() == known_addresses.len() {
+            // nothing to do
+            return;
+        }
+        *trans_addrs = known_addresses.into_iter().collect();
+        self.set_transition(state, next_state, transition.clone())
+            .expect("Suboptimal transition was improved, but improvement exists");
+    }
+
     fn get_transition(
         &self,
         state: NodeIndex,
@@ -498,7 +584,21 @@ impl NaiveGraphTrie {
                                 known_addresses.extend(current_match.no_map.iter().cloned());
                             }
                             if next_addr.iter().all(|addr| known_addresses.contains(addr)) {
-                                all_transitions.push(transition.clone());
+                                if !all_transitions
+                                    .iter()
+                                    .filter_map(|trans| {
+                                        if let NodeTransition::KnownNode(other_addr, port) = trans {
+                                            (port == offset).then_some(other_addr)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .any(|other_addr| {
+                                        next_addr.iter().all(|addr| other_addr.contains(addr))
+                                    })
+                                {
+                                    all_transitions.push(transition.clone());
+                                }
                             }
                         }
                     }
@@ -1009,10 +1109,11 @@ impl WriteGraphTrie for NaiveGraphTrie {
             let (next_ports, next_matches): (Vec<_>, Vec<_>) = self
                 .get_transition(state, graph, &current_match, TrieTraversal::Write)
                 .into_iter()
-                .flat_map(|(transition, next_match)| {
+                .flat_map(|(mut transition, next_match)| {
                     if let NodeTransition::NoLinkedNode = &transition {
                         self.carriage_return(state, current_match.clone(), &mut new_node, true)
                     } else {
+                        self.expand_addrs(&mut transition, state, graph, &current_match);
                         [(
                             self.transition_port(state, &transition).unwrap_or_else(|| {
                                 let next_addr = next_match.current_addr.clone();
