@@ -3,10 +3,7 @@ use std::collections::BTreeMap;
 use bimap::BiBTreeMap;
 use portgraph::{NodeIndex, PortGraph};
 
-use crate::{
-    pattern::{Edge, Pattern},
-    PortOffset,
-};
+use crate::pattern::{Edge, Pattern};
 
 use super::Matcher;
 
@@ -43,8 +40,8 @@ impl SinglePatternMatcher {
             // Follow outgoing port...
             let out_node = self.graph_ref().port_node(out_port).unwrap();
             let &out_node_host = match_map.get_by_left(&out_node).unwrap();
-            let out_offset = PortOffset::try_from_index(out_port, self.graph_ref()).unwrap();
-            let out_port_host = out_offset.get_index(out_node_host, host)?;
+            let out_offset = self.graph_ref().port_offset(out_port).unwrap();
+            let out_port_host = host.port_index(out_node_host, out_offset)?;
 
             // ...into a new incoming port
             let Some(in_port) = in_port else {
@@ -56,8 +53,8 @@ impl SinglePatternMatcher {
             let in_node_host = host.port_node(in_port_host).unwrap();
 
             // Check that the in-port index is correct
-            let in_offset = PortOffset::try_from_index(in_port, self.graph_ref()).unwrap();
-            let in_offset_host = PortOffset::try_from_index(in_port_host, host).unwrap();
+            let in_offset = self.graph_ref().port_offset(in_port).unwrap();
+            let in_offset_host = host.port_offset(in_port_host).unwrap();
             if in_offset != in_offset_host {
                 return None;
             }
@@ -83,7 +80,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use itertools::Itertools;
-    use portgraph::{Direction, NodeIndex, PortGraph};
+    use portgraph::{NodeIndex, PortGraph, PortOffset};
 
     use crate::{matcher::Matcher, pattern::Pattern, utils::test_utils::graph};
 
@@ -124,8 +121,8 @@ mod tests {
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
         g.link_ports(
-            g.port_index(n, 0, Direction::Outgoing).unwrap(),
-            g.port_index(n, 0, Direction::Incoming).unwrap(),
+            g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
+            g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
         let p = Pattern::from_graph(g).unwrap();
@@ -134,8 +131,8 @@ mod tests {
         let mut g = PortGraph::new();
         let n = g.add_node(2, 1);
         g.link_ports(
-            g.port_index(n, 0, Direction::Outgoing).unwrap(),
-            g.port_index(n, 0, Direction::Incoming).unwrap(),
+            g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
+            g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
 
@@ -147,8 +144,8 @@ mod tests {
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
         g.link_ports(
-            g.port_index(n, 0, Direction::Outgoing).unwrap(),
-            g.port_index(n, 0, Direction::Incoming).unwrap(),
+            g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
+            g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
         let p = Pattern::from_graph(g).unwrap();
@@ -158,8 +155,8 @@ mod tests {
         let n0 = g.add_node(0, 1);
         let n1 = g.add_node(1, 0);
         g.link_ports(
-            g.port_index(n0, 0, Direction::Outgoing).unwrap(),
-            g.port_index(n1, 0, Direction::Incoming).unwrap(),
+            g.port_index(n0, PortOffset::new_outgoing(0)).unwrap(),
+            g.port_index(n1, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
 

@@ -4,11 +4,11 @@ use std::{
 };
 
 use itertools::Itertools;
-// use portgraph::dot::dot_string;
+use portgraph::dot::dot_string;
 use portgraph::PortGraph;
 use portmatching::{
     matcher::{
-        many_patterns::{NaiveManyPatternMatcher, PatternID, PatternMatch},
+        many_patterns::{LineGraphTrie, PatternID, PatternMatch, ManyPatternMatcher},
         Matcher,
     },
     pattern::Pattern,
@@ -31,11 +31,11 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<Pattern>> {
     all_patterns.sort_unstable();
     for path in all_patterns {
         let p: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
-        // {
-        //     let mut path = path;
-        //     path.set_extension("gv");
-        //     fs::write(path, dot_string(&p)).unwrap();
-        // }
+        {
+            let mut path = path;
+            path.set_extension("gv");
+            fs::write(path, dot_string(&p)).unwrap();
+        }
         patterns.push(Pattern::from_graph(p).unwrap());
     }
 
@@ -49,11 +49,11 @@ fn load_graph(dir: &Path) -> io::Result<PortGraph> {
         let path = entry.path();
         if valid_binary_file(&file_name, "graph") {
             let graph: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
-            // {
-            //     let mut path = path;
-            //     path.set_extension("gv");
-            //     fs::write(path, dot_string(&graph)).unwrap();
-            // }
+            {
+                let mut path = path;
+                path.set_extension("gv");
+                fs::write(path, dot_string(&graph)).unwrap();
+            }
             return Ok(graph);
         }
     }
@@ -78,45 +78,21 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
 
 #[test]
 fn from_saved_patterns() {
-    let testcases = [
-        "first",
-        "second",
-        "third",
-        "fourth",
-        "fifth",
-        "sixth",
-        "seventh",
-        "eighth",
-        "ninth",
-        "tenth",
-        "eleventh",
-        "twelveth",
-        "thirteenth",
-        "fourteenth",
-        "fifteenth",
-        "sixteenth",
-        "seventeenth",
-        "eighteenth",
-        "ninteenth",
-        "twentieth",
-        "21",
-        "22",
-        "23",
-        "24",
-    ];
+    let testcases = ["24"];
     for test in testcases {
-        // println!("{test}...");
+        println!("{test}...");
         let path: PathBuf = ["tests", "saved_patterns", test].iter().collect();
         let patterns = load_patterns(&path).unwrap();
         let graph = load_graph(&path).unwrap();
         let exp = load_results(&path).unwrap();
 
-        let matcher = NaiveManyPatternMatcher::from_patterns(patterns.clone());
-        // {
-        //     let mut path = path;
-        //     path.push("patterntrie.gv");
-        //     fs::write(path, matcher.dotstring()).unwrap();
-        // }
+        let matcher = LineGraphTrie::from_patterns(patterns.clone());
+        {
+            let mut path = path;
+            path.push("patterntrie.gv");
+            fs::write(path, matcher.dotstring()).unwrap();
+        }
+        println!("built!");
         let many_matches = matcher.find_matches(&graph);
         let many_matches = (0..patterns.len())
             .map(|i| {

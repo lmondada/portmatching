@@ -1,8 +1,11 @@
-use std::{collections::VecDeque, iter::FusedIterator};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    iter::FusedIterator,
+};
 
 use bitvec::prelude::*;
 
-use portgraph::{NodeIndex, PortGraph};
+use portgraph::{NodeIndex, PortGraph, PortIndex};
 
 pub enum Direction {
     _Incoming = 0,
@@ -56,6 +59,60 @@ impl<'graph> Iterator for PreOrder<'graph> {
 }
 
 impl<'graph> FusedIterator for PreOrder<'graph> {}
+
+pub fn pre_order(
+    graph: &PortGraph,
+    source: impl IntoIterator<Item = NodeIndex>,
+    direction: Direction,
+) -> PreOrder {
+    PreOrder::new(graph, source, direction)
+}
+
+pub struct Path {
+    root: NodeIndex,
+    out_ports: Vec<PortIndex>,
+}
+
+pub fn shortest_path(
+    graph: &PortGraph,
+    source: impl IntoIterator<Item = NodeIndex>,
+    target: impl IntoIterator<Item = NodeIndex>,
+) -> Option<Path> {
+    let source: BTreeSet<_> = source.into_iter().collect();
+    let target: Vec<_> = target.into_iter().collect();
+
+    let mut distance = vec![usize::MAX; graph.node_capacity()];
+    let mut prev = vec![None; graph.node_capacity()];
+
+    for n in source.iter() {
+        distance[n.index()] = 0;
+    }
+    let mut nodes = pre_order(graph, source.iter().copied(), Direction::Both);
+    while target.iter().all(|n| distance[n.index()] == usize::MAX) {
+        let node = nodes.next()?;
+        if let Some(best_out_port) = graph.all_links(node).flatten().min_by_key(|&p| {
+            let n = graph.port_node(p).expect("invalid port");
+            distance[n.index()]
+        }) {
+            let min = distance[best_out_port.index()];
+            if min + 1 < distance[node.index()] {
+                distance[node.index()] = min + 1;
+                prev[node.index()] = Some(best_out_port);
+            }
+        }
+    }
+    let mut node = target.iter().min_by_key(|n| distance[n.index()]).copied()?;
+    let mut out_ports = Vec::new();
+    while !source.contains(&node) {
+        let port = prev[node.index()]?;
+        out_ports.push(port);
+        node = graph.port_node(port).expect("invalid port");
+    }
+    Some(Path {
+        root: node,
+        out_ports: out_ports.into_iter().rev().collect(),
+    })
+}
 
 #[cfg(test)]
 mod tests {

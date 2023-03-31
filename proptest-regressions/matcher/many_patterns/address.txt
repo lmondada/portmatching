@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 416fd520cee779446d93b6edf13d6486368a0b10d9a5d6404ff2176efa0dfc6e # shrinks to (g, node) = (PortGraph { nodes: {NodeIndex(0): Node { inputs: [], outputs: [] }}, ports: {} }, NodeIndex(0))
+cc 03a7f6cecba72ffd5d41d13e48260fc88632462fcf42438e2428f186d50831ce # shrinks to (g, node) = (PortGraph { nodes: {NodeIndex(0): Node { inputs: [], outputs: [PortIndex(0), PortIndex(1), PortIndex(2), PortIndex(3)] }, NodeIndex(1): Node { inputs: [PortIndex(4), PortIndex(5)], outputs: [] }}, ports: {PortIndex(0): Port { node: NodeIndex(0), direction: Outgoing }, PortIndex(1): Port { node: NodeIndex(0), direction: Outgoing }, PortIndex(2): Port { node: NodeIndex(0), direction: Outgoing, link: PortIndex(5) }, PortIndex(3): Port { node: NodeIndex(0), direction: Outgoing }, PortIndex(4): Port { node: NodeIndex(1), direction: Incoming }, PortIndex(5): Port { node: NodeIndex(1), direction: Incoming, link: PortIndex(2) }} }, NodeIndex(1))

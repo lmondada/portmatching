@@ -2,19 +2,18 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Display},
-    mem,
+    fs, mem,
 };
 
 use portgraph::{
     algorithms::postorder,
     dot::{dot_string_weighted, dot_string_with},
-    Direction, NodeIndex, PortGraph, PortIndex, SecondaryMap, Weights,
+    Direction, NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap, Weights,
 };
 
 use crate::{
     pattern::Edge,
     utils::{cover::cover_nodes, ninj_map::NInjMap},
-    PortOffset,
 };
 
 use super::{ManyPatternMatcher, ReadGraphTrie, WriteGraphTrie};
@@ -96,10 +95,10 @@ impl fmt::Display for NodeTransition {
                 for PatternNodeAddress(i, j) in addrs {
                     write!(f, "({}, {})", i, j)?;
                 }
-                write!(f, "[{}]", port)
+                write!(f, "[{:?}]", port)
             }
             NodeTransition::NewNode(port) => {
-                write!(f, "X[{}]", port)
+                write!(f, "X[{:?}]", port)
             }
             NodeTransition::NoLinkedNode => write!(f, "dangling"),
             NodeTransition::Fail => write!(f, "fail"),
@@ -130,7 +129,7 @@ impl Display for NodeWeight {
             write!(f, "None")?;
         }
         if let Some(port) = &self.port_offset {
-            write!(f, "[{port}]")?;
+            write!(f, "[{port:?}]")?;
         }
         Ok(())
     }
@@ -358,7 +357,7 @@ impl NaiveGraphTrie {
 
     fn set_num_ports(&mut self, node: NodeIndex, incoming: usize, outgoing: usize) {
         self.graph
-            .set_num_ports(node, incoming, outgoing, |old, new, _| {
+            .set_num_ports(node, incoming, outgoing, |old, new| {
                 rekey(
                     &mut self.weights,
                     &mut self.perm_indices.borrow_mut(),
@@ -516,12 +515,13 @@ impl NaiveGraphTrie {
             .get_by_left(addr)
             .copied()
             .expect("A KnownTransition exists");
-        let out_port = self
-            .state(state)
-            .port_offset
-            .as_ref()
-            .expect("A KnownTransition exists")
-            .get_index(graph_node, graph)
+        let out_port = graph
+            .port_index(
+                graph_node,
+                self.state(state)
+                    .port_offset
+                    .expect("A KnownTransition exists"),
+            )
             .expect("A KnownTransition exists");
         let in_port = graph.port_link(out_port).expect("A KnownTransition exists");
         let graph_next_node = graph.port_node(in_port).expect("Invalid port");
@@ -558,11 +558,10 @@ impl NaiveGraphTrie {
         let out_port = self
             .state(state)
             .port_offset
-            .as_ref()
-            .and_then(|out_port| out_port.get_index(graph_node?, graph));
+            .and_then(|out_port| graph.port_index(graph_node?, out_port));
         let in_port = out_port.and_then(|out_port| graph.port_link(out_port));
         let graph_next_node = in_port.map(|p| graph.port_node(p).expect("Invalid port"));
-        let graph_next_offset = in_port.map(|p| PortOffset::try_from_index(p, graph).unwrap());
+        let graph_next_offset = in_port.map(|p| graph.port_offset(p).unwrap());
 
         let mut all_transitions = Vec::new();
         for transition in self
@@ -702,7 +701,7 @@ impl NaiveGraphTrie {
                     .get_by_left(addr)
                     .expect("Malformed pattern trie");
                 let out_port = self.state(state).port_offset.clone().unwrap();
-                let out_port = out_port.get_index(graph_node, graph).unwrap();
+                let out_port = graph.port_index(graph_node, out_port).unwrap();
                 graph.port_link(out_port).unwrap()
             }
         };
@@ -855,7 +854,7 @@ impl NaiveGraphTrie {
         // We start by finding where we are in the graph, using the outgoing
         // port
         let graph_node = graph.port_node(out_port).expect("Invalid port");
-        let graph_port = PortOffset::try_from_index(out_port, graph).expect("Invalid port");
+        let graph_port = graph.port_offset(out_port).expect("Invalid port");
 
         // Process carriage returns where necessary
         let mut states_post_carriage_return = Vec::new();
@@ -863,6 +862,9 @@ impl NaiveGraphTrie {
         // If the current state does not correspond to our position and we
         // are in a deterministic state, follow the FAIL transition (aka do a
         // carriage return)
+        dbg!(&states);
+        println!("Trying to get {graph_node:?}");
+        fs::write("patterntrie.gv", self.dotstring());
         let first_addresses = states.first().map(|(_, first_match)| {
             first_match
                 .map
@@ -922,6 +924,7 @@ impl NaiveGraphTrie {
                     panic!("Could not find shared address");
                 }
                 while !self.try_update_node(state, graph_addresses, &graph_port) {
+                    // fs::write("patterntrie.gv", self.dotstring());
                     let port = match self.transition_port(state, &NodeTransition::Fail) {
                         Some(next_port) => next_port,
                         None => {
@@ -1011,7 +1014,7 @@ impl NaiveGraphTrie {
                 // callback
                 clone_state(state, new_state);
             },
-            |old, new, _| {
+            |old, new| {
                 let mut weights = weights.borrow_mut();
                 if let Some(new) = new {
                     weights[new] = mem::take(&mut weights[old]);
@@ -1166,6 +1169,7 @@ fn merge_states(next_states: BTreeSet<(NodeIndex, MatchObject)>) -> Vec<(NodeInd
             })
             .or_insert_with(|| next_match.current_addr.clone());
     }
+    dbg!(&next_states);
     for (state, mut next_match) in next_states {
         // states must all coincide on curr_addr
         if curr_addrs[&state] > next_match.current_addr {
@@ -1187,7 +1191,7 @@ fn merge_states(next_states: BTreeSet<(NodeIndex, MatchObject)>) -> Vec<(NodeInd
             .or_insert(next_match.map);
     }
 
-    no_maps
+    let ret = no_maps
         .into_iter()
         .map(|(state, no_map)| {
             let map = maps.remove(&state).unwrap();
@@ -1201,7 +1205,9 @@ fn merge_states(next_states: BTreeSet<(NodeIndex, MatchObject)>) -> Vec<(NodeInd
                 },
             )
         })
-        .collect()
+        .collect();
+    dbg!(&ret);
+    ret
 }
 
 impl ReadGraphTrie for NaiveGraphTrie {
@@ -1242,10 +1248,10 @@ pub type NaiveManyPatternMatcher = ManyPatternMatcher<NaiveGraphTrie>;
 
 #[cfg(test)]
 mod tests {
-    // use std::fs;
+    use std::fs;
 
     use itertools::Itertools;
-    use portgraph::{proptest::gen_portgraph, Direction, NodeIndex, PortGraph};
+    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
 
     use proptest::prelude::*;
 
@@ -1268,8 +1274,8 @@ mod tests {
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
         g.link_ports(
-            g.port_index(n, 0, Direction::Outgoing).unwrap(),
-            g.port_index(n, 0, Direction::Incoming).unwrap(),
+            g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
+            g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
 
@@ -1287,8 +1293,8 @@ mod tests {
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
         g.link_ports(
-            g.port_index(n, 0, Direction::Outgoing).unwrap(),
-            g.port_index(n, 0, Direction::Incoming).unwrap(),
+            g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
+            g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
         let p = Pattern::from_graph(g.clone()).unwrap();
@@ -1316,8 +1322,8 @@ mod tests {
         let n0 = g.add_node(0, 1);
         let n1 = g.add_node(1, 0);
         g.link_ports(
-            g.port_index(n0, 0, Direction::Outgoing).unwrap(),
-            g.port_index(n1, 0, Direction::Incoming).unwrap(),
+            g.port_index(n0, PortOffset::new_outgoing(0)).unwrap(),
+            g.port_index(n1, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
 
@@ -1340,8 +1346,8 @@ mod tests {
 
     fn link(p: &mut PortGraph, (n1, p1): (NodeIndex, usize), (n2, p2): (NodeIndex, usize)) {
         p.link_ports(
-            p.port_index(n1, p1, Direction::Outgoing).unwrap(),
-            p.port_index(n2, p2, Direction::Incoming).unwrap(),
+            p.port_index(n1, PortOffset::new_outgoing(p1)).unwrap(),
+            p.port_index(n2, PortOffset::new_incoming(p2)).unwrap(),
         )
         .unwrap();
     }
@@ -1463,16 +1469,16 @@ mod tests {
 
     proptest! {
         #[ignore = "a bit slow"]
-        // #[cfg(feature = "serde")]
+        #[cfg(feature = "serde")]
         #[test]
         fn many_graphs_proptest(
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
-            // for (i, p) in patterns.iter().enumerate() {
-            //     fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
-            // }
-            // fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
+            for (i, p) in patterns.iter().enumerate() {
+                fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
+            }
+            fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
             let patterns = patterns
                 .into_iter()
                 .map(|p| Pattern::from_graph(p).unwrap())
@@ -1495,7 +1501,7 @@ mod tests {
                         .collect_vec()
                 })
                 .collect_vec();
-            // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
+            fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
             let matcher = NaiveManyPatternMatcher::from_patterns(patterns.clone());
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())

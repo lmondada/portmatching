@@ -1,21 +1,40 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use portgraph::{Direction, NodeIndex, PortGraph, PortIndex};
+use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
 /// Split `nodes` so that all its predecessors "go through" cover
 pub fn cover_nodes<F, G>(
     graph: &mut PortGraph,
-    cover: &BTreeSet<NodeIndex>,
     mut all_ports: BTreeSet<PortIndex>,
     mut clone_state: G,
     mut rekey: F,
-) where
-    F: FnMut(PortIndex, Option<PortIndex>, &PortGraph),
+) -> BTreeSet<NodeIndex>
+where
+    F: FnMut(PortIndex, Option<PortIndex>),
     G: FnMut(NodeIndex, NodeIndex, &PortGraph),
 {
     let nodes: BTreeSet<_> = all_ports
         .iter()
         .map(|&p| graph.port_node(p).expect("Invalid port"))
+        .collect();
+    let cover: BTreeSet<_> = all_ports
+        .iter()
+        .filter_map(|&p| {
+            let out_p = graph.port_link(p)?;
+            graph.port_node(out_p)
+        })
+        .filter(|n| !nodes.contains(n))
+        .collect();
+    let bottom: BTreeSet<_> = nodes
+        .iter()
+        .copied()
+        .filter(|&n| {
+            !graph
+                .output_links(n)
+                .flatten()
+                .map(|p| graph.port_node(p).expect("invalid port"))
+                .any(|n| nodes.contains(&n))
+        })
         .collect();
 
     let mut curr_nodes: VecDeque<_> = cover
@@ -56,11 +75,11 @@ pub fn cover_nodes<F, G>(
                 within,
                 without,
                 &mut clone_state,
-                |old, new, graph| {
+                |old, new| {
                     if all_ports.remove(&old) {
                         all_ports.insert(new.expect("Removed port"));
                     }
-                    rekey(old, new, graph)
+                    rekey(old, new)
                 },
             );
         }
@@ -72,6 +91,7 @@ pub fn cover_nodes<F, G>(
                 .filter(|n| nodes.contains(n)),
         );
     }
+    bottom
 }
 
 /// Splits node1 into (node1, node2) according to partition
@@ -84,7 +104,7 @@ fn split_node<F, G>(
     mut rekey: F,
 ) -> (NodeIndex, NodeIndex)
 where
-    F: FnMut(PortIndex, Option<PortIndex>, &PortGraph),
+    F: FnMut(PortIndex, Option<PortIndex>),
     G: FnMut(NodeIndex, NodeIndex, &PortGraph),
 {
     let n_out = graph.num_outputs(node1);
@@ -94,11 +114,11 @@ where
     // require a refactor of portgraph to e.g. only compact input ports
     for (new_port_offset, in_port) in in_ports2.into_iter().enumerate() {
         let new_port = graph
-            .port_index(node2, new_port_offset, Direction::Incoming)
+            .port_index(node2, PortOffset::new_incoming(new_port_offset))
             .expect("Just created");
         if let Some(out_port) = graph.unlink_port(in_port) {
             graph.link_ports(out_port, new_port).unwrap();
-            rekey(in_port, new_port.into(), graph);
+            rekey(in_port, new_port.into());
         }
     }
     // Compact input ports for node1
@@ -106,13 +126,13 @@ where
     let num_in_ports1 = in_ports1.len();
     for (new_port_offset, in_port) in in_ports1.into_iter().enumerate() {
         let new_port = graph
-            .port_index(node1, new_port_offset, Direction::Incoming)
+            .port_index(node1, PortOffset::new_incoming(new_port_offset))
             .expect("At most num_inputs iterations");
         if in_port != new_port {
             // invariant: new_port < port
             if let Some(out_port) = graph.unlink_port(in_port) {
                 graph.link_ports(out_port, new_port).unwrap();
-                rekey(in_port, new_port.into(), graph);
+                rekey(in_port, new_port.into());
             }
         }
     }
@@ -142,12 +162,12 @@ where
         if let Some(in_port) = graph.port_link(out_port) {
             let offset = graph.port_offset(out_port).unwrap();
             let out_port = graph
-                .port_index(node2, offset, Direction::Outgoing)
+                .port_index(node2, offset)
                 .expect("At most node1.num_outputs()");
             let in_node = graph.port_node(in_port).expect("Invalid port");
             let offset = new_port_offset.get_mut(&in_node).unwrap();
             let in_port = graph
-                .port_index(in_node, *offset, Direction::Incoming)
+                .port_index(in_node, PortOffset::new_incoming(*offset))
                 .expect("preallocated above");
             graph.link_ports(out_port, in_port).unwrap();
             *offset += 1;
@@ -163,7 +183,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use itertools::Itertools;
-    use portgraph::{Direction, NodeIndex, PortGraph};
+    use portgraph::{NodeIndex, PortGraph, PortOffset};
 
     use super::cover_nodes;
 
@@ -180,8 +200,8 @@ mod tests {
 
         let edge = |g: &PortGraph, (n1, p1), (n2, p2)| {
             (
-                g.port_index(n1, p1, Direction::Outgoing).unwrap(),
-                g.port_index(n2, p2, Direction::Incoming).unwrap(),
+                g.port_index(n1, PortOffset::new_outgoing(p1)).unwrap(),
+                g.port_index(n2, PortOffset::new_incoming(p2)).unwrap(),
             )
         };
 
@@ -208,12 +228,11 @@ mod tests {
             .collect();
         cover_nodes(
             &mut g,
-            &[n0_0, n0_1].into(),
             all_ports,
             |old_n, new_n, _| {
                 new_nodes.insert(old_n, new_n);
             },
-            |old_p, new_p, _| {
+            |old_p, new_p| {
                 for (p1, p2) in left_edges.iter_mut() {
                     if *p1 == old_p {
                         *p1 = new_p.unwrap();
