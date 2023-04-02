@@ -8,7 +8,7 @@ use portgraph::dot::dot_string;
 use portgraph::PortGraph;
 use portmatching::{
     matcher::{
-        many_patterns::{LineGraphTrie, PatternID, PatternMatch, ManyPatternMatcher},
+        many_patterns::{LineGraphTrie, ManyPatternMatcher, PatternID, PatternMatch},
         Matcher,
     },
     pattern::Pattern,

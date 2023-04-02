@@ -1,13 +1,11 @@
-use std::{
-    fmt,
-};
+use std::fmt;
 
-use portgraph::{NodeIndex};
+use portgraph::NodeIndex;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::pattern::{Pattern};
+use crate::pattern::Pattern;
 
 use super::Matcher;
 
@@ -59,4 +57,3 @@ pub trait ManyPatternMatcher: Default + Matcher {
         obj
     }
 }
-

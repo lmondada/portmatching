@@ -130,13 +130,15 @@ mod tests {
     use std::fs;
 
     use itertools::Itertools;
-    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset, dot::dot_string};
+    use portgraph::{dot::dot_string, proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
 
     use proptest::prelude::*;
 
     use crate::{
         matcher::{
-            many_patterns::{line_based::LineGraphTrie, PatternID, PatternMatch, ManyPatternMatcher},
+            many_patterns::{
+                line_based::LineGraphTrie, ManyPatternMatcher, PatternID, PatternMatch,
+            },
             Matcher, SinglePatternMatcher,
         },
         pattern::Pattern,
@@ -275,9 +277,7 @@ mod tests {
         let n1 = p2.add_node(0, 2);
         link(&mut p2, (n1, 0), (n0, 1));
         link(&mut p2, (n1, 1), (n0, 0));
-        LineGraphTrie::from_patterns(
-            [p1, p2].map(|p| Pattern::from_graph(p).unwrap()).into(),
-        );
+        LineGraphTrie::from_patterns([p1, p2].map(|p| Pattern::from_graph(p).unwrap()).into());
     }
 
     #[test]
