@@ -5,7 +5,7 @@ use std::{
 
 use bitvec::prelude::*;
 
-use portgraph::{NodeIndex, PortGraph, PortIndex};
+use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
 pub enum Direction {
     _Incoming = 0,
@@ -69,8 +69,9 @@ pub fn pre_order(
 }
 
 pub struct Path {
-    root: NodeIndex,
-    out_ports: Vec<PortIndex>,
+    pub(crate) src: NodeIndex,
+    pub(crate) target: NodeIndex,
+    pub(crate) out_ports: Vec<PortOffset>,
 }
 
 pub fn shortest_path(
@@ -94,22 +95,25 @@ pub fn shortest_path(
             let n = graph.port_node(p).expect("invalid port");
             distance[n.index()]
         }) {
-            let min = distance[best_out_port.index()];
-            if min + 1 < distance[node.index()] {
+            let nei = graph.port_node(best_out_port).expect("invalid port");
+            let min = distance[nei.index()];
+            if min < usize::MAX && min + 1 < distance[node.index()] {
                 distance[node.index()] = min + 1;
                 prev[node.index()] = Some(best_out_port);
             }
         }
     }
-    let mut node = target.iter().min_by_key(|n| distance[n.index()]).copied()?;
+    let target = target.iter().min_by_key(|n| distance[n.index()]).copied()?;
+    let mut node = target;
     let mut out_ports = Vec::new();
     while !source.contains(&node) {
         let port = prev[node.index()]?;
-        out_ports.push(port);
+        out_ports.push(graph.port_offset(port).expect("invalid port"));
         node = graph.port_node(port).expect("invalid port");
     }
     Some(Path {
-        root: node,
+        src: node,
+        target,
         out_ports: out_ports.into_iter().rev().collect(),
     })
 }
