@@ -48,16 +48,27 @@ impl<'graph> LinePartition<'graph> {
                 .get_mut(&node)
                 .expect("added all nodes")
                 .push(LinePoint::new(graph, line_ind, ind, port, port_op));
-            if let Some(port) = port_op.and_then(|p| graph.port_link(p)) {
-                if !visited_ports.contains(&port) {
-                    let new_ind = if ind >= 0 { ind + 1 } else { ind - 1 };
-                    port_queue.push((Reverse(port), Some((Reverse(line_ind), new_ind))));
-                }
-            }
             if ind == 0 {
-                if let Some(port) = graph.port_link(port) {
+                // Follow both port and port_op
+                for port in [Some(port), port_op].into_iter().flatten() {
+                    if let Some(port) = graph.port_link(port) {
+                        if !visited_ports.contains(&port) {
+                            let new_ind = if graph.port_direction(port).expect("invalid port")
+                                == Direction::Incoming
+                            {
+                                1
+                            } else {
+                                -1
+                            };
+                            port_queue.push((Reverse(port), Some((Reverse(line_ind), new_ind))));
+                        }
+                    }
+                }
+            } else {
+                if let Some(port) = port_op.and_then(|p| graph.port_link(p)) {
                     if !visited_ports.contains(&port) {
-                        port_queue.push((Reverse(port), Some((Reverse(line_ind), -1))));
+                        let new_ind = if ind >= 0 { ind + 1 } else { ind - 1 };
+                        port_queue.push((Reverse(port), Some((Reverse(line_ind), new_ind))));
                     }
                 }
             }
@@ -93,16 +104,10 @@ impl<'graph> LinePartition<'graph> {
                 .iter()
                 .find(|line| line.line_ind == line_ind)
                 .expect("found target above");
-            if let Some(out_port) = lp.out_port {
+            if let Some(port) = lp.out_port.or(lp.in_port) {
                 skeleton_paths.push((
                     path.out_ports.clone(),
-                    self.graph.port_offset(out_port).expect("invalid port"),
-                ));
-            }
-            if let Some(in_port) = lp.in_port {
-                skeleton_paths.push((
-                    path.out_ports,
-                    self.graph.port_offset(in_port).expect("invalid port"),
+                    self.graph.port_offset(port).expect("invalid port"),
                 ));
             }
         }
@@ -112,7 +117,7 @@ impl<'graph> LinePartition<'graph> {
     /// Find the address of `node` relative to the skeleton
     pub(crate) fn get_address(&self, node: NodeIndex, skeleton: &Skeleton) -> Option<(usize, i32)> {
         if node == self.root {
-            return Some((0, 0))
+            return Some((0, 0));
         }
         let skeleton_lines = self.skeleton_lines(skeleton)?;
         let rev_inds: BTreeMap<_, _> = skeleton_lines
@@ -373,13 +378,10 @@ mod tests {
 
     proptest! {
         #[test]
-        fn get_addr((g, n) in gen_node_index(gen_portgraph_connected(10, 4, 20))) {
+        fn prop_get_addr((g, n) in gen_node_index(gen_portgraph_connected(10, 4, 20))) {
             let p = LinePartition::new(&g, NodeIndex::new(0));
             let skeleton = p.get_skeleton();
-            dbg!(&skeleton);
-            dbg!(g.nodes_iter().collect::<Vec<_>>());
             let addr = p.get_address(n, &skeleton).unwrap();
-            dbg!(&addr);
             prop_assert_eq!(n, p.get_node_index(&addr, &skeleton).unwrap());
         }
     }
