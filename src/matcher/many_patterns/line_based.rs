@@ -5,6 +5,7 @@ use portgraph::{NodeIndex, PortGraph};
 use crate::{
     matcher::Matcher,
     pattern::{Edge, Pattern},
+    utils::address::LinePartition,
 };
 
 use super::{
@@ -44,6 +45,7 @@ impl Matcher for LineGraphTrie {
     fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
         let mut current_states = vec![StateID::root()];
         let mut matches = BTreeSet::new();
+        let partition = LinePartition::new(&graph, root);
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
             for state in current_states {
@@ -53,7 +55,7 @@ impl Matcher for LineGraphTrie {
                         root,
                     });
                 }
-                for next_state in self.trie.next_states(state, graph, root) {
+                for next_state in self.trie.next_states(state, graph, &partition) {
                     new_states.push(next_state);
                 }
             }
@@ -72,6 +74,7 @@ impl ManyPatternMatcher for LineGraphTrie {
         self.patterns.push(pattern);
         let pattern = &self.patterns[pattern_id.0];
         let graph = &pattern.graph;
+        let partition = LinePartition::new(graph, pattern.root);
 
         // Stores the current positions in the graph trie, along with the
         // match that corresponds to that position
@@ -103,7 +106,7 @@ impl ManyPatternMatcher for LineGraphTrie {
                         out_port,
                         state,
                         graph,
-                        pattern.root,
+                        &partition,
                         &mut new_state,
                         &mut new_start_state,
                     ))
@@ -127,10 +130,10 @@ impl ManyPatternMatcher for LineGraphTrie {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    // use std::fs;
 
     use itertools::Itertools;
-    use portgraph::{dot::dot_string, proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
+    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
 
     use proptest::prelude::*;
 
@@ -329,8 +332,6 @@ mod tests {
     proptest! {
         #[test]
         fn single_graph_proptest(pattern in gen_portgraph_connected(10, 4, 20), g in gen_portgraph(100, 4, 200)) {
-            // fs::write("pattern.gv", dot_string(&pattern));
-            // fs::write("graph.gv", dot_string(&g));
             let pattern = Pattern::from_graph(pattern).unwrap();
             let mut matcher = LineGraphTrie::new();
             let pattern_id = matcher.add_pattern(pattern.clone());
@@ -344,7 +345,6 @@ mod tests {
                     root: m[&pattern.root],
                 })
                 .collect();
-            fs::write("patterntrie.gv", matcher.dotstring());
             prop_assert_eq!(many_matches, single_matches);
         }
     }
@@ -357,10 +357,10 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
-            for (i, p) in patterns.iter().enumerate() {
-                fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
-            }
-            fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
+            // for (i, p) in patterns.iter().enumerate() {
+            //     fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
+            // }
+            // fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
             let patterns = patterns
                 .into_iter()
                 .map(|p| Pattern::from_graph(p).unwrap())
@@ -383,7 +383,7 @@ mod tests {
                         .collect_vec()
                 })
                 .collect_vec();
-            fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
+            // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
             let matcher = LineGraphTrie::from_patterns(patterns.clone());
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())

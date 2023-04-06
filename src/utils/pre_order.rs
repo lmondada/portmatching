@@ -5,7 +5,7 @@ use std::{
 
 use bitvec::prelude::*;
 
-use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
+use portgraph::{NodeIndex, PortGraph, PortOffset};
 
 pub enum Direction {
     _Incoming = 0,
@@ -69,7 +69,7 @@ pub fn pre_order(
 }
 
 pub struct Path {
-    pub(crate) src: NodeIndex,
+    pub(crate) _src: NodeIndex,
     pub(crate) target: NodeIndex,
     pub(crate) out_ports: Vec<PortOffset>,
 }
@@ -112,7 +112,7 @@ pub fn shortest_path(
         node = graph.port_node(port).expect("invalid port");
     }
     Some(Path {
-        src: node,
+        _src: node,
         target,
         out_ports: out_ports.into_iter().rev().collect(),
     })

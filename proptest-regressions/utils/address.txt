@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4fa7e9607d7208d9f33cbdc95c3481517bfecf7b6905f71c4699ae641867ae1f # shrinks to g = PortGraph { nodes: {NodeIndex(0): Node { inputs: [PortIndex(0)], outputs: [PortIndex(1)] }}, ports: {PortIndex(0): Port { node: NodeIndex(0), direction: Incoming, link: PortIndex(1) }, PortIndex(1): Port { node: NodeIndex(0), direction: Outgoing, link: PortIndex(0) }} }
+cc 356f4432ed2bbdbea709cef6c56278dc3f3def579f0f9bad2ca8ee43a37971ae # shrinks to (g, n) = (PortGraph { nodes: {NodeIndex(0): Node { inputs: [PortIndex(0), PortIndex(1)], outputs: [PortIndex(2), PortIndex(3)] }}, ports: {PortIndex(0): Port { node: NodeIndex(0), direction: Incoming, link: PortIndex(3) }, PortIndex(1): Port { node: NodeIndex(0), direction: Incoming, link: PortIndex(2) }, PortIndex(2): Port { node: NodeIndex(0), direction: Outgoing, link: PortIndex(1) }, PortIndex(3): Port { node: NodeIndex(0), direction: Outgoing, link: PortIndex(0) }} }, NodeIndex(0))
+cc 8b463ff000c8bf101985efee10ac51366109126c69d0f43e75d1c443512010f2 # shrinks to (g, n) = (PortGraph { nodes: {NodeIndex(0): Node { inputs: [], outputs: [] }}, ports: {} }, NodeIndex(0))
