@@ -9,9 +9,9 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
 use super::pre_order::shortest_path;
 
 pub(crate) struct LinePartition<'graph> {
-    node2line: BTreeMap<NodeIndex, Vec<LinePoint>>,
-    graph: &'graph PortGraph,
-    root: NodeIndex,
+    pub(crate) node2line: BTreeMap<NodeIndex, Vec<LinePoint>>,
+    pub(crate) graph: &'graph PortGraph,
+    pub(crate) root: NodeIndex,
 }
 
 impl<'graph> fmt::Debug for LinePartition<'graph> {
@@ -46,10 +46,31 @@ pub(crate) struct Skeleton {
 //     }
 // }
 
-pub(crate) type Address = (usize, i32);
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub(crate) struct Address(pub(crate) usize, pub(crate) i32);
+
+impl Address {
+    fn key(&self) -> (usize, u32, bool) {
+        let &Address(fst, snd) = self;
+        (fst, snd.abs() as u32, snd < 0)
+    }
+}
+
+impl PartialOrd for Address {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        self.key().partial_cmp(&other.key())
+    }
+}
+
+impl Ord for Address {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.key().cmp(&other.key())
+    }
+}
+
 pub(crate) type Spine = Vec<(Vec<PortOffset>, usize)>;
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Ribs(Vec<[i32; 2]>);
+pub(crate) struct Ribs(pub(crate) Vec<[i32; 2]>);
 
 impl Ribs {
     pub(crate) fn within(&self, ribs: &Ribs) -> bool {
@@ -59,12 +80,10 @@ impl Ribs {
             .all(|(a, b)| a[0] >= b[0] && a[1] <= b[1])
     }
 
-    pub(crate) fn add_addr(&self, (line, ind): (usize, i32)) -> Ribs {
-        let mut new = self.clone();
-        let [min, max] = &mut new.0[line];
+    pub(crate) fn add_addr(&mut self, Address(line, ind): Address) {
+        let [min, max] = &mut self.0[line];
         *min = cmp::min(*min, ind);
         *max = cmp::max(*max, ind);
-        new
     }
 }
 
@@ -138,8 +157,7 @@ impl<'graph> LinePartition<'graph> {
     }
 
     pub(crate) fn get_skeleton(&self) -> Skeleton {
-        let mut skeleton_paths = Vec::new();
-        let mut intervals = Vec::new();
+        let mut spine = Vec::new();
         for line_ind in 0.. {
             let nodes_on_line: Vec<_> = self
                 .node2line
@@ -157,88 +175,71 @@ impl<'graph> LinePartition<'graph> {
                 .filter(|line| line.line_ind == line_ind)
                 .min_by_key(|line| line.ind.abs())
                 .expect("invalid spine of path");
-
-            // Compute intervals
-            // All indices that we must represent must be in the interval
-            let mut inds = Vec::new();
-            for &n in &nodes_on_line {
-                let lp = self.node2line[&n]
-                    .iter()
-                    .filter(|line| line.line_ind == line_ind)
-                    .min_by_key(|line| line.ind.abs_diff(spine_lp.ind))
-                    .expect("node not on line");
-                inds.push(lp.ind - spine_lp.ind);
-            }
-            let interval = [
-                *inds.iter().min().expect("every line has node"),
-                *inds.iter().max().expect("every line has node"),
-            ];
             if let Some(port) = spine_lp.out_port.or(spine_lp.in_port) {
-                intervals.push(interval);
-                skeleton_paths.push((
+                spine.push((
                     path.out_ports.clone(),
                     self.graph.port_offset(port).expect("invalid port").index(),
                 ));
             }
         }
-        Skeleton {
-            spine: skeleton_paths,
-            ribs: Ribs(intervals),
-        }
+
+        let ribs = self.get_ribs(&spine);
+        Skeleton { spine, ribs }
     }
 
     /// Find the address of `node` relative to the skeleton
-    pub(crate) fn get_address(
-        &self,
-        node: NodeIndex,
-        skeleton: &Skeleton,
-        bypass_ribs: bool,
-    ) -> Option<Address> {
-        // println!("getting address of {node:?}");
+    pub(crate) fn get_all_addresses(&self, node: NodeIndex, spine: &Spine) -> Vec<Address> {
         if node == self.root {
-            // println!(" -> (0, 0)");
-            return Some((0, 0));
+            return vec![Address(0, 0)];
         }
-        let spine = self.get_spine(skeleton);
+        let spine = self.get_spine(spine);
         let mut rev_inds: BTreeMap<_, Vec<_>> = Default::default();
         for (i, lp) in spine.iter().enumerate() {
             if let Some(lp) = lp {
                 rev_inds.entry(lp.line_ind).or_default().push(i);
             }
         }
-        // dbg!(skeleton);
-        // dbg!(&self.node2line[&node]);
-        // dbg!(&rev_inds);
-        let mut best_addr = None;
+        let mut all_addrs = Vec::new();
         for line in self.node2line[&node].iter() {
             for &spine_ind in rev_inds.get(&line.line_ind).unwrap_or(&Vec::new()) {
                 let spine = spine[spine_ind].expect("By construction of in rev_inds");
-                // dbg!(&spine);
                 let ind = line.ind - spine.ind;
-                // dbg!(ind);
-                let [from, to] = skeleton.ribs.0[spine_ind];
-                if bypass_ribs || (from <= ind && to >= ind) {
-                    let new_addr = (spine_ind, ind);
-                    let best_addr = best_addr.get_or_insert_with(|| new_addr.clone());
-                    if *best_addr > new_addr {
-                        *best_addr = new_addr;
-                    }
-                }
+                all_addrs.push(Address(spine_ind, ind))
             }
         }
-        // println!(" -> {best_addr:?}");
-        best_addr
+        all_addrs.sort_unstable();
+        all_addrs
+    }
+
+    /// Find the address of `node` relative to the skeleton
+    pub(crate) fn get_address(
+        &self,
+        node: NodeIndex,
+        spine: &Spine,
+        ribs: Option<&Ribs>,
+    ) -> Option<Address> {
+        let all_addrs = self.get_all_addresses(node, spine);
+        let Some(Ribs(ribs)) = ribs else {
+            return all_addrs.into_iter().next()
+        };
+        all_addrs
+            .into_iter()
+            .filter(|&Address(spine_ind, ind)| {
+                let [from, to] = ribs[spine_ind];
+                from <= ind && to >= ind
+            })
+            .next()
     }
 
     pub(crate) fn get_node_index(
         &self,
-        &(line_ind, ind): &Address,
-        skeleton: &Skeleton,
+        &Address(line_ind, ind): &Address,
+        spine: &Spine,
     ) -> Option<NodeIndex> {
         if (line_ind, ind) == (0, 0) {
             return Some(self.root);
         }
-        let skeleton_lines = self.get_spine(skeleton);
+        let skeleton_lines = self.get_spine(spine);
         let line = skeleton_lines[line_ind]?;
         let mut port = if ind == 0 {
             line.out_port.or(line.in_port)
@@ -256,9 +257,8 @@ impl<'graph> LinePartition<'graph> {
         Some(node)
     }
 
-    fn get_spine(&self, skeleton: &Skeleton) -> Vec<Option<&LinePoint>> {
-        skeleton
-            .spine
+    fn get_spine(&self, spine: &Spine) -> Vec<Option<&LinePoint>> {
+        spine
             .iter()
             .map(|(path, out_port)| {
                 let n = follow_path(path, self.root, self.graph)?;
@@ -275,6 +275,51 @@ impl<'graph> LinePartition<'graph> {
                 })
             })
             .collect()
+    }
+
+    pub(crate) fn get_ribs(&self, spine: &Spine) -> Ribs {
+        // Compute intervals
+        // All indices that we must represent must be in the interval
+        let mut ribs = vec![[0, 0]; spine.len()];
+        let all_addrs = self
+            .graph
+            .nodes_iter()
+            .flat_map(|n| self.get_all_addresses(n, spine));
+        for Address(l_ind, ind) in all_addrs {
+            let [min, max] = &mut ribs[l_ind];
+            *min = cmp::min(*min, ind);
+            *max = cmp::max(*max, ind);
+        }
+        Ribs(ribs)
+    }
+
+    pub(crate) fn extend_spine(
+        &self,
+        spine: &mut Spine,
+        &Address(l_ind, ind): &Address,
+        port: PortOffset,
+    ) -> Address {
+        let path_to_spine = spine[l_ind].0.clone();
+        let mut spine_to_node = vec![None; ind.abs() as usize];
+        self.node2line
+            .values()
+            .flatten()
+            .filter(|line| {
+                line.line_ind == l_ind && ind * line.ind >= 0 && line.ind.abs() < ind.abs()
+            })
+            .for_each(|line| {
+                let port = if ind < 0 { line.in_port } else { line.out_port };
+                spine_to_node[line.ind.abs() as usize] =
+                    self.graph.port_offset(port.expect("Cannot follow path"));
+            });
+        let mut path = path_to_spine;
+        path.extend(
+            spine_to_node
+                .into_iter()
+                .map(|ind| ind.expect("Cannot follow path")),
+        );
+        spine.push((path, port.index()));
+        Address(spine.len() - 1, 0)
     }
 }
 
@@ -338,7 +383,7 @@ fn follow_path(path: &Vec<PortOffset>, root: NodeIndex, graph: &PortGraph) -> Op
     Some(curr_node)
 }
 
-fn port_opposite(port: PortIndex, graph: &PortGraph) -> Option<PortIndex> {
+pub(crate) fn port_opposite(port: PortIndex, graph: &PortGraph) -> Option<PortIndex> {
     let node = graph.port_node(port).expect("invalid port");
     let offset = graph.port_offset(port).expect("invalid port");
     let offset_op = match offset.direction() {
@@ -350,7 +395,7 @@ fn port_opposite(port: PortIndex, graph: &PortGraph) -> Option<PortIndex> {
 
 /// A node on a line
 #[derive(Debug)]
-struct LinePoint {
+pub(crate) struct LinePoint {
     line_ind: usize,
     ind: i32,
     in_port: Option<PortIndex>,
@@ -365,7 +410,7 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::utils::{
-        address::{LinePartition, Ribs, Skeleton},
+        address::{Address, LinePartition, Ribs, Skeleton},
         test_utils::gen_portgraph_connected,
     };
     use portgraph::proptest::gen_node_index;
@@ -394,8 +439,10 @@ mod tests {
             spine: vec![([].into(), 0), ([].into(), 1)],
             ribs: Ribs(vec![[-1, 0], [0, 0]]),
         };
-        let addr = p.get_address(NodeIndex::new(1), &skel, false).unwrap();
-        assert_eq!(addr, (0, -1));
+        let addr = p
+            .get_address(NodeIndex::new(1), &skel.spine, Some(&skel.ribs))
+            .unwrap();
+        assert_eq!(addr, Address(0, -1));
     }
 
     #[test]
@@ -444,16 +491,35 @@ mod tests {
         let partition = LinePartition::new(&g, NodeIndex::new(0));
 
         let skeleton = partition.get_skeleton();
-        assert_eq!(partition.get_address(n0, &skeleton, false).unwrap(), (0, 0));
-        assert_eq!(partition.get_address(n2, &skeleton, false).unwrap(), (0, 2));
         assert_eq!(
-            partition.get_address(n4, &skeleton, false).unwrap(),
-            (0, -1)
+            partition
+                .get_address(n0, &skeleton.spine, Some(&skeleton.ribs))
+                .unwrap(),
+            Address(0, 0)
         );
-        assert_eq!(partition.get_address(n5, &skeleton, false).unwrap(), (3, 1));
         assert_eq!(
-            partition.get_address(n6, &skeleton, false).unwrap(),
-            (3, -1)
+            partition
+                .get_address(n2, &skeleton.spine, Some(&skeleton.ribs))
+                .unwrap(),
+            Address(0, 2)
+        );
+        assert_eq!(
+            partition
+                .get_address(n4, &skeleton.spine, Some(&skeleton.ribs))
+                .unwrap(),
+            Address(0, -1)
+        );
+        assert_eq!(
+            partition
+                .get_address(n5, &skeleton.spine, Some(&skeleton.ribs))
+                .unwrap(),
+            Address(3, 1)
+        );
+        assert_eq!(
+            partition
+                .get_address(n6, &skeleton.spine, Some(&skeleton.ribs))
+                .unwrap(),
+            Address(3, -1)
         );
     }
 
@@ -473,14 +539,29 @@ mod tests {
             spine: vec![([].into(), 0)],
             ribs: Ribs(vec![[0, 2]]),
         };
-        assert_eq!(partition.get_address(n2, &skel, false).unwrap(), (0, 2));
+        assert_eq!(
+            partition
+                .get_address(n2, &skel.spine, Some(&skel.ribs))
+                .unwrap(),
+            Address(0, 2)
+        );
 
         let skel = Skeleton {
             spine: vec![([].into(), 0)],
             ribs: Ribs(vec![[-2, 0]]),
         };
-        assert_eq!(partition.get_address(n2, &skel, false).unwrap(), (0, -1));
-        assert_eq!(partition.get_address(n1, &skel, false).unwrap(), (0, -2));
+        assert_eq!(
+            partition
+                .get_address(n2, &skel.spine, Some(&skel.ribs))
+                .unwrap(),
+            Address(0, -1)
+        );
+        assert_eq!(
+            partition
+                .get_address(n1, &skel.spine, Some(&skel.ribs))
+                .unwrap(),
+            Address(0, -2)
+        );
     }
 
     proptest! {
@@ -513,8 +594,8 @@ mod tests {
         fn prop_get_addr((g, n) in gen_node_index(gen_portgraph_connected(10, 4, 20))) {
             let p = LinePartition::new(&g, NodeIndex::new(0));
             let skeleton = p.get_skeleton();
-            let addr = p.get_address(n, &skeleton, false).unwrap();
-            prop_assert_eq!(n, p.get_node_index(&addr, &skeleton).unwrap());
+            let addr = p.get_address(n, &skeleton.spine, Some(&skeleton.ribs)).unwrap();
+            prop_assert_eq!(n, p.get_node_index(&addr, &skeleton.spine).unwrap());
         }
     }
 }
