@@ -280,7 +280,8 @@ impl<'graph> LinePartition<'graph> {
     pub(crate) fn get_ribs(&self, spine: &Spine) -> Ribs {
         // Compute intervals
         // All indices that we must represent must be in the interval
-        let mut ribs = vec![[0, 0]; spine.len()];
+        let spine_len = cmp::max(spine.len(), 1);
+        let mut ribs = vec![[0, 0]; spine_len];
         let all_addrs = self
             .graph
             .nodes_iter()

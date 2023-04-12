@@ -221,8 +221,8 @@ impl GraphTrie {
                         .get_address(n, spine.as_ref().unwrap(), None)
                         .expect("There is no address for next node")
                 });
-                let next_ribs = spine.and_then(|spine| {
-                    let mut ribs = partition.get_ribs(&spine);
+                let next_ribs = spine.as_ref().and_then(|spine| {
+                    let mut ribs = partition.get_ribs(spine);
                     ribs.add_addr(next_addr.as_ref()?.clone());
                     Some(ribs)
                 });
@@ -230,26 +230,26 @@ impl GraphTrie {
                 if !self.weight(state).non_deterministic {
                     transitions.extend(
                         self.compatible_transitions(state, graph, partition, mode)
-                            .map(|out_p| {
+                            .filter_map(|out_p| {
                                 let mut transition = self.weights[out_p].clone();
                                 if let (StateTransition::Node(addrs, _), Some(new_addr)) =
                                     (&mut transition, &next_addr)
                                 {
-                                    if addrs
-                                        .iter()
-                                        .find(|(addr, ribs)| {
-                                            addr == new_addr
-                                                && next_ribs.as_ref().unwrap().within(ribs)
-                                        })
-                                        .is_none()
-                                    {
-                                        addrs.push((
-                                            new_addr.clone(),
-                                            next_ribs.as_ref().unwrap().clone(),
-                                        ));
+                                    let merged_addrs = merge_addrs(
+                                        &addrs,
+                                        &[(new_addr.clone(), next_ribs.clone().unwrap())],
+                                    )?;
+                                    if !is_satisfied(
+                                        next_node?,
+                                        &merged_addrs,
+                                        partition,
+                                        spine.as_ref()?,
+                                    ) {
+                                        return None;
                                     }
+                                    *addrs = merged_addrs;
                                 }
-                                transition
+                                Some(transition)
                             }),
                     );
                 }
@@ -360,11 +360,7 @@ impl GraphTrie {
         partition: &'a LinePartition,
         mode: TrieTraversal,
     ) -> impl Iterator<Item = PortIndex> + 'a {
-        let addr = self.weight(state).address.as_ref();
-        let offset = self.weight(state).out_port;
-        let node = addr
-            .and_then(|addr| partition.get_node_index(addr, self.weight(state).spine.as_ref()?));
-        let out_port = node.and_then(|node| graph.port_index(node, offset?));
+        let out_port = self.out_port(state, partition);
         let in_port = out_port.and_then(|out_port| graph.port_link(out_port));
         let in_offset = in_port.map(|in_port| graph.port_offset(in_port).expect("invalid port"));
         let next_node = in_port.map(|in_port| graph.port_node(in_port).expect("invalid port"));
@@ -377,19 +373,30 @@ impl GraphTrie {
                         .spine
                         .as_ref()
                         .expect("from if condition");
-                    in_offset == Some(offset)
-                        && addrs.iter().all(|(addr, ribs)| {
+                    if in_offset != Some(offset) {
+                        return false;
+                    }
+                    match mode {
+                        TrieTraversal::ReadOnly => addrs.iter().all(|(addr, ribs)| {
                             let Some(next_addr) = partition.get_address(
-                                next_node.expect("from if condition"),
-                                spine,
-                                Some(ribs)
-                            ) else {
-                                // In write mode, being unable to access the node is allowed,
-                                // in read-only it is not
-                                return mode == TrieTraversal::Write
-                            };
+                                    next_node.expect("from if condition"),
+                                    spine,
+                                    Some(ribs)
+                                ) else {
+                                    return false
+                                };
                             &next_addr == addr
-                        })
+                        }),
+                        TrieTraversal::Write => addrs.iter().all(|(addr, _)| {
+                            let Some(node) = partition.get_node_index(
+                                addr,
+                                spine,
+                            ) else {
+                                return true
+                            };
+                            node == next_node.expect("from if condition")
+                        }),
+                    }
                 }
                 StateTransition::NoLinkedNode => {
                     // In read mode, out_port existing is enough
@@ -603,8 +610,8 @@ impl GraphTrie {
                             }
                             transitions_iter.next();
                         }
-                        // Finally, insert new transitions before the current transition
-                        // for Node(_, _)s, if curr_transition is strictly contained
+                        // Finally, insert new transition if it is strictly stronger
+                        // than the current one
                         while let Some(transition) = transitions_iter.peek() {
                             let (
                                 StateTransition::Node(curr_addrs, curr_port),
@@ -615,28 +622,23 @@ impl GraphTrie {
                             if curr_port != port {
                                 break;
                             }
-                            let Some(merged_addrs) = merge_addrs(curr_addrs, addrs) else {
-                                break
-                            };
-                            let spine = self
-                                .weight(state)
-                                .spine
-                                .as_ref()
-                                .expect("node transition must have skeleton");
-                            let node = self
-                                .node(state, partition)
-                                .expect("Node transition must have next node");
-                            if !is_satisfied(node, &merged_addrs, partition, spine) {
+                            if curr_addrs.iter().all(|(c_addr, c_rib)| {
+                                addrs
+                                    .iter()
+                                    .any(|(addr, rib)| addr == c_addr && c_rib.within(rib))
+                            }) {
+                                new_transitions
+                                    .push((port_offset, transitions_iter.next().unwrap().clone()));
+                            } else {
                                 break;
                             }
-                            let new_trans = StateTransition::Node(merged_addrs, *port);
-                            new_transitions.push((port_offset, new_trans));
-                            transitions_iter.next();
                         }
                     }
                     // Insert remaining transitions at the end
                     let n_ports = self.graph.num_outputs(state.0);
                     new_transitions.extend(transitions_iter.map(|t| (n_ports, t.clone())));
+                    // sort transitions
+                    new_transitions.sort_by_key(|&(p, _)| p);
 
                     // Now shift ports to make space for new ones
                     self.set_num_ports(
@@ -772,9 +774,9 @@ fn is_satisfied(
     partition: &LinePartition,
     spine: &Spine,
 ) -> bool {
-    addrs.iter().all(|(addr, ribs)| {
-        if let Some(graph_addr) = partition.get_address(node, spine, Some(ribs)).as_ref() {
-            addr == graph_addr
+    addrs.iter().all(|(addr, _)| {
+        if let Some(graph_node) = partition.get_node_index(addr, spine) {
+            node == graph_node
         } else {
             true
         }
