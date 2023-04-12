@@ -6,10 +6,12 @@ use std::{
     mem,
 };
 
-use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortIndex, PortOffset, Weights};
+use portgraph::{
+    dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights,
+};
 
 use crate::utils::{
-    address::{port_opposite, Address, LinePartition, Ribs, Spine},
+    address::{Address, LinePartition, Ribs, Spine},
     cover::cover_nodes,
 };
 
@@ -44,7 +46,7 @@ impl Display for NodeWeight {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StateID(NodeIndex);
+pub struct StateID(pub(crate) NodeIndex);
 
 impl StateID {
     pub fn root() -> Self {
@@ -554,7 +556,7 @@ impl GraphTrie {
                             self.graph
                                 .outputs(state.0)
                                 .filter(|&out_p| {
-                                    matches!(
+                                    !matches!(
                                         &self.weights[out_p],
                                         StateTransition::FAIL | StateTransition::NoLinkedNode
                                     )
@@ -596,6 +598,9 @@ impl GraphTrie {
                         }
                         // Use existing transition if it's identical
                         if Some(curr_transition) == transitions_iter.peek().copied() {
+                            if let Some(in_port) = self.graph.port_link(port) {
+                                in_ports.push(self.create_perm_port(in_port));
+                            }
                             transitions_iter.next();
                         }
                         // Finally, insert new transitions before the current transition
@@ -643,7 +648,7 @@ impl GraphTrie {
                     let mut new_offset = self.graph.num_outputs(state.0);
                     for offset in (0..=n_ports).rev() {
                         // move existing transition
-                        if offset < n_ports {
+                        let fallback = if offset < n_ports {
                             new_offset -= 1;
                             let old = self
                                 .graph
@@ -654,7 +659,12 @@ impl GraphTrie {
                                 .port_index(state.0, PortOffset::new_outgoing(new_offset))
                                 .expect("invalid offset");
                             self.move_out_port(old, new);
-                        }
+                            self.graph
+                                .port_link(new)
+                                .map(|p| self.graph.port_node(p).expect("invalid port"))
+                        } else {
+                            None
+                        };
                         // Insert new transitions
                         while matches!(new_transitions.last(), Some(&(o, _)) if offset == o) {
                             let (_, transition) = new_transitions.pop().expect("just checked");
@@ -664,29 +674,19 @@ impl GraphTrie {
                                 .port_index(state.0, PortOffset::new_outgoing(new_offset))
                                 .expect("invalid offset");
                             self.weights[new] = transition;
+                            let next_state = if let Some(fallback) = fallback {
+                                StateID(fallback)
+                            } else {
+                                *new_state.get_or_insert_with(|| self.add_state(false))
+                            };
+                            let in_port = self.add_edge(new, next_state).expect("new port index");
+                            in_ports.push(self.create_perm_port(in_port));
                         }
                         if offset == new_offset {
                             // There are no more empty slots. We are done
                             break;
                         }
                     }
-
-                    // Finally, return all matching transition ports
-                    in_ports.extend(
-                        self.graph
-                            .outputs(state.0)
-                            .filter(|&out_port| transitions.contains(&self.weights[out_port]))
-                            .collect::<Vec<_>>()
-                            .into_iter()
-                            .map(|out_port| {
-                                let in_port = self.graph.port_link(out_port).unwrap_or_else(|| {
-                                    let &mut new_node =
-                                        new_state.get_or_insert_with(|| self.add_state(false));
-                                    self.add_edge(out_port, new_node).expect("out_port free")
-                                });
-                                self.create_perm_port(in_port)
-                            }),
-                    );
                 }
                 None => {}
             }
@@ -747,8 +747,22 @@ impl GraphTrie {
         self.perm_indices.borrow_mut().remove(&port)
     }
 
+    pub(crate) fn str_weights(&self) -> Weights<String, String> {
+        let mut str_weights = Weights::new();
+        for p in self.graph.ports_iter() {
+            str_weights[p] = match self.graph.port_direction(p).unwrap() {
+                Direction::Incoming => "".to_string(),
+                Direction::Outgoing => self.weights[p].to_string(),
+            }
+        }
+        for n in self.graph.nodes_iter() {
+            str_weights[n] = self.weights[n].to_string();
+        }
+        str_weights
+    }
+
     pub(crate) fn dotstring(&self) -> String {
-        dot_string_weighted(&self.graph, &self.weights)
+        dot_string_weighted(&self.graph, &self.str_weights())
     }
 }
 

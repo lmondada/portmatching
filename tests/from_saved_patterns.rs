@@ -78,7 +78,34 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
 
 #[test]
 fn from_saved_patterns() {
-    let testcases = ["24"];
+    let testcases = [
+        "first",
+        "second",
+        "third",
+        "fourth",
+        "fifth",
+        "sixth",
+        "seventh",
+        "eighth",
+        "ninth",
+        "tenth",
+        "eleventh",
+        "twelveth",
+        "thirteenth",
+        "fourteenth",
+        "fifteenth",
+        "sixteenth",
+        "seventeenth",
+        "eighteenth",
+        "ninteenth",
+        "twentieth",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26",
+    ];
     for test in testcases {
         println!("{test}...");
         let path: PathBuf = ["tests", "saved_patterns", test].iter().collect();

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use portgraph::{NodeIndex, PortGraph};
+use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 
 use crate::{
     matcher::Matcher,
@@ -35,7 +35,15 @@ impl LineGraphTrie {
     }
 
     pub fn dotstring(&self) -> String {
-        self.trie.dotstring()
+        let mut weights = self.trie.str_weights();
+        for n in self.trie.graph.nodes_iter() {
+            let empty = vec![];
+            let matches = self.match_states.get(&StateID(n)).unwrap_or(&empty);
+            if !matches.is_empty() {
+                weights[n] += &format!("[{:?}]", matches);
+            }
+        }
+        dot_string_weighted(&self.trie.graph, &weights)
     }
 }
 
@@ -118,10 +126,7 @@ impl ManyPatternMatcher for LineGraphTrie {
 
         // Record matching pattern in final states
         for state in current_states {
-            self.match_states
-                .entry(state)
-                .or_insert_with(Vec::new)
-                .push(pattern_id);
+            self.match_states.entry(state).or_default().push(pattern_id);
         }
 
         pattern_id
@@ -133,7 +138,7 @@ mod tests {
     // use std::fs;
 
     use itertools::Itertools;
-    use portgraph::{dot::dot_string, proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
+    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
 
     use proptest::prelude::*;
 
@@ -332,12 +337,9 @@ mod tests {
     proptest! {
         #[test]
         fn single_graph_proptest(pattern in gen_portgraph_connected(10, 4, 20), g in gen_portgraph(100, 4, 200)) {
-            // fs::write("pattern.gv", dot_string(&pattern));
-            // fs::write("graph.gv", dot_string(&g));
             let pattern = Pattern::from_graph(pattern).unwrap();
             let mut matcher = LineGraphTrie::new();
             let pattern_id = matcher.add_pattern(pattern.clone());
-            // fs::write("patterntrie.gv", matcher.dotstring());
             let single_matcher = SinglePatternMatcher::from_pattern(pattern.clone());
             let many_matches = matcher.find_matches(&g);
             let single_matches: Vec<_> = single_matcher
@@ -387,8 +389,11 @@ mod tests {
                 })
                 .collect_vec();
             // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
+            println!("building...");
             let matcher = LineGraphTrie::from_patterns(patterns.clone());
+            println!("finding...");
             let many_matches = matcher.find_matches(&g);
+            println!("done");
             let many_matches = (0..patterns.len())
                 .map(|i| {
                     many_matches

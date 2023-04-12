@@ -300,16 +300,33 @@ impl<'graph> LinePartition<'graph> {
         port: PortOffset,
     ) -> Address {
         let path_to_spine = spine[l_ind].0.clone();
+        let (spine_ind, l_ind) = {
+            let spine_root = follow_path(&path_to_spine, self.root, self.graph)
+                .expect("cannot reach spine root");
+            let line = self.node2line[&spine_root]
+                .iter()
+                .find(|l| {
+                    let Some(port) = l.out_port.or(l.in_port) else {
+                        return false
+                    };
+                    let offset = self.graph.port_offset(port).expect("invalid port");
+                    offset.index() == spine[l_ind].1
+                })
+                .expect("Spine root is not root");
+            (line.ind, line.line_ind)
+        };
         let mut spine_to_node = vec![None; ind.abs() as usize];
         self.node2line
             .values()
             .flatten()
             .filter(|line| {
-                line.line_ind == l_ind && ind * line.ind >= 0 && line.ind.abs() < ind.abs()
+                let spine_dst = line.ind - spine_ind;
+                line.line_ind == l_ind && ind * spine_dst >= 0 && spine_dst.abs() < ind.abs()
             })
             .for_each(|line| {
+                let spine_dst = line.ind - spine_ind;
                 let port = if ind < 0 { line.in_port } else { line.out_port };
-                spine_to_node[line.ind.abs() as usize] =
+                spine_to_node[spine_dst.abs() as usize] =
                     self.graph.port_offset(port.expect("Cannot follow path"));
             });
         let mut path = path_to_spine;
