@@ -53,7 +53,7 @@ impl Matcher for LineGraphTrie {
     fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
         let mut current_states = vec![StateID::root()];
         let mut matches = BTreeSet::new();
-        let partition = LinePartition::new(&graph, root);
+        let partition = LinePartition::new(graph, root);
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
             for state in current_states {
@@ -137,7 +137,9 @@ impl ManyPatternMatcher for LineGraphTrie {
 mod tests {
     // use std::fs;
 
+    #[cfg(feature = "serde")]
     use itertools::Itertools;
+    
     use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
 
     use proptest::prelude::*;

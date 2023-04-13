@@ -47,7 +47,7 @@ where
         })
         .filter(|n| nodes.contains(n))
         .collect();
-    let mut visited = cover.clone();
+    let mut visited = cover;
 
     while let Some(node) = curr_nodes.pop_front() {
         if visited.contains(&node) {
@@ -55,10 +55,7 @@ where
         } else if graph
             .input_links(node)
             .flatten()
-            .map(|p| graph.port_node(p).expect("Invalid port"))
-            .filter(|n| nodes.contains(n) && !visited.contains(n))
-            .next()
-            .is_some()
+            .map(|p| graph.port_node(p).expect("Invalid port")).any(|n| nodes.contains(&n) && !visited.contains(&n))
         {
             // there is a predecessor in nodes that was not yet visited, so wait
             curr_nodes.push_back(node);

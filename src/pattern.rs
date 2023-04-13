@@ -168,19 +168,19 @@ mod tests {
         assert_eq!(
             p.canonical_edge_ordering(),
             vec![
-                Edge(v2_ports[0].into(), v1_ports[3].into()),
-                Edge(v1_ports[1].into(), None),
-                Edge(v2_ports[1].into(), v0_ports[2].into()),
-                Edge(v0_ports[0].into(), None),
-                Edge(v2_ports[2].into(), v3_ports[1].into()),
-                Edge(v3_ports[3].into(), None),
-                Edge(v1_ports[0].into(), None),
-                Edge(v1_ports[2].into(), None),
-                Edge(v1_ports[4].into(), None),
-                Edge(v0_ports[1].into(), None),
-                Edge(v0_ports[3].into(), None),
-                Edge(v3_ports[0].into(), None),
-                Edge(v3_ports[2].into(), None)
+                Edge(v2_ports[0], v1_ports[3].into()),
+                Edge(v1_ports[1], None),
+                Edge(v2_ports[1], v0_ports[2].into()),
+                Edge(v0_ports[0], None),
+                Edge(v2_ports[2], v3_ports[1].into()),
+                Edge(v3_ports[3], None),
+                Edge(v1_ports[0], None),
+                Edge(v1_ports[2], None),
+                Edge(v1_ports[4], None),
+                Edge(v0_ports[1], None),
+                Edge(v0_ports[3], None),
+                Edge(v3_ports[0], None),
+                Edge(v3_ports[2], None)
             ]
         );
     }
@@ -200,8 +200,8 @@ mod tests {
         assert_eq!(
             get_line(&g, v2_out0, &mut BTreeSet::new()),
             vec![
-                Edge(v2_out0.into(), v3_in1.into()),
-                Edge(v3_out1.into(), None)
+                Edge(v2_out0, v3_in1.into()),
+                Edge(v3_out1, None)
             ]
         );
     }
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn get_line_test_2() {
         let mut g = graph();
-        let v0 = g.nodes_iter().nth(0).unwrap();
+        let v0 = g.nodes_iter().next().unwrap();
         let v2 = g.nodes_iter().nth(2).unwrap();
         let v3 = g.nodes_iter().nth(3).unwrap();
         let v4 = g.add_node(1, 0);
@@ -225,15 +225,15 @@ mod tests {
         assert_eq!(
             get_line(&g, v2_out0, &mut BTreeSet::new()),
             vec![
-                Edge(v2_out0.into(), v3_in1.into()),
-                Edge(v3_out1.into(), v4_in0.into())
+                Edge(v2_out0, v3_in1.into()),
+                Edge(v3_out1, v4_in0.into())
             ]
         );
         assert_eq!(
             get_line(&g, v2_in1, &mut BTreeSet::new()),
             vec![
-                Edge(v2_in1.into(), v0_out0.into()),
-                Edge(v0_in0.into(), None)
+                Edge(v2_in1, v0_out0.into()),
+                Edge(v0_in0, None)
             ]
         );
     }

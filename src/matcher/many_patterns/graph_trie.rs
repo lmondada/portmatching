@@ -264,7 +264,7 @@ impl GraphTrie {
                             (&mut transition, &next_addr)
                         {
                             let merged_addrs = merge_addrs(
-                                &addrs,
+                                addrs,
                                 &[(new_addr.clone(), next_ribs.clone().unwrap())],
                             )?;
                             if !is_satisfied(next_node?, &merged_addrs, partition, spine?) {
@@ -737,7 +737,7 @@ impl GraphTrie {
 
     fn port_state(&self, port: PermPortIndex) -> Option<StateID> {
         let &port = self.perm_indices.borrow().get(&port)?;
-        self.graph.port_node(port).map(|p| StateID(p))
+        self.graph.port_node(port).map(StateID)
     }
 
     pub(crate) fn free(&self, port: PermPortIndex) -> Option<PortIndex> {
@@ -765,7 +765,7 @@ impl GraphTrie {
 
 fn is_satisfied(
     node: NodeIndex,
-    addrs: &Vec<(Address, Ribs)>,
+    addrs: &[(Address, Ribs)],
     partition: &LinePartition,
     spine: &Spine,
 ) -> bool {
@@ -971,8 +971,7 @@ mod tests {
         let spine = partition.get_spine();
         let ribs = partition.get_ribs(&spine);
         trie.weights[state.0].address = partition
-            .get_address(root, &spine, Some(&ribs))
-            .into();
+            .get_address(root, &spine, Some(&ribs));
         trie.weights[state.0].out_port = PortOffset::new_outgoing(1).into();
 
         trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);

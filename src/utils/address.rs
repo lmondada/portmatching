@@ -46,7 +46,7 @@ pub(crate) struct Address(pub(crate) usize, pub(crate) i32);
 impl Address {
     fn key(&self) -> (usize, u32, bool) {
         let &Address(fst, snd) = self;
-        (fst, snd.abs() as u32, snd < 0)
+        (fst, snd.unsigned_abs(), snd < 0)
     }
 }
 
@@ -108,7 +108,7 @@ impl<'graph> LinePartition<'graph> {
                 .ports
                 .iter()
                 .enumerate()
-                .flat_map(|(i, ps)| ps.into_iter().flatten().map(move |&p| (i, p)))
+                .flat_map(|(i, ps)| ps.iter().flatten().map(move |&p| (i, p)))
                 .find(|&(_, p)| p == port)
                 .expect("line must contain port")
                 .0 as i32;
@@ -215,13 +215,10 @@ impl<'graph> LinePartition<'graph> {
         let Some(Ribs(ribs)) = ribs else {
             return all_addrs.into_iter().next()
         };
-        all_addrs
-            .into_iter()
-            .filter(|&Address(spine_ind, ind)| {
-                let [from, to] = ribs[spine_ind];
-                from <= ind && to >= ind
-            })
-            .next()
+        all_addrs.into_iter().find(|&Address(spine_ind, ind)| {
+            let [from, to] = ribs[spine_ind];
+            from <= ind && to >= ind
+        })
     }
 
     pub(crate) fn get_node_index(
@@ -234,12 +231,10 @@ impl<'graph> LinePartition<'graph> {
         }
         let skeleton_lines = self.get_spine_within(spine);
         let line = skeleton_lines[line_ind]?;
-        let mut port = if ind == 0 {
-            line.out_port.or(line.in_port)
-        } else if ind > 0 {
-            line.out_port
-        } else {
-            line.in_port
+        let mut port = match ind {
+            ind if ind > 0 => line.out_port,
+            ind if ind < 0 => line.in_port,
+            _ => line.out_port.or(line.in_port),
         };
         let mut node = self.graph.port_node(port?).expect("invalid port");
         for _ in 0..ind.abs() {
@@ -256,15 +251,13 @@ impl<'graph> LinePartition<'graph> {
             .map(|(path, out_port)| {
                 let n = follow_path(path, self.root, self.graph)?;
                 self.node2line[&n].iter().find(|line| {
-                    for port in [line.out_port, line.in_port] {
-                        if let Some(port) = port {
-                            let offset = self.graph.port_offset(port).expect("invalid port");
-                            if offset.index() == *out_port {
-                                return true;
-                            }
+                    for port in [line.out_port, line.in_port].into_iter().flatten() {
+                        let offset = self.graph.port_offset(port).expect("invalid port");
+                        if offset.index() == *out_port {
+                            return true;
                         }
                     }
-                    return false;
+                    false
                 })
             })
             .collect()
@@ -309,7 +302,7 @@ impl<'graph> LinePartition<'graph> {
                 .expect("Spine root is not root");
             (line.ind, line.line_ind)
         };
-        let mut spine_to_node = vec![None; ind.abs() as usize];
+        let mut spine_to_node = vec![None; ind.unsigned_abs() as usize];
         self.node2line
             .values()
             .flatten()
@@ -320,7 +313,7 @@ impl<'graph> LinePartition<'graph> {
             .for_each(|line| {
                 let spine_dst = line.ind - spine_ind;
                 let port = if ind < 0 { line.in_port } else { line.out_port };
-                spine_to_node[spine_dst.abs() as usize] =
+                spine_to_node[spine_dst.unsigned_abs() as usize] =
                     self.graph.port_offset(port.expect("Cannot follow path"));
             });
         let mut path = path_to_spine;
@@ -502,33 +495,23 @@ mod tests {
         let spine = partition.get_spine();
         let ribs = partition.get_ribs(&spine);
         assert_eq!(
-            partition
-                .get_address(n0, &spine, Some(&ribs))
-                .unwrap(),
+            partition.get_address(n0, &spine, Some(&ribs)).unwrap(),
             Address(0, 0)
         );
         assert_eq!(
-            partition
-                .get_address(n2, &spine, Some(&ribs))
-                .unwrap(),
+            partition.get_address(n2, &spine, Some(&ribs)).unwrap(),
             Address(0, 2)
         );
         assert_eq!(
-            partition
-                .get_address(n4, &spine, Some(&ribs))
-                .unwrap(),
+            partition.get_address(n4, &spine, Some(&ribs)).unwrap(),
             Address(0, -1)
         );
         assert_eq!(
-            partition
-                .get_address(n5, &spine, Some(&ribs))
-                .unwrap(),
+            partition.get_address(n5, &spine, Some(&ribs)).unwrap(),
             Address(3, 1)
         );
         assert_eq!(
-            partition
-                .get_address(n6, &spine, Some(&ribs))
-                .unwrap(),
+            partition.get_address(n6, &spine, Some(&ribs)).unwrap(),
             Address(3, -1)
         );
     }
@@ -548,24 +531,18 @@ mod tests {
         let spine = vec![([].into(), 0)];
         let ribs = Ribs(vec![[0, 2]]);
         assert_eq!(
-            partition
-                .get_address(n2, &spine, Some(&ribs))
-                .unwrap(),
+            partition.get_address(n2, &spine, Some(&ribs)).unwrap(),
             Address(0, 2)
         );
 
         let spine = vec![([].into(), 0)];
         let ribs = Ribs(vec![[-2, 0]]);
         assert_eq!(
-            partition
-                .get_address(n2, &spine, Some(&ribs))
-                .unwrap(),
+            partition.get_address(n2, &spine, Some(&ribs)).unwrap(),
             Address(0, -1)
         );
         assert_eq!(
-            partition
-                .get_address(n1, &spine, Some(&ribs))
-                .unwrap(),
+            partition.get_address(n1, &spine, Some(&ribs)).unwrap(),
             Address(0, -2)
         );
     }
