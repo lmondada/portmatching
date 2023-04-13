@@ -389,7 +389,6 @@ mod tests {
                 })
                 .collect_vec();
             // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
-            println!("building...");
             let matcher = LineGraphTrie::from_patterns(patterns.clone());
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())

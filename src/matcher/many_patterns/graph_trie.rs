@@ -147,8 +147,15 @@ impl GraphTrie {
     }
 
     pub(crate) fn node(&self, state: StateID, graph_cache: &LinePartition) -> Option<NodeIndex> {
-        let NodeWeight { address, spine, .. } = self.weight(state);
-        graph_cache.get_node_index(address.as_ref()?, spine.as_ref()?)
+        graph_cache.get_node_index(self.address(state)?, self.spine(state)?)
+    }
+
+    fn spine(&self, state: StateID) -> Option<&Spine> {
+        self.weight(state).spine.as_ref()
+    }
+
+    fn address(&self, state: StateID) -> Option<&Address> {
+        self.weight(state).address.as_ref()
     }
 
     pub(crate) fn out_port(
@@ -197,77 +204,90 @@ impl GraphTrie {
         state: StateID,
         graph: &PortGraph,
         partition: &LinePartition,
-        mode: TrieTraversal,
     ) -> Vec<StateTransition> {
-        match mode {
-            TrieTraversal::ReadOnly => {
-                let mut transitions = self
-                    .compatible_transitions(state, graph, partition, mode)
-                    .map(|out_p| self.weights[out_p].clone());
-                if self.weight(state).non_deterministic {
-                    transitions.collect()
-                } else {
-                    transitions.next().into_iter().collect()
-                }
-            }
-            TrieTraversal::Write => {
-                let spine = self.weight(state).spine.clone();
-                let (next_node, next_port) = self
-                    .next_node_port(state, partition)
-                    .map(|(n, p)| (Some(n), Some(p)))
-                    .unwrap_or((None, None));
-                let next_addr = next_node.map(|n| {
-                    partition
-                        .get_address(n, spine.as_ref().unwrap(), None)
-                        .expect("There is no address for next node")
-                });
-                let next_ribs = spine.as_ref().and_then(|spine| {
-                    let mut ribs = partition.get_ribs(spine);
-                    ribs.add_addr(next_addr.as_ref()?.clone());
-                    Some(ribs)
-                });
-                let mut transitions = Vec::new();
-                if !self.weight(state).non_deterministic {
-                    transitions.extend(
-                        self.compatible_transitions(state, graph, partition, mode)
-                            .filter_map(|out_p| {
-                                let mut transition = self.weights[out_p].clone();
-                                if let (StateTransition::Node(addrs, _), Some(new_addr)) =
-                                    (&mut transition, &next_addr)
-                                {
-                                    let merged_addrs = merge_addrs(
-                                        &addrs,
-                                        &[(new_addr.clone(), next_ribs.clone().unwrap())],
-                                    )?;
-                                    if !is_satisfied(
-                                        next_node?,
-                                        &merged_addrs,
-                                        partition,
-                                        spine.as_ref()?,
-                                    ) {
-                                        return None;
-                                    }
-                                    *addrs = merged_addrs;
-                                }
-                                Some(transition)
-                            }),
+        let mut transitions = self
+            .compatible_transitions(state, graph, partition, TrieTraversal::ReadOnly)
+            .map(|out_p| self.weights[out_p].clone());
+        if self.weight(state).non_deterministic {
+            transitions.collect()
+        } else {
+            transitions.next().into_iter().collect()
+        }
+    }
+    pub(crate) fn get_transitions_write(
+        &mut self,
+        state: StateID,
+        graph: &PortGraph,
+        partition: &LinePartition,
+    ) -> Vec<StateTransition> {
+        let (next_node, next_port) = self
+            .next_node_port(state, partition)
+            .map(|(n, p)| (Some(n), Some(p)))
+            .unwrap_or((None, None));
+        let next_addr = next_node.map(|n| {
+            let NodeWeight {
+                out_port,
+                address,
+                spine,
+                ..
+            } = &mut self.weights[state.0];
+            partition
+                .get_address(n, spine.as_ref().expect("next_node exists"), None)
+                .unwrap_or_else(|| {
+                    let Address(line_ind, _) = partition.extend_spine(
+                        spine.as_mut().expect("next_node exists"),
+                        address.as_ref().expect("next_node exists"),
+                        out_port.expect("next_node exists"),
                     );
-                }
-                // Append the perfect transition
-                if let (Some(addr), Some(port)) = (next_addr, next_port) {
-                    let ideal = StateTransition::Node(vec![(addr, next_ribs.unwrap())], port);
-                    if !transitions.contains(&ideal) {
-                        transitions.push(ideal);
-                    }
-                } else if self.out_port(state, partition).is_some() {
-                    let ideal = StateTransition::NoLinkedNode;
-                    if !transitions.contains(&ideal) {
-                        transitions.push(ideal);
-                    }
-                }
-                transitions
+                    let ind = if out_port.unwrap().direction() == Direction::Outgoing {
+                        1
+                    } else {
+                        -1
+                    };
+                    Address(line_ind, ind)
+                })
+        });
+        let spine = self.spine(state);
+        let next_ribs = self.spine(state).and_then(|spine| {
+            let mut ribs = partition.get_ribs(spine);
+            ribs.add_addr(next_addr.as_ref()?.clone());
+            Some(ribs)
+        });
+        let mut transitions = Vec::new();
+        if !self.weight(state).non_deterministic {
+            transitions.extend(
+                self.compatible_transitions(state, graph, partition, TrieTraversal::Write)
+                    .filter_map(|out_p| {
+                        let mut transition = self.weights[out_p].clone();
+                        if let (StateTransition::Node(addrs, _), Some(new_addr)) =
+                            (&mut transition, &next_addr)
+                        {
+                            let merged_addrs = merge_addrs(
+                                &addrs,
+                                &[(new_addr.clone(), next_ribs.clone().unwrap())],
+                            )?;
+                            if !is_satisfied(next_node?, &merged_addrs, partition, spine?) {
+                                return None;
+                            }
+                            *addrs = merged_addrs;
+                        }
+                        Some(transition)
+                    }),
+            );
+        }
+        // Append the perfect transition
+        if let (Some(addr), Some(port)) = (next_addr, next_port) {
+            let ideal = StateTransition::Node(vec![(addr, next_ribs.unwrap())], port);
+            if !transitions.contains(&ideal) {
+                transitions.push(ideal);
+            }
+        } else if self.out_port(state, partition).is_some() {
+            let ideal = StateTransition::NoLinkedNode;
+            if !transitions.contains(&ideal) {
+                transitions.push(ideal);
             }
         }
+        transitions
     }
 
     pub(crate) fn next_states(
@@ -277,7 +297,7 @@ impl GraphTrie {
         partition: &LinePartition,
     ) -> Vec<StateID> {
         // Compute "ideal" transition
-        self.get_transitions(state, graph, partition, TrieTraversal::ReadOnly)
+        self.get_transitions(state, graph, partition)
             .into_iter()
             .map(|transition| {
                 self.transition(state, &transition)
@@ -368,11 +388,7 @@ impl GraphTrie {
             .outputs(state.0)
             .filter(move |&out_p| match self.weights[out_p] {
                 StateTransition::Node(ref addrs, offset) => {
-                    let spine = self
-                        .weight(state)
-                        .spine
-                        .as_ref()
-                        .expect("from if condition");
+                    let spine = self.spine(state).expect("from if condition");
                     if in_offset != Some(offset) {
                         return false;
                     }
@@ -469,40 +485,18 @@ impl GraphTrie {
         let start_offset = graph.port_offset(out_port).expect("invalid port");
         let mut curr_states: VecDeque<_> = [state].into();
         while let Some(state) = curr_states.pop_front() {
-            let NodeWeight {
-                out_port: offset,
-                address: addr,
-                spine,
-                ..
-            } = self.weight(state);
-            let offset = offset.unwrap_or(start_offset);
-            let mut fallback_spine = if spine.is_none() {
-                Some(partition.get_skeleton().spine)
-            } else {
-                None
-            };
-            let addr = addr.clone().unwrap_or_else(|| {
+            let offset = self.weight(state).out_port.unwrap_or(start_offset);
+            let mut fallback_spine = None;
+            let spine = self.spine(state).unwrap_or_else(|| {
+                fallback_spine = Some(partition.get_skeleton().spine);
+                fallback_spine.as_ref().unwrap()
+            });
+            let addr = self.address(state).cloned().unwrap_or_else(|| {
                 partition
-                    .get_address(
-                        start_node,
-                        spine
-                            .as_ref()
-                            .or(fallback_spine.as_ref())
-                            .expect("by def of fallback_spine"),
-                        None,
-                    )
+                    .get_address(start_node, spine, None)
                     .expect("Could not get address of current node")
             });
-            if let Some(spine) = &mut fallback_spine {
-                // If we just created the spine we extend it for future cases
-                // that may require `addr` in the spine
-                partition.extend_spine(spine, &addr, offset);
-            }
-            let spine = spine
-                .as_ref()
-                .or(fallback_spine.as_ref())
-                .expect("by def of fallback");
-            if offset == start_offset && Some(start_node) == partition.get_node_index(&addr, &spine)
+            if offset == start_offset && Some(start_node) == partition.get_node_index(&addr, spine)
             {
                 self.weights[state.0].spine = Some(spine.clone());
                 self.weights[state.0].out_port = Some(offset);
@@ -552,7 +546,7 @@ impl GraphTrie {
             self.get_or_create_start_states(out_port, state, graph, partition, new_start_state);
         let mut in_ports = Vec::new();
         for state in start_states {
-            let transitions = self.get_transitions(state, graph, partition, TrieTraversal::Write);
+            let transitions = self.get_transitions_write(state, graph, partition);
             let mut transitions_iter = transitions.iter().peekable();
             match transitions_iter.peek() {
                 Some(StateTransition::FAIL) => panic!("invalid start state"),

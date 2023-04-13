@@ -281,7 +281,7 @@ impl<'graph> LinePartition<'graph> {
         // Compute intervals
         // All indices that we must represent must be in the interval
         let spine_len = cmp::max(spine.len(), 1);
-        let mut ribs = vec![[0, 0]; spine_len];
+        let mut ribs = vec![[0, -1]; spine_len];
         let all_addrs = self
             .graph
             .nodes_iter()
