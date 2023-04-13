@@ -97,6 +97,7 @@ pub(crate) enum TrieTraversal {
     Write,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum StateTransition {
     Node(Vec<(Address, Ribs)>, PortOffset),
@@ -488,7 +489,7 @@ impl GraphTrie {
             let offset = self.weight(state).out_port.unwrap_or(start_offset);
             let mut fallback_spine = None;
             let spine = self.spine(state).unwrap_or_else(|| {
-                fallback_spine = Some(partition.get_skeleton().spine);
+                fallback_spine = Some(partition.get_spine());
                 fallback_spine.as_ref().unwrap()
             });
             let addr = self.address(state).cloned().unwrap_or_else(|| {
@@ -757,7 +758,7 @@ impl GraphTrie {
         str_weights
     }
 
-    pub(crate) fn dotstring(&self) -> String {
+    pub(crate) fn _dotstring(&self) -> String {
         dot_string_weighted(&self.graph, &self.str_weights())
     }
 }
@@ -967,9 +968,10 @@ mod tests {
         link(&mut graph, (0, 1), (1, 1));
 
         let partition = LinePartition::new(&graph, root);
-        let skeleton = partition.get_skeleton();
+        let spine = partition.get_spine();
+        let ribs = partition.get_ribs(&spine);
         trie.weights[state.0].address = partition
-            .get_address(root, &skeleton.spine, Some(&skeleton.ribs))
+            .get_address(root, &spine, Some(&ribs))
             .into();
         trie.weights[state.0].out_port = PortOffset::new_outgoing(1).into();
 

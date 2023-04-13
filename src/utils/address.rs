@@ -20,12 +20,6 @@ impl<'graph> fmt::Debug for LinePartition<'graph> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct Skeleton {
-    pub(crate) spine: Spine,
-    pub(crate) ribs: Ribs,
-}
-
 // impl Skeleton {
 //     pub(crate) fn ribs_for(&self, partition: &LinePartition) -> Ribs {
 //         let mut ribs = vec![[None; 2]; self.spine.len()];
@@ -156,7 +150,7 @@ impl<'graph> LinePartition<'graph> {
         }
     }
 
-    pub(crate) fn get_skeleton(&self) -> Skeleton {
+    pub(crate) fn get_spine(&self) -> Spine {
         let mut spine = Vec::new();
         for line_ind in 0.. {
             let nodes_on_line: Vec<_> = self
@@ -183,8 +177,7 @@ impl<'graph> LinePartition<'graph> {
             }
         }
 
-        let ribs = self.get_ribs(&spine);
-        Skeleton { spine, ribs }
+        spine
     }
 
     /// Find the address of `node` relative to the skeleton
@@ -192,7 +185,7 @@ impl<'graph> LinePartition<'graph> {
         if node == self.root {
             return vec![Address(0, 0)];
         }
-        let spine = self.get_spine(spine);
+        let spine = self.get_spine_within(spine);
         let mut rev_inds: BTreeMap<_, Vec<_>> = Default::default();
         for (i, lp) in spine.iter().enumerate() {
             if let Some(lp) = lp {
@@ -239,7 +232,7 @@ impl<'graph> LinePartition<'graph> {
         if (line_ind, ind) == (0, 0) {
             return Some(self.root);
         }
-        let skeleton_lines = self.get_spine(spine);
+        let skeleton_lines = self.get_spine_within(spine);
         let line = skeleton_lines[line_ind]?;
         let mut port = if ind == 0 {
             line.out_port.or(line.in_port)
@@ -257,7 +250,7 @@ impl<'graph> LinePartition<'graph> {
         Some(node)
     }
 
-    fn get_spine(&self, spine: &Spine) -> Vec<Option<&LinePoint>> {
+    fn get_spine_within(&self, spine: &Spine) -> Vec<Option<&LinePoint>> {
         spine
             .iter()
             .map(|(path, out_port)| {
@@ -428,7 +421,7 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::utils::{
-        address::{Address, LinePartition, Ribs, Skeleton},
+        address::{Address, LinePartition, Ribs},
         test_utils::gen_portgraph_connected,
     };
     use portgraph::proptest::gen_node_index;
@@ -453,12 +446,10 @@ mod tests {
         link(&mut g, (1, 0), (0, 1));
         link(&mut g, (1, 1), (0, 0));
         let p = LinePartition::new(&g, NodeIndex::new(0));
-        let skel = Skeleton {
-            spine: vec![([].into(), 0), ([].into(), 1)],
-            ribs: Ribs(vec![[-1, 0], [0, 0]]),
-        };
+        let spine = vec![([].into(), 0), ([].into(), 1)];
+        let ribs = Ribs(vec![[-1, 0], [0, 0]]);
         let addr = p
-            .get_address(NodeIndex::new(1), &skel.spine, Some(&skel.ribs))
+            .get_address(NodeIndex::new(1), &spine, Some(&ribs))
             .unwrap();
         assert_eq!(addr, Address(0, -1));
     }
@@ -508,34 +499,35 @@ mod tests {
 
         let partition = LinePartition::new(&g, NodeIndex::new(0));
 
-        let skeleton = partition.get_skeleton();
+        let spine = partition.get_spine();
+        let ribs = partition.get_ribs(&spine);
         assert_eq!(
             partition
-                .get_address(n0, &skeleton.spine, Some(&skeleton.ribs))
+                .get_address(n0, &spine, Some(&ribs))
                 .unwrap(),
             Address(0, 0)
         );
         assert_eq!(
             partition
-                .get_address(n2, &skeleton.spine, Some(&skeleton.ribs))
+                .get_address(n2, &spine, Some(&ribs))
                 .unwrap(),
             Address(0, 2)
         );
         assert_eq!(
             partition
-                .get_address(n4, &skeleton.spine, Some(&skeleton.ribs))
+                .get_address(n4, &spine, Some(&ribs))
                 .unwrap(),
             Address(0, -1)
         );
         assert_eq!(
             partition
-                .get_address(n5, &skeleton.spine, Some(&skeleton.ribs))
+                .get_address(n5, &spine, Some(&ribs))
                 .unwrap(),
             Address(3, 1)
         );
         assert_eq!(
             partition
-                .get_address(n6, &skeleton.spine, Some(&skeleton.ribs))
+                .get_address(n6, &spine, Some(&ribs))
                 .unwrap(),
             Address(3, -1)
         );
@@ -553,30 +545,26 @@ mod tests {
 
         let partition = LinePartition::new(&g, NodeIndex::new(0));
 
-        let skel = Skeleton {
-            spine: vec![([].into(), 0)],
-            ribs: Ribs(vec![[0, 2]]),
-        };
+        let spine = vec![([].into(), 0)];
+        let ribs = Ribs(vec![[0, 2]]);
         assert_eq!(
             partition
-                .get_address(n2, &skel.spine, Some(&skel.ribs))
+                .get_address(n2, &spine, Some(&ribs))
                 .unwrap(),
             Address(0, 2)
         );
 
-        let skel = Skeleton {
-            spine: vec![([].into(), 0)],
-            ribs: Ribs(vec![[-2, 0]]),
-        };
+        let spine = vec![([].into(), 0)];
+        let ribs = Ribs(vec![[-2, 0]]);
         assert_eq!(
             partition
-                .get_address(n2, &skel.spine, Some(&skel.ribs))
+                .get_address(n2, &spine, Some(&ribs))
                 .unwrap(),
             Address(0, -1)
         );
         assert_eq!(
             partition
-                .get_address(n1, &skel.spine, Some(&skel.ribs))
+                .get_address(n1, &spine, Some(&ribs))
                 .unwrap(),
             Address(0, -2)
         );
@@ -611,9 +599,10 @@ mod tests {
         #[test]
         fn prop_get_addr((g, n) in gen_node_index(gen_portgraph_connected(10, 4, 20))) {
             let p = LinePartition::new(&g, NodeIndex::new(0));
-            let skeleton = p.get_skeleton();
-            let addr = p.get_address(n, &skeleton.spine, Some(&skeleton.ribs)).unwrap();
-            prop_assert_eq!(n, p.get_node_index(&addr, &skeleton.spine).unwrap());
+            let spine = p.get_spine();
+            let ribs = p.get_ribs(&spine);
+            let addr = p.get_address(n, &spine, Some(&ribs)).unwrap();
+            prop_assert_eq!(n, p.get_node_index(&addr, &spine).unwrap());
         }
     }
 }
