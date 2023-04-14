@@ -24,6 +24,7 @@ portgraph = { git = "https://github.com/cqcl/portgraph", rev = "52a4439", featur
 ] }
 rmp-serde = "1.1.1"
 serde = "1.0.156"
+glob = "0.3.1"
 
 [[test]]
 name = "from_saved_patterns"

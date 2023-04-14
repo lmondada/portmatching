@@ -144,6 +144,8 @@ mod tests {
 
     use proptest::prelude::*;
 
+    use glob::glob;
+
     use crate::{
         matcher::{
             many_patterns::{
@@ -364,6 +366,12 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
+            // for entry in glob("pattern_*.bin").expect("glob pattern failed") {
+            //     match entry {
+            //         Ok(path) => fs::remove_file(path).expect("Removing file failed"),
+            //         Err(_) => {},
+            //     }
+            // }
             // for (i, p) in patterns.iter().enumerate() {
             //     fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
             // }
