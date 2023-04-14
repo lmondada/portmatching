@@ -199,10 +199,7 @@ mod tests {
         g.link_ports(v3_out0, v4_in0).unwrap();
         assert_eq!(
             get_line(&g, v2_out0, &mut BTreeSet::new()),
-            vec![
-                Edge(v2_out0, v3_in1.into()),
-                Edge(v3_out1, None)
-            ]
+            vec![Edge(v2_out0, v3_in1.into()), Edge(v3_out1, None)]
         );
     }
 
@@ -224,17 +221,11 @@ mod tests {
         g.link_ports(v3_out1, v4_in0).unwrap();
         assert_eq!(
             get_line(&g, v2_out0, &mut BTreeSet::new()),
-            vec![
-                Edge(v2_out0, v3_in1.into()),
-                Edge(v3_out1, v4_in0.into())
-            ]
+            vec![Edge(v2_out0, v3_in1.into()), Edge(v3_out1, v4_in0.into())]
         );
         assert_eq!(
             get_line(&g, v2_in1, &mut BTreeSet::new()),
-            vec![
-                Edge(v2_in1, v0_out0.into()),
-                Edge(v0_in0, None)
-            ]
+            vec![Edge(v2_in1, v0_out0.into()), Edge(v0_in0, None)]
         );
     }
 }

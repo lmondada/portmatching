@@ -55,7 +55,8 @@ where
         } else if graph
             .input_links(node)
             .flatten()
-            .map(|p| graph.port_node(p).expect("Invalid port")).any(|n| nodes.contains(&n) && !visited.contains(&n))
+            .map(|p| graph.port_node(p).expect("Invalid port"))
+            .any(|n| nodes.contains(&n) && !visited.contains(&n))
         {
             // there is a predecessor in nodes that was not yet visited, so wait
             curr_nodes.push_back(node);

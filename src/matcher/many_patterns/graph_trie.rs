@@ -970,8 +970,7 @@ mod tests {
         let partition = LinePartition::new(&graph, root);
         let spine = partition.get_spine();
         let ribs = partition.get_ribs(&spine);
-        trie.weights[state.0].address = partition
-            .get_address(root, &spine, Some(&ribs));
+        trie.weights[state.0].address = partition.get_address(root, &spine, Some(&ribs));
         trie.weights[state.0].out_port = PortOffset::new_outgoing(1).into();
 
         trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
