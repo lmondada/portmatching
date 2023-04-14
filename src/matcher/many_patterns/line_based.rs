@@ -139,7 +139,7 @@ mod tests {
 
     #[cfg(feature = "serde")]
     use itertools::Itertools;
-    
+
     use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
 
     use proptest::prelude::*;

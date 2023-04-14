@@ -461,13 +461,47 @@ impl GraphTrie {
                     self.graph.num_inputs(state.0),
                     self.graph.num_outputs(state.0) + 1,
                 );
-                let out_port = self.graph.outputs(state.0).last().expect("just created");
+                let mut offset = self.graph.outputs(state.0).len() - 1;
+                // shift transitions until out_port is in the right place
+                loop {
+                    if offset == 0 {
+                        break;
+                    }
+                    let prev_port = self
+                        .graph
+                        .output(state.0, offset - 1)
+                        .expect("0 <= offset < len");
+                    if self.weights[prev_port].transition_type() > transition.transition_type() {
+                        let new = self
+                            .graph
+                            .output(state.0, offset)
+                            .expect("0 <= offset < len");
+                        self.move_out_port(prev_port, new);
+                    } else {
+                        break;
+                    }
+                    offset -= 1;
+                }
+                let out_port = self
+                    .graph
+                    .output(state.0, offset)
+                    .expect("0 <= offset < len");
                 self.weights[out_port] = transition.clone();
                 out_port
             });
         let in_port = self.graph.port_link(out_port).unwrap_or_else(|| {
-            let &mut new_state = new_state.get_or_insert_with(|| self.add_state(true));
-            self.add_edge(out_port, new_state)
+            let offset = self
+                .graph
+                .port_offset(out_port)
+                .expect("invalid port")
+                .index();
+            let next_state = self
+                .graph
+                .output(state.0, offset + 1)
+                .and_then(|p| self.graph.port_link(p))
+                .map(|p| StateID(self.graph.port_node(p).expect("invalid port")))
+                .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.add_state(true)));
+            self.add_edge(out_port, next_state)
                 .expect("out_port is linked?")
         });
         self.create_perm_port(in_port)
