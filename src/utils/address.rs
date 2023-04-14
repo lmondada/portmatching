@@ -216,7 +216,9 @@ impl<'graph> LinePartition<'graph> {
             return all_addrs.into_iter().next()
         };
         all_addrs.into_iter().find(|&Address(spine_ind, ind)| {
-            let [from, to] = ribs[spine_ind];
+            let Some(&[from, to]) = ribs.get(spine_ind) else {
+                return false
+            };
             from <= ind && to >= ind
         })
     }
