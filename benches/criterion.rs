@@ -1,10 +1,12 @@
 use std::fs::File;
 
+use criterion::BenchmarkGroup;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::Throughput;
+use criterion::measurement::WallTime;
 use itertools::Itertools;
 
 use portgraph::PortGraph;
@@ -15,21 +17,19 @@ use portmatching::pattern::Pattern;
 
 fn bench<T: ManyPatternMatcher>(
     name: &str,
-    c: &mut Criterion,
+    group: &mut BenchmarkGroup<WallTime>,
     patterns: &[Pattern],
     graph: &PortGraph,
 ) {
-    let mut group = c.benchmark_group(name);
     group.sample_size(10);
     for n in (0..patterns.len()).step_by(10) {
         group.throughput(Throughput::Elements(n as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
+        group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
             let matcher: T = ManyPatternMatcher::from_patterns(patterns);
             b.iter(|| matcher.find_matches(&graph));
         });
     }
-    group.finish();
 }
 
 fn perform_benches(c: &mut Criterion) {
@@ -56,8 +56,10 @@ fn perform_benches(c: &mut Criterion) {
         .next()
         .expect("Did not find any large graph");
 
-    bench::<LineGraphTrie>("line-based graph trie", c, &patterns, &graph);
-    bench::<NaiveManyMatcher>("naive", c, &patterns, &graph);
+    let mut group = c.benchmark_group("Many Patterns Matching");
+    bench::<LineGraphTrie>("Line-based Graph Trie", &mut group, &patterns, &graph);
+    bench::<NaiveManyMatcher>("Naive", &mut group, &patterns, &graph);
+    group.finish();
 }
 
 criterion_group!(benches, perform_benches);
