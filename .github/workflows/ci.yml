@@ -1,53 +1,56 @@
 on: push
 
-name: Continuous integration
+name: CI tests
 
 env:
   CARGO_TERM_COLOR: always
   PROPTEST_CASES: 1024
 
 jobs:
-  ci:
+  checks:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust:
-          - stable
-          - beta
-          - nightly
-          - 1.68.0  # MSRV
+    
+    name: Formatting and Linting Check
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         name: Check out repo
 
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         name: Install toolchain
         with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
           components: rustfmt, clippy
 
-      - uses: actions-rs/cargo@v1
-        name: Build package
-        with:
-          command: build
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      
+      - name: Linting (clippy)
+        run: cargo clippy --all-targets -- -D warnings
 
-      - uses: actions-rs/cargo@v1
-        name: Test all features
-        with:
-          command: test
-          args: --all-features -- --include-ignored
+  tests:
+    strategy:
+      matrix:
+        rust: [stable, beta, nightly, 1.68.0]
+        os:
+          - ubuntu-latest
+    
+    runs-on: ${{ matrix.os }}
+    name: Rust ${{ matrix.rust }} on ${{ matrix.os }}
 
-      - uses: actions-rs/cargo@v1
-        name: Check formatting
-        with:
-          command: fmt
-          args: --all -- --check
+    steps:
+      - uses: actions/checkout@v3
+        name: Check out repo
 
-      - uses: actions-rs/cargo@v1
-        name: Lint with Clippy
+      - uses: dtolnay/rust-toolchain@master
+        name: Install toolchain
         with:
-          command: clippy
-          args: -- -D warnings
+          toolchain: ${{ matrix.rust }}
+
+      - name: Build package (default features)
+        run: cargo build
+
+      - name: Build package (all features)
+        run: cargo build --all-features
+
+      - name: Test all features
+        run: cargo test --all-features -- --include-ignored
