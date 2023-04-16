@@ -1,9 +1,9 @@
 on:
   push:
     branches: [main]
-    paths: [src/bin/data_generation.rs]
+    paths-ignore: [src/bin/data_generation.rs]
 
-name: "Data Generation for Benchmarking"
+name: "Benchmarking"
 
 permissions:
   contents: write
@@ -13,7 +13,7 @@ concurrency: datasets
 jobs:
   all:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v3
         name: Check out repo
@@ -31,12 +31,13 @@ jobs:
           git merge -Xtheirs -m "Merge branch main into bench" origin/main
           git push
 
-      - name: Generate datasets
+      - name: Generate benchmarks
         run: |
-          cargo run --bin=data_generation --all-features
+          cargo bench
 
       - name: Push to repo
         run: |
-          git add -f datasets
-          git commit -m "New datasets"
+          git add -f target/criterion
+          git commit -m "New benchmarking results"
           git push
+

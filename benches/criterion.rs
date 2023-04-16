@@ -20,6 +20,7 @@ fn bench<T: ManyPatternMatcher>(
     graph: &PortGraph,
 ) {
     let mut group = c.benchmark_group(name);
+    group.sample_size(10);
     for n in (0..patterns.len()).step_by(10) {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
@@ -40,7 +41,7 @@ fn perform_benches(c: &mut Criterion) {
                     .expect("Could not open small graph"),
             )
             .expect("could not serialize");
-            Pattern::from_graph(g).expect("invalid pattern")
+            Pattern::from_graph(g).expect("pattern not connected")
         })
         .collect_vec();
     let graph = glob::glob("datasets/large_graphs/*.bin")

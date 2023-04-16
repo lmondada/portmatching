@@ -29,7 +29,7 @@ proptest = "1.1.0"
 rmp-serde = "1.1.1"
 serde = "1.0.156"
 glob = "0.3.1"
-criterion = "0.4.0"
+criterion = { version = "0.4.0", features = ["html_reports"] }
 
 [dev-dependencies.portgraph]
 git = "https://github.com/cqcl/portgraph"
