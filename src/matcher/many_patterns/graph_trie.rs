@@ -526,13 +526,16 @@ impl GraphTrie {
                 fallback_spine = Some(partition.get_spine());
                 fallback_spine.as_ref().unwrap()
             });
-            let addr = self.address(state).cloned().unwrap_or_else(|| {
-                partition
-                    .get_address(start_node, spine, None)
-                    .expect("Could not get address of current node")
-            });
-            if offset == start_offset && Some(start_node) == partition.get_node_index(&addr, spine)
-            {
+            let mut graph_addr_cache = None;
+            let mut graph_addr = || {
+                graph_addr_cache = partition.get_address(start_node, spine, None);
+                graph_addr_cache.clone()
+            };
+            let addr = self
+                .address(state)
+                .cloned()
+                .unwrap_or_else(|| graph_addr().expect("Could not get address of current node"));
+            if offset == start_offset && Some(&addr) == graph_addr().as_ref() {
                 self.weights[state.0].spine = Some(spine.clone());
                 self.weights[state.0].out_port = Some(offset);
                 self.weights[state.0].address = Some(addr);

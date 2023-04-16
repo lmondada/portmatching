@@ -136,6 +136,7 @@ impl ManyPatternMatcher for LineGraphTrie {
 #[cfg(test)]
 mod tests {
     // use std::fs;
+    // use glob::glob;
 
     #[cfg(feature = "serde")]
     use itertools::Itertools;
@@ -143,8 +144,6 @@ mod tests {
     use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
 
     use proptest::prelude::*;
-
-    use glob::glob;
 
     use crate::{
         matcher::{
