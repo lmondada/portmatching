@@ -1,5 +1,7 @@
 [package]
 name = "portmatching"
+description = "Fast Graph Matching for Port Graphs"
+author = "Luca Mondada"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.68"
@@ -10,22 +12,33 @@ rust-version = "1.68"
 bimap = "0.6.2"
 bitvec = "1.0.1"
 portgraph = { git = "https://github.com/cqcl/portgraph", rev = "52a4439" }
-serde = { version = "1.0.152", features = ["derive"], optional = true}
+serde = { version = "1.0.152", features = ["derive"], optional = true }
+
+# these are for benchmarking only
+rand = { version = "0.8.5", optional = true }
+rmp-serde = { version = "1.1.1", optional = true }
+clap = { version = "4.2.2", features = ["derive"], optional = true }
 
 [features]
 serde = ["dep:serde", "portgraph/serde"]
+bench = ["dep:rand", "dep:rmp-serde", "dep:clap"]
 
 [dev-dependencies]
 itertools = "0.10.5"
 proptest = "1.1.0"
-portgraph = { git = "https://github.com/cqcl/portgraph", rev = "52a4439", features = [
-    "proptest",
-    "serde",
-] }
 rmp-serde = "1.1.1"
 serde = "1.0.156"
 glob = "0.3.1"
 
+[dev-dependencies.portgraph]
+git = "https://github.com/cqcl/portgraph"
+rev = "52a4439"
+features = ["proptest", "serde"]
+
 [[test]]
 name = "from_saved_patterns"
 required-features = ["serde"]
+
+[[bin]]
+name = "data_generation"
+required-features = ["bench", "serde"]

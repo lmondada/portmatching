@@ -5,29 +5,32 @@ on:
 
 name: "Data Generation for Benchmarking"
 
+permissions:
+  contents: write
+
 jobs:
-  rebase:
+  all:
     runs-on: ubuntu-latest
     
-    name: "Rebasing bench branch"
-
     steps:
       - uses: actions/checkout@v3
         name: Check out repo
+        with:
+          fetch-depth: 0
       
-      - name: Checkout bench and rebase
+      - name: Set up git name
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "<>"
+      
+      - name: Merge main into bench
         run: |
           git switch bench
-          git rebase main
+          git merge -Xtheirs -m "Merge branch main into bench" origin/main
+          git push
 
-    gen-data:
-      runs-on: ubuntu-latest
-      needs: rebase
-
-      name: "Generating data"
-
-      steps:
-        - run: |
-            cargo run --bin=data_generation --all-features
-            git add datasets
-            git commit --amend --no-edit
+      - run: |
+          cargo run --bin=data_generation --all-features
+          git add -f datasets
+          git commit -m "New datasets"
+          git push
