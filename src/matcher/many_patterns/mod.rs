@@ -9,12 +9,11 @@ use crate::pattern::Pattern;
 
 use super::Matcher;
 
-// mod address;
 mod graph_trie;
 mod line_based;
+mod naive;
 pub use line_based::LineGraphTrie;
-// mod naive;
-// pub use naive::{NaiveGraphTrie, NaiveManyPatternMatcher};
+pub use naive::NaiveManyMatcher;
 
 /// A match instance returned by a ManyPatternMatcher instance
 ///
@@ -45,8 +44,6 @@ impl fmt::Display for PatternID {
 }
 
 pub trait ManyPatternMatcher: Default + Matcher {
-    type StateID;
-
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID;
 
     fn from_patterns(patterns: Vec<Pattern>) -> Self {

@@ -74,8 +74,6 @@ impl Matcher for LineGraphTrie {
 }
 
 impl ManyPatternMatcher for LineGraphTrie {
-    type StateID = StateID;
-
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());
