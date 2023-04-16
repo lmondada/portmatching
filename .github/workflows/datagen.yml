@@ -1,0 +1,33 @@
+on:
+  push:
+    branches: [main]
+    paths: [src/bin/data_generation.rs]
+
+name: "Data Generation for Benchmarking"
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    
+    name: "Rebasing bench branch"
+
+    steps:
+      - uses: actions/checkout@v3
+        name: Check out repo
+      
+      - name: Checkout bench and rebase
+        run: |
+          git switch bench
+          git rebase main
+
+    gen-data:
+      runs-on: ubuntu-latest
+      needs: rebase
+
+      name: "Generating data"
+
+      steps:
+        - run: |
+            cargo run --bin=data_generation --all-features
+            git add datasets
+            git commit --amend --no-edit
