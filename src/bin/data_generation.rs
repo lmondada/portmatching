@@ -1,4 +1,5 @@
 use clap::Parser;
+use portmatching::utils::is_connected;
 use rmp_serde;
 use std::fs;
 
@@ -23,7 +24,7 @@ struct Args {
     v_large: usize,
     // Max vertices in small graph
     #[arg(short = 'n')]
-    #[arg(default_value_t = 30)]
+    #[arg(default_value_t = 10)]
     v_small: usize,
 
     // Max edges in large graph
@@ -32,7 +33,7 @@ struct Args {
     e_large: usize,
     // Max edges in small graph
     #[arg(short = 'e')]
-    #[arg(default_value_t = 60)]
+    #[arg(default_value_t = 40)]
     e_small: usize,
 
     // Max in/out-degree in large graph
@@ -63,7 +64,15 @@ fn main() {
         fs::create_dir_all("datasets/small_graphs").expect("could not create directory");
         let (n_graphs, n, m, d) = (args.n_small, args.v_small, args.e_small, args.d_small);
         for i in 0..n_graphs {
-            let g = gen_graph(n, m, d).expect("could not generate graph");
+            let mut g = gen_graph(n, m, d).expect("could not generate graph");
+            let mut n_fails = 0;
+            while !is_connected(&g) {
+                g = gen_graph(n, m, d).expect("could not generate graph");
+                n_fails += 1;
+                if n_fails >= 1000 {
+                    panic!("could not create connected graph with n={n}, m={m}, d={d}")
+                }
+            }
             let f = format!("datasets/small_graphs/pattern_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
         }

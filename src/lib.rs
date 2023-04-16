@@ -1,3 +1,3 @@
 pub mod matcher;
 pub mod pattern;
-mod utils;
+pub mod utils;

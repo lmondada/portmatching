@@ -4,6 +4,7 @@ mod depth;
 pub(crate) mod address;
 mod pre_order;
 
+pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
 
 #[cfg(test)]
