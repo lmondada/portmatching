@@ -41,10 +41,10 @@ impl<'graph> fmt::Debug for LinePartition<'graph> {
 // }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(crate) struct Address(pub(crate) usize, pub(crate) i32);
+pub(crate) struct Address(pub(crate) usize, pub(crate) isize);
 
 impl Address {
-    fn key(&self) -> (usize, u32, bool) {
+    fn key(&self) -> (usize, usize, bool) {
         let &Address(fst, snd) = self;
         (fst, snd.unsigned_abs(), snd < 0)
     }
@@ -64,7 +64,7 @@ impl Ord for Address {
 
 pub(crate) type Spine = Vec<(Vec<PortOffset>, usize)>;
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Ribs(pub(crate) Vec<[i32; 2]>);
+pub(crate) struct Ribs(pub(crate) Vec<[isize; 2]>);
 
 impl Ribs {
     pub(crate) fn within(&self, ribs: &Ribs) -> bool {
@@ -111,7 +111,7 @@ impl<'graph> LinePartition<'graph> {
                 .flat_map(|(i, ps)| ps.iter().flatten().map(move |&p| (i, p)))
                 .find(|&(_, p)| p == port)
                 .expect("line must contain port")
-                .0 as i32;
+                .0 as isize;
             if line.is_cyclic {
                 assert_eq!(ind_offset, 0);
             }
@@ -123,7 +123,7 @@ impl<'graph> LinePartition<'graph> {
                     .expect("added all nodes")
                     .push(LinePoint {
                         line_ind: line_cnt,
-                        ind: (i as i32) - ind_offset,
+                        ind: (i as isize) - ind_offset,
                         in_port: ps[0],
                         out_port: ps[1],
                     });
@@ -133,7 +133,7 @@ impl<'graph> LinePartition<'graph> {
                         .expect("added all nodes")
                         .push(LinePoint {
                             line_ind: line_cnt,
-                            ind: (i as i32) - (line.ports.len() as i32),
+                            ind: (i as isize) - (line.ports.len() as isize),
                             in_port: ps[0],
                             out_port: ps[1],
                         });
@@ -403,7 +403,7 @@ pub(crate) fn port_opposite(port: PortIndex, graph: &PortGraph) -> Option<PortIn
 #[derive(Debug)]
 pub(crate) struct LinePoint {
     line_ind: usize,
-    ind: i32,
+    ind: isize,
     in_port: Option<PortIndex>,
     out_port: Option<PortIndex>,
 }
