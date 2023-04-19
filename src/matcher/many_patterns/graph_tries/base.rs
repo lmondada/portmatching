@@ -11,9 +11,9 @@ use portgraph::{
 };
 
 use crate::utils::{
-    address::{Address, AddressWithBound, LinePartition, Ribs, Skeleton, Spine},
     cover::cover_nodes,
 };
+use crate::addresses::{Address, AddressWithBound, LinePartition, Ribs, Skeleton, Spine};
 
 use super::{GraphTrie, StateID, StateTransition};
 
@@ -78,7 +78,7 @@ impl Default for BaseGraphTrie {
     }
 }
 
-impl GraphTrie for BaseGraphTrie {
+impl<'graph> GraphTrie<'graph> for BaseGraphTrie {
     type Address = AddressWithBound;
 
     fn trie(&self) -> &PortGraph {
@@ -882,7 +882,7 @@ fn rekey<K: Clone, V: Clone + Default>(
 mod tests {
     use portgraph::{NodeIndex, PortGraph, PortOffset};
 
-    use crate::utils::address::{Address, LinePartition};
+    use crate::addresses::{Address, LinePartition};
 
     use super::BaseGraphTrie;
 

@@ -3,13 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 
 use crate::{
+    addresses::LinePartition,
     matcher::Matcher,
     pattern::{Edge, Pattern},
-    utils::address::{AddressWithBound, LinePartition},
 };
 
 use super::{
-    graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
+    graph_tries::{root_state, BaseGraphTrie, BoundedAddress, GraphCache, GraphTrie, StateID},
     ManyPatternMatcher, PatternID, PatternMatch,
 };
 
@@ -19,7 +19,7 @@ pub struct LineGraphTrie<T> {
     patterns: Vec<Pattern>,
 }
 
-impl<T: GraphTrie + Default> Default for LineGraphTrie<T> {
+impl<'graph, T: GraphTrie<'graph> + Default> Default for LineGraphTrie<T> {
     fn default() -> Self {
         Self {
             trie: T::default(),
@@ -29,7 +29,7 @@ impl<T: GraphTrie + Default> Default for LineGraphTrie<T> {
     }
 }
 
-impl<T: GraphTrie + Default> LineGraphTrie<T> {
+impl<'graph, T: GraphTrie<'graph> + Default> LineGraphTrie<T> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -49,13 +49,16 @@ impl LineGraphTrie<BaseGraphTrie> {
     }
 }
 
-impl<T: GraphTrie<Address = AddressWithBound>> Matcher for LineGraphTrie<T> {
+impl<'graph, T> Matcher<'graph> for LineGraphTrie<T>
+where
+    T: GraphTrie<'graph>,
+{
     type Match = PatternMatch;
 
-    fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
+    fn find_anchored_matches(&self, graph: &'graph PortGraph, root: NodeIndex) -> Vec<Self::Match> {
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
-        let partition = LinePartition::new(graph, root);
+        let partition = <T::Address as BoundedAddress>::Cache::init(graph, root);
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
             for state in current_states {
@@ -75,7 +78,7 @@ impl<T: GraphTrie<Address = AddressWithBound>> Matcher for LineGraphTrie<T> {
     }
 }
 
-impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie> {
+impl<'graph> ManyPatternMatcher<'graph> for LineGraphTrie<BaseGraphTrie> {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());

@@ -16,11 +16,11 @@ use portmatching::matcher::many_patterns::ManyPatternMatcher;
 use portmatching::matcher::many_patterns::NaiveManyMatcher;
 use portmatching::pattern::Pattern;
 
-fn bench<T: ManyPatternMatcher>(
+fn bench<'graph, T: ManyPatternMatcher<'graph>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[Pattern],
-    graph: &PortGraph,
+    graph: &'graph PortGraph,
 ) {
     group.sample_size(10);
     for n in (0..patterns.len()).step_by(10) {

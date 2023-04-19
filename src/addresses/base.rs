@@ -8,9 +8,9 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
 
 use crate::matcher::many_patterns::graph_tries::{BoundedAddress, GraphCache};
 
-use super::pre_order::shortest_path;
+use crate::utils::pre_order::shortest_path;
 
-pub(crate) struct LinePartition<'graph> {
+pub struct LinePartition<'graph> {
     pub(crate) node2line: BTreeMap<NodeIndex, Vec<LinePoint>>,
     pub(crate) graph: &'graph PortGraph,
     pub(crate) root: NodeIndex,
@@ -22,8 +22,12 @@ impl<'graph> fmt::Debug for LinePartition<'graph> {
     }
 }
 
-impl<'a> GraphCache<AddressWithBound> for LinePartition<'a> {
-    fn graph(&self) -> &PortGraph {
+impl<'graph> GraphCache<'graph, AddressWithBound> for LinePartition<'graph> {
+    fn init(graph: &'graph PortGraph, root: NodeIndex) -> Self {
+        Self::new(graph, root)
+    }
+
+    fn graph(&self) -> &'graph PortGraph {
         &self.graph
     }
 
@@ -90,9 +94,10 @@ impl Skeleton {
 #[derive(Clone, PartialEq, Eq)]
 pub struct AddressWithBound(pub(crate) Address, pub(crate) Skeleton);
 
-impl BoundedAddress for AddressWithBound {
+impl<'graph> BoundedAddress<'graph> for AddressWithBound {
     type Main = Address;
     type Boundary = Skeleton;
+    type Cache = LinePartition<'graph>;
 
     fn boundary(&self) -> &Self::Boundary {
         &self.1
@@ -462,10 +467,8 @@ mod tests {
     use portgraph::{NodeIndex, PortGraph, PortOffset};
     use proptest::prelude::*;
 
-    use crate::utils::{
-        address::{Address, LinePartition, Ribs},
-        test_utils::gen_portgraph_connected,
-    };
+    use crate::addresses::{Address, LinePartition, Ribs};
+    use crate::utils::test_utils::gen_portgraph_connected;
     use portgraph::proptest::gen_node_index;
 
     fn link(graph: &mut PortGraph, (out_n, out_p): (usize, usize), (in_n, in_p): (usize, usize)) {

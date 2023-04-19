@@ -43,7 +43,7 @@ impl fmt::Display for PatternID {
     }
 }
 
-pub trait ManyPatternMatcher: Default + Matcher {
+pub trait ManyPatternMatcher<'graph>: Default + Matcher<'graph> {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID;
 
     fn from_patterns(patterns: Vec<Pattern>) -> Self {

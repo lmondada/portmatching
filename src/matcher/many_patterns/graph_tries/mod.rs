@@ -48,18 +48,20 @@ pub enum TrieTraversal {
     Write,
 }
 
-pub trait BoundedAddress {
+pub trait BoundedAddress<'graph>: Sized {
     type Main: PartialEq;
     type Boundary;
+    type Cache: GraphCache<'graph, Self>;
 
     fn boundary(&self) -> &Self::Boundary;
     fn main(&self) -> &Self::Main;
 }
 
-pub trait GraphCache<Address: BoundedAddress> {
+pub trait GraphCache<'graph, Address: BoundedAddress<'graph>> {
+    fn init(graph: &'graph PortGraph, root: NodeIndex) -> Self;
     fn get_node(&self, addr: &Address::Main, boundary: &Address::Boundary) -> Option<NodeIndex>;
     fn get_addr(&self, node: NodeIndex, boundary: &Address::Boundary) -> Option<Address::Main>;
-    fn graph(&self) -> &PortGraph;
+    fn graph(&self) -> &'graph PortGraph;
 }
 
 pub type StateID = NodeIndex;
@@ -67,8 +69,8 @@ pub fn root_state() -> NodeIndex {
     NodeIndex::new(0)
 }
 
-pub trait GraphTrie {
-    type Address: BoundedAddress + PartialEq + Clone;
+pub trait GraphTrie<'graph> {
+    type Address: BoundedAddress<'graph> + PartialEq + Clone;
 
     /// The three methods to implement
     fn trie(&self) -> &PortGraph;
@@ -78,19 +80,19 @@ pub trait GraphTrie {
     fn is_non_deterministic(&self, state: StateID) -> bool;
 
     /// The node in the current graph at `state`
-    fn node<C: GraphCache<Self::Address>>(&self, state: StateID, cache: &C) -> Option<NodeIndex> {
+    fn node<C: GraphCache<'graph, Self::Address>>(&self, state: StateID, cache: &C) -> Option<NodeIndex> {
         let addr = self.address(state)?;
         cache.get_node(&addr.main(), addr.boundary())
     }
 
     /// The port in the current graph at `state`
-    fn port<C: GraphCache<Self::Address>>(&self, state: StateID, cache: &C) -> Option<PortIndex> {
+    fn port<C: GraphCache<'graph, Self::Address>>(&self, state: StateID, cache: &C) -> Option<PortIndex> {
         let offset = self.port_offset(state)?;
         cache.graph().port_index(self.node(state, cache)?, offset)
     }
 
     /// The next node in the current graph if we follow one transition
-    fn next_node<C: GraphCache<Self::Address>>(
+    fn next_node<C: GraphCache<'graph, Self::Address>>(
         &self,
         state: StateID,
         cache: &C,
@@ -101,7 +103,7 @@ pub trait GraphTrie {
     }
 
     /// The next port in the current graph if we follow one transition
-    fn next_port_offset<C: GraphCache<Self::Address>>(
+    fn next_port_offset<C: GraphCache<'graph, Self::Address>>(
         &self,
         state: StateID,
         cache: &C,
@@ -128,10 +130,10 @@ pub trait GraphTrie {
     /// This works because even in deterministic read-only mode, a
     /// FAIL or NoLinkedNode transition will only be followed if there is
     /// no other match
-    fn get_transitions<C: GraphCache<Self::Address>>(
+    fn get_transitions<C: GraphCache<'graph, Self::Address>>(
         &self,
         state: StateID,
-        graph: &PortGraph,
+        graph: &'graph PortGraph,
         partition: &C,
     ) -> Vec<StateTransition<Self::Address>> {
         // All transitions in `state` that are allowed for `graph`
@@ -172,10 +174,10 @@ pub trait GraphTrie {
         }
     }
 
-    fn next_states<C: GraphCache<Self::Address>>(
+    fn next_states<C: GraphCache<'graph, Self::Address>>(
         &self,
         state: StateID,
-        graph: &PortGraph,
+        graph: &'graph PortGraph,
         partition: &C,
     ) -> Vec<StateID> {
         // Compute "ideal" transition

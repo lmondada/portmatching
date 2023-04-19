@@ -10,7 +10,7 @@ pub struct NaiveManyMatcher {
     matchers: Vec<SinglePatternMatcher>,
 }
 
-impl Matcher for NaiveManyMatcher {
+impl<'graph> Matcher<'graph> for NaiveManyMatcher {
     type Match = PatternMatch;
 
     fn find_anchored_matches(
@@ -33,7 +33,7 @@ impl Matcher for NaiveManyMatcher {
     }
 }
 
-impl ManyPatternMatcher for NaiveManyMatcher {
+impl<'graph> ManyPatternMatcher<'graph> for NaiveManyMatcher {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         self.matchers
             .push(SinglePatternMatcher::from_pattern(pattern));
