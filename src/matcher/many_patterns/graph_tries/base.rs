@@ -143,7 +143,7 @@ pub(crate) enum TrieTraversal {
 
 impl BaseGraphTrie {
     /// An empty graph trie
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 

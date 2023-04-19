@@ -22,18 +22,16 @@ impl<'graph> fmt::Debug for LinePartition<'graph> {
     }
 }
 
-impl<'a> GraphCache<Address> for LinePartition<'a> {
-    type Boundary = Skeleton;
-
+impl<'a> GraphCache<AddressWithBound> for LinePartition<'a> {
     fn graph(&self) -> &PortGraph {
         &self.graph
     }
 
-    fn get_node(&self, addr: &Address, boundary: &Self::Boundary) -> Option<NodeIndex> {
+    fn get_node(&self, addr: &Address, boundary: &Skeleton) -> Option<NodeIndex> {
         self.get_node_index(addr, boundary.spine.as_ref()?)
     }
 
-    fn get_addr(&self, node: NodeIndex, boundary: &Self::Boundary) -> Option<Address> {
+    fn get_addr(&self, node: NodeIndex, boundary: &Skeleton) -> Option<Address> {
         let addr = self.get_address(node, boundary.spine.as_ref()?, boundary.ribs.as_ref())?;
         Some(addr)
     }

@@ -40,16 +40,6 @@ impl<A> StateTransition<A> {
             StateTransition::FAIL => 2,
         }
     }
-
-    fn map<B, F: for<'a> FnMut(&'a A) -> B>(&self, mut f: F) -> StateTransition<B> {
-        match self {
-            StateTransition::Node(addrs, port) => {
-                StateTransition::Node(addrs.iter().map(|addr| f(addr)).collect(), *port)
-            }
-            Self::NoLinkedNode => StateTransition::NoLinkedNode,
-            Self::FAIL => StateTransition::FAIL,
-        }
-    }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -66,11 +56,9 @@ pub trait BoundedAddress {
     fn main(&self) -> &Self::Main;
 }
 
-pub trait GraphCache<Address> {
-    type Boundary;
-
-    fn get_node(&self, addr: &Address, boundary: &Self::Boundary) -> Option<NodeIndex>;
-    fn get_addr(&self, node: NodeIndex, boundary: &Self::Boundary) -> Option<Address>;
+pub trait GraphCache<Address: BoundedAddress> {
+    fn get_node(&self, addr: &Address::Main, boundary: &Address::Boundary) -> Option<NodeIndex>;
+    fn get_addr(&self, node: NodeIndex, boundary: &Address::Boundary) -> Option<Address::Main>;
     fn graph(&self) -> &PortGraph;
 }
 
@@ -90,42 +78,19 @@ pub trait GraphTrie {
     fn is_non_deterministic(&self, state: StateID) -> bool;
 
     /// The node in the current graph at `state`
-    fn node<
-        C: GraphCache<
-            <Self::Address as BoundedAddress>::Main,
-            Boundary = <Self::Address as BoundedAddress>::Boundary,
-        >,
-    >(
-        &self,
-        state: StateID,
-        cache: &C,
-    ) -> Option<NodeIndex> {
+    fn node<C: GraphCache<Self::Address>>(&self, state: StateID, cache: &C) -> Option<NodeIndex> {
         let addr = self.address(state)?;
         cache.get_node(&addr.main(), addr.boundary())
     }
 
     /// The port in the current graph at `state`
-    fn port<
-        C: GraphCache<
-            <Self::Address as BoundedAddress>::Main,
-            Boundary = <Self::Address as BoundedAddress>::Boundary,
-        >,
-    >(
-        &self,
-        state: StateID,
-        cache: &C,
-    ) -> Option<PortIndex> {
+    fn port<C: GraphCache<Self::Address>>(&self, state: StateID, cache: &C) -> Option<PortIndex> {
         let offset = self.port_offset(state)?;
         cache.graph().port_index(self.node(state, cache)?, offset)
     }
 
     /// The next node in the current graph if we follow one transition
-    fn next_node<
-        C: GraphCache<
-            <Self::Address as BoundedAddress>::Main,
-            Boundary = <Self::Address as BoundedAddress>::Boundary,
-        >,
-    >(
+    fn next_node<C: GraphCache<Self::Address>>(
         &self,
         state: StateID,
         cache: &C,
@@ -136,12 +101,7 @@ pub trait GraphTrie {
     }
 
     /// The next port in the current graph if we follow one transition
-    fn next_port_offset<
-        C: GraphCache<
-            <Self::Address as BoundedAddress>::Main,
-            Boundary = <Self::Address as BoundedAddress>::Boundary,
-        >,
-    >(
+    fn next_port_offset<C: GraphCache<Self::Address>>(
         &self,
         state: StateID,
         cache: &C,
@@ -168,12 +128,7 @@ pub trait GraphTrie {
     /// This works because even in deterministic read-only mode, a
     /// FAIL or NoLinkedNode transition will only be followed if there is
     /// no other match
-    fn get_transitions<
-        C: GraphCache<
-            <Self::Address as BoundedAddress>::Main,
-            Boundary = <Self::Address as BoundedAddress>::Boundary,
-        >,
-    >(
+    fn get_transitions<C: GraphCache<Self::Address>>(
         &self,
         state: StateID,
         graph: &PortGraph,
@@ -217,12 +172,7 @@ pub trait GraphTrie {
         }
     }
 
-    fn next_states<
-        C: GraphCache<
-            <Self::Address as BoundedAddress>::Main,
-            Boundary = <Self::Address as BoundedAddress>::Boundary,
-        >,
-    >(
+    fn next_states<C: GraphCache<Self::Address>>(
         &self,
         state: StateID,
         graph: &PortGraph,
