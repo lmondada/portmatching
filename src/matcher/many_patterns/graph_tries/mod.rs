@@ -90,7 +90,12 @@ pub trait GraphTrie {
     fn is_non_deterministic(&self, state: StateID) -> bool;
 
     /// The node in the current graph at `state`
-    fn node<C: GraphCache<<Self::Address as BoundedAddress>::Main, Boundary = <Self::Address as BoundedAddress>::Boundary>>(
+    fn node<
+        C: GraphCache<
+            <Self::Address as BoundedAddress>::Main,
+            Boundary = <Self::Address as BoundedAddress>::Boundary,
+        >,
+    >(
         &self,
         state: StateID,
         cache: &C,
@@ -100,7 +105,12 @@ pub trait GraphTrie {
     }
 
     /// The port in the current graph at `state`
-    fn port<C: GraphCache<<Self::Address as BoundedAddress>::Main, Boundary = <Self::Address as BoundedAddress>::Boundary>>(
+    fn port<
+        C: GraphCache<
+            <Self::Address as BoundedAddress>::Main,
+            Boundary = <Self::Address as BoundedAddress>::Boundary,
+        >,
+    >(
         &self,
         state: StateID,
         cache: &C,
@@ -110,7 +120,12 @@ pub trait GraphTrie {
     }
 
     /// The next node in the current graph if we follow one transition
-    fn next_node<C: GraphCache<<Self::Address as BoundedAddress>::Main, Boundary = <Self::Address as BoundedAddress>::Boundary>>(
+    fn next_node<
+        C: GraphCache<
+            <Self::Address as BoundedAddress>::Main,
+            Boundary = <Self::Address as BoundedAddress>::Boundary,
+        >,
+    >(
         &self,
         state: StateID,
         cache: &C,
@@ -121,7 +136,12 @@ pub trait GraphTrie {
     }
 
     /// The next port in the current graph if we follow one transition
-    fn next_port_offset<C: GraphCache<<Self::Address as BoundedAddress>::Main, Boundary = <Self::Address as BoundedAddress>::Boundary>>(
+    fn next_port_offset<
+        C: GraphCache<
+            <Self::Address as BoundedAddress>::Main,
+            Boundary = <Self::Address as BoundedAddress>::Boundary,
+        >,
+    >(
         &self,
         state: StateID,
         cache: &C,
@@ -148,7 +168,12 @@ pub trait GraphTrie {
     /// This works because even in deterministic read-only mode, a
     /// FAIL or NoLinkedNode transition will only be followed if there is
     /// no other match
-    fn get_transitions<C: GraphCache<<Self::Address as BoundedAddress>::Main, Boundary = <Self::Address as BoundedAddress>::Boundary>>(
+    fn get_transitions<
+        C: GraphCache<
+            <Self::Address as BoundedAddress>::Main,
+            Boundary = <Self::Address as BoundedAddress>::Boundary,
+        >,
+    >(
         &self,
         state: StateID,
         graph: &PortGraph,
@@ -192,7 +217,12 @@ pub trait GraphTrie {
         }
     }
 
-    fn next_states<C: GraphCache<<Self::Address as BoundedAddress>::Main, Boundary = <Self::Address as BoundedAddress>::Boundary>>(
+    fn next_states<
+        C: GraphCache<
+            <Self::Address as BoundedAddress>::Main,
+            Boundary = <Self::Address as BoundedAddress>::Boundary,
+        >,
+    >(
         &self,
         state: StateID,
         graph: &PortGraph,

@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    graph_tries::{BaseGraphTrie, GraphTrie, StateID, root_state},
+    graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
     ManyPatternMatcher, PatternID, PatternMatch,
 };
 
@@ -148,7 +148,8 @@ mod tests {
     use crate::{
         matcher::{
             many_patterns::{
-                line_based::LineGraphTrie, ManyPatternMatcher, PatternID, PatternMatch, graph_tries::BaseGraphTrie,
+                graph_tries::BaseGraphTrie, line_based::LineGraphTrie, ManyPatternMatcher,
+                PatternID, PatternMatch,
             },
             Matcher, SinglePatternMatcher,
         },

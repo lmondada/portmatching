@@ -88,7 +88,10 @@ impl GraphTrie for BaseGraphTrie {
     fn address(&self, state: super::StateID) -> Option<Self::Address> {
         let addr = self.weight(state).address.as_ref()?;
         let spine = self.spine(state)?;
-        Some(AddressWithBound(addr.clone(), Skeleton::from_spine(spine.clone())))
+        Some(AddressWithBound(
+            addr.clone(),
+            Skeleton::from_spine(spine.clone()),
+        ))
     }
 
     fn port_offset(&self, state: super::StateID) -> Option<PortOffset> {

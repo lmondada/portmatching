@@ -6,7 +6,7 @@ use std::{
 
 use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
 
-use crate::matcher::many_patterns::graph_tries::{GraphCache, BoundedAddress};
+use crate::matcher::many_patterns::graph_tries::{BoundedAddress, GraphCache};
 
 use super::pre_order::shortest_path;
 
@@ -70,7 +70,7 @@ impl Ord for Address {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Skeleton {
     pub(crate) spine: Option<Spine>,
-    pub(crate) ribs: Option<Ribs>
+    pub(crate) ribs: Option<Ribs>,
 }
 
 impl Skeleton {
@@ -110,7 +110,6 @@ impl<'a> Display for AddressWithBound {
         self.0.fmt(f)
     }
 }
-
 
 pub(crate) type Spine = Vec<(Vec<PortOffset>, usize)>;
 #[derive(Clone, Debug, PartialEq, Eq)]

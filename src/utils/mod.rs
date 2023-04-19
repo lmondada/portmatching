@@ -1,6 +1,6 @@
+pub(crate) mod address;
 pub(crate) mod cover;
 mod depth;
-pub(crate) mod address;
 mod pre_order;
 
 pub use depth::is_connected;

@@ -1,19 +1,19 @@
 use std::fs::File;
 
-use criterion::BenchmarkGroup;
 use criterion::criterion_group;
 use criterion::criterion_main;
+use criterion::measurement::WallTime;
+use criterion::BenchmarkGroup;
 use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::Throughput;
-use criterion::measurement::WallTime;
 use itertools::Itertools;
 
 use portgraph::PortGraph;
+use portmatching::matcher::many_patterns::graph_tries::BaseGraphTrie;
 use portmatching::matcher::many_patterns::LineGraphTrie;
 use portmatching::matcher::many_patterns::ManyPatternMatcher;
 use portmatching::matcher::many_patterns::NaiveManyMatcher;
-use portmatching::matcher::many_patterns::graph_tries::BaseGraphTrie;
 use portmatching::pattern::Pattern;
 
 fn bench<T: ManyPatternMatcher>(
