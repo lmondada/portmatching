@@ -11,11 +11,11 @@ use portgraph::{
 };
 
 use crate::utils::{
-    address::{Address, AddressWithBound, LinePartition, Spine},
+    address::{Address, AddressWithBound, LinePartition, Skeleton, Spine},
     cover::cover_nodes,
 };
 
-use super::{GraphTrie, StateTransition, StateID};
+use super::{GraphTrie, StateID, StateTransition};
 
 /// A node in the GraphTrie
 ///
@@ -88,7 +88,10 @@ impl GraphTrie for BaseGraphTrie {
     fn address(&self, state: super::StateID) -> Option<Self::Address> {
         let addr = self.weight(state).address.as_ref()?;
         let spine = self.spine(state)?;
-        Some(AddressWithBound(addr.clone(), (spine.clone(), None)))
+        Some(AddressWithBound(
+            addr.clone(),
+            Skeleton::from_spine(spine.clone()),
+        ))
     }
 
     fn port_offset(&self, state: super::StateID) -> Option<PortOffset> {
@@ -178,8 +181,7 @@ impl BaseGraphTrie {
                                 addrs,
                                 &[AddressWithBound(
                                     new_addr.clone(),
-                                    (vec![],
-                                    Some(next_ribs.clone()).unwrap(),)
+                                    Skeleton::from_ribs(next_ribs.clone().unwrap()),
                                 )],
                             )?;
                             if !is_satisfied(next_node?, &merged_addrs, partition, spine?) {
@@ -193,8 +195,13 @@ impl BaseGraphTrie {
         }
         // Append the perfect transition
         if let (Some(addr), Some(port)) = (next_addr, next_port) {
-            let ideal =
-                StateTransition::Node(vec![AddressWithBound(addr, (vec![], next_ribs))], port);
+            let ideal = StateTransition::Node(
+                vec![AddressWithBound(
+                    addr,
+                    Skeleton::from_ribs(next_ribs.clone().expect("next_addr != None")),
+                )],
+                port,
+            );
             if !transitions.contains(&ideal) {
                 transitions.push(ideal);
             }
@@ -294,16 +301,18 @@ impl BaseGraphTrie {
                     }
                     match mode {
                         TrieTraversal::ReadOnly => {
-                            addrs.iter().all(|AddressWithBound(addr, (_, ribs))| {
-                                let Some(next_addr) = partition.get_address(
+                            addrs
+                                .iter()
+                                .all(|AddressWithBound(addr, Skeleton { ribs, .. })| {
+                                    let Some(next_addr) = partition.get_address(
                                     next_node.expect("from if condition"),
                                     spine,
                                     ribs.as_ref()
                                 ) else {
                                     return false
                                 };
-                                &next_addr == addr
-                            })
+                                    &next_addr == addr
+                                })
                         }
                         TrieTraversal::Write => addrs.iter().all(|AddressWithBound(addr, _)| {
                             let Some(node) = partition.get_node_index(
@@ -362,20 +371,14 @@ impl BaseGraphTrie {
                         .output(state, offset - 1)
                         .expect("0 <= offset < len");
                     if self.weights[prev_port].transition_type() > transition.transition_type() {
-                        let new = self
-                            .graph
-                            .output(state, offset)
-                            .expect("0 <= offset < len");
+                        let new = self.graph.output(state, offset).expect("0 <= offset < len");
                         self.move_out_port(prev_port, new);
                     } else {
                         break;
                     }
                     offset -= 1;
                 }
-                let out_port = self
-                    .graph
-                    .output(state, offset)
-                    .expect("0 <= offset < len");
+                let out_port = self.graph.output(state, offset).expect("0 <= offset < len");
                 self.weights[out_port] = transition.clone();
                 out_port
             });
@@ -544,12 +547,16 @@ impl BaseGraphTrie {
                             if curr_port != port {
                                 break;
                             }
-                            if curr_addrs.iter().all(|AddressWithBound(c_addr, (_, c_rib))| {
-                                let c_rib = c_rib.as_ref().unwrap();
-                                addrs.iter().any(|AddressWithBound(addr, (_, rib))| {
-                                    addr == c_addr && c_rib.within(rib.as_ref().unwrap())
-                                })
-                            }) {
+                            if curr_addrs.iter().all(
+                                |AddressWithBound(c_addr, Skeleton { ribs: c_ribs, .. })| {
+                                    let c_rib = c_ribs.as_ref().unwrap();
+                                    addrs.iter().any(
+                                        |AddressWithBound(addr, Skeleton { ribs, .. })| {
+                                            addr == c_addr && c_rib.within(ribs.as_ref().unwrap())
+                                        },
+                                    )
+                                },
+                            ) {
                                 new_transitions
                                     .push((port_offset, transitions_iter.next().unwrap().clone()));
                             } else {
@@ -715,10 +722,10 @@ fn merge_addrs(
     addrs2: &[AddressWithBound],
 ) -> Option<Vec<AddressWithBound>> {
     let mut addrs = Vec::from_iter(addrs1.iter().cloned());
-    for AddressWithBound(a, (spine, rib_a)) in addrs2 {
+    for AddressWithBound(a, Skeleton { spine, ribs: rib_a }) in addrs2 {
         let rib_a = rib_a.as_ref().unwrap();
         let mut already_inserted = false;
-        for AddressWithBound(b, (_, rib_b)) in addrs.iter_mut() {
+        for AddressWithBound(b, Skeleton { ribs: rib_b, .. }) in addrs.iter_mut() {
             let rib_b = rib_b.as_mut().unwrap();
             if a == b {
                 // If they share the same address, then ribs is union of ribs
@@ -744,8 +751,10 @@ fn merge_addrs(
         if !already_inserted {
             addrs.push(AddressWithBound(
                 a.clone(),
-                (spine.clone(),
-                Some(rib_a.clone()))
+                Skeleton {
+                    spine: spine.clone(),
+                    ribs: Some(rib_a.clone()),
+                },
             ));
         }
     }

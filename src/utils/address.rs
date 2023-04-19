@@ -24,7 +24,7 @@ impl<'graph> fmt::Debug for LinePartition<'graph> {
 
 impl<'a> GraphCache<AddressWithBound> for LinePartition<'a> {
     fn get_node(&self, addr: &AddressWithBound) -> Option<NodeIndex> {
-        self.get_node_index(&addr.0, &addr.1.0)
+        self.get_node_index(&addr.0, addr.1.spine.as_ref()?)
     }
 
     fn graph(&self) -> &PortGraph {
@@ -32,30 +32,10 @@ impl<'a> GraphCache<AddressWithBound> for LinePartition<'a> {
     }
 
     fn get_addr(&self, node: NodeIndex, boundary: &<AddressWithBound as BoundedAddress>::Boundary) -> Option<AddressWithBound> {
-        let addr = self.get_address(node, &boundary.0, boundary.1.as_ref())?;
-        Some(AddressWithBound(addr, (boundary.0.clone(), boundary.1.clone())))
+        let addr = self.get_address(node, boundary.spine.as_ref()?, boundary.ribs.as_ref())?;
+        Some(AddressWithBound(addr, boundary.clone()))
     }
 }
-
-// impl Skeleton {
-//     pub(crate) fn ribs_for(&self, partition: &LinePartition) -> Ribs {
-//         let mut ribs = vec![[None; 2]; self.spine.len()];
-//         for n in partition.graph.nodes_iter() {
-//             if let Some((a, b)) = partition.get_address(n, self, true) {
-//                 let [min, max] = &mut ribs[a];
-//                 let min = min.get_or_insert(b);
-//                 let max = max.get_or_insert(b);
-//                 *min = cmp::min(*min, b);
-//                 *max = cmp::max(*max, b);
-//             }
-//         }
-//         Ribs(
-//             ribs.into_iter()
-//                 .map(|[a, b]| [a.unwrap_or(0), b.unwrap_or(0)])
-//                 .collect(),
-//         )
-//     }
-// }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) struct Address(pub(crate) usize, pub(crate) isize);
@@ -86,10 +66,32 @@ impl Ord for Address {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct AddressWithBound(pub(crate) Address, pub(crate) (Spine, Option<Ribs>));
+pub struct Skeleton {
+    pub(crate) spine: Option<Spine>,
+    pub(crate) ribs: Option<Ribs>
+}
+
+impl Skeleton {
+    pub fn from_spine(spine: Spine) -> Self {
+        Self {
+            spine: Some(spine),
+            ribs: None,
+        }
+    }
+
+    pub fn from_ribs(ribs: Ribs) -> Self {
+        Self {
+            spine: None,
+            ribs: Some(ribs),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct AddressWithBound(pub(crate) Address, pub(crate) Skeleton);
 
 impl BoundedAddress for AddressWithBound {
-    type Boundary = (Spine, Option<Ribs>);
+    type Boundary = Skeleton;
 
     fn boundary(&self) -> &Self::Boundary {
         &self.1
