@@ -11,7 +11,7 @@ use portgraph::{
 };
 
 use crate::utils::{
-    address::{Address, AddressWithBound, LinePartition, Skeleton, Spine},
+    address::{Address, AddressWithBound, LinePartition, Ribs, Skeleton, Spine},
     cover::cover_nodes,
 };
 
@@ -59,7 +59,7 @@ impl PermPortIndex {
 
 pub struct BaseGraphTrie {
     pub(crate) graph: PortGraph,
-    weights: Weights<NodeWeight, StateTransition<AddressWithBound>>,
+    weights: Weights<NodeWeight, StateTransition<(Address, Ribs)>>,
     perm_indices: RefCell<BTreeMap<PermPortIndex, PortIndex>>,
 }
 
@@ -88,18 +88,35 @@ impl GraphTrie for BaseGraphTrie {
     fn address(&self, state: super::StateID) -> Option<Self::Address> {
         let addr = self.weight(state).address.as_ref()?;
         let spine = self.spine(state)?;
-        Some(AddressWithBound(
-            addr.clone(),
-            Skeleton::from_spine(spine.clone()),
-        ))
+        Some(AddressWithBound(addr.clone(), Skeleton::from_spine(spine.clone())))
     }
 
     fn port_offset(&self, state: super::StateID) -> Option<PortOffset> {
         self.weight(state).out_port.clone()
     }
 
-    fn transition(&self, port: PortIndex) -> &StateTransition<Self::Address> {
-        &self.weights[port]
+    fn transition(&self, port: PortIndex) -> StateTransition<Self::Address> {
+        let node = self.graph.port_node(port).expect("invalid port");
+        let spine = self.spine(node);
+        match &self.weights[port] {
+            StateTransition::Node(addrs, port) => StateTransition::Node(
+                addrs
+                    .iter()
+                    .map(|(addr, ribs)| {
+                        AddressWithBound(
+                            addr.clone(),
+                            Skeleton {
+                                spine: spine.cloned(),
+                                ribs: Some(ribs.clone()),
+                            },
+                        )
+                    })
+                    .collect(),
+                *port,
+            ),
+            StateTransition::NoLinkedNode => StateTransition::NoLinkedNode,
+            StateTransition::FAIL => StateTransition::FAIL,
+        }
     }
 
     fn is_non_deterministic(&self, state: super::StateID) -> bool {
@@ -136,7 +153,7 @@ impl BaseGraphTrie {
         state: StateID,
         graph: &PortGraph,
         partition: &LinePartition,
-    ) -> Vec<StateTransition<AddressWithBound>> {
+    ) -> Vec<StateTransition<(Address, Ribs)>> {
         let next_node = self.next_node(state, partition);
         let next_port = self.next_port_offset(state, partition);
         let next_addr = next_node.map(|n| {
@@ -179,10 +196,7 @@ impl BaseGraphTrie {
                         {
                             let merged_addrs = merge_addrs(
                                 addrs,
-                                &[AddressWithBound(
-                                    new_addr.clone(),
-                                    Skeleton::from_ribs(next_ribs.clone().unwrap()),
-                                )],
+                                &[(new_addr.clone(), next_ribs.clone().unwrap())],
                             )?;
                             if !is_satisfied(next_node?, &merged_addrs, partition, spine?) {
                                 return None;
@@ -196,10 +210,7 @@ impl BaseGraphTrie {
         // Append the perfect transition
         if let (Some(addr), Some(port)) = (next_addr, next_port) {
             let ideal = StateTransition::Node(
-                vec![AddressWithBound(
-                    addr,
-                    Skeleton::from_ribs(next_ribs.clone().expect("next_addr != None")),
-                )],
+                vec![(addr, next_ribs.clone().expect("next_addr != None"))],
                 port,
             );
             if !transitions.contains(&ideal) {
@@ -280,11 +291,11 @@ impl BaseGraphTrie {
     }
 
     /// All transitions in `state` that are allowed for `graph`
-    fn compatible_transitions<'a>(
-        &'a self,
+    fn compatible_transitions<'a, 'b: 'a>(
+        &'b self,
         state: StateID,
         graph: &'a PortGraph,
-        partition: &'a LinePartition,
+        partition: &'a LinePartition<'b>,
         mode: TrieTraversal,
     ) -> impl Iterator<Item = PortIndex> + 'a {
         let out_port = self.port(state, partition);
@@ -300,21 +311,17 @@ impl BaseGraphTrie {
                         return false;
                     }
                     match mode {
-                        TrieTraversal::ReadOnly => {
-                            addrs
-                                .iter()
-                                .all(|AddressWithBound(addr, Skeleton { ribs, .. })| {
-                                    let Some(next_addr) = partition.get_address(
+                        TrieTraversal::ReadOnly => addrs.iter().all(|(addr, ribs)| {
+                            let Some(next_addr) = partition.get_address(
                                     next_node.expect("from if condition"),
                                     spine,
-                                    ribs.as_ref()
+                                    Some(ribs)
                                 ) else {
                                     return false
                                 };
-                                    &next_addr == addr
-                                })
-                        }
-                        TrieTraversal::Write => addrs.iter().all(|AddressWithBound(addr, _)| {
+                            &next_addr == addr
+                        }),
+                        TrieTraversal::Write => addrs.iter().all(|(addr, _)| {
                             let Some(node) = partition.get_node_index(
                                 addr,
                                 spine,
@@ -341,7 +348,7 @@ impl BaseGraphTrie {
     fn get_or_insert(
         &mut self,
         state: StateID,
-        transition: &StateTransition<AddressWithBound>,
+        transition: &StateTransition<(Address, Ribs)>,
         new_state: &mut Option<StateID>,
     ) -> PermPortIndex {
         if !matches!(
@@ -547,16 +554,11 @@ impl BaseGraphTrie {
                             if curr_port != port {
                                 break;
                             }
-                            if curr_addrs.iter().all(
-                                |AddressWithBound(c_addr, Skeleton { ribs: c_ribs, .. })| {
-                                    let c_rib = c_ribs.as_ref().unwrap();
-                                    addrs.iter().any(
-                                        |AddressWithBound(addr, Skeleton { ribs, .. })| {
-                                            addr == c_addr && c_rib.within(ribs.as_ref().unwrap())
-                                        },
-                                    )
-                                },
-                            ) {
+                            if curr_addrs.iter().all(|(c_addr, c_ribs)| {
+                                addrs
+                                    .iter()
+                                    .any(|(addr, ribs)| addr == c_addr && c_ribs.within(ribs))
+                            }) {
                                 new_transitions
                                     .push((port_offset, transitions_iter.next().unwrap().clone()));
                             } else {
@@ -704,11 +706,11 @@ impl BaseGraphTrie {
 
 fn is_satisfied(
     node: NodeIndex,
-    addrs: &[AddressWithBound],
+    addrs: &[(Address, Ribs)],
     partition: &LinePartition,
     spine: &Spine,
 ) -> bool {
-    addrs.iter().all(|AddressWithBound(addr, _)| {
+    addrs.iter().all(|(addr, _)| {
         if let Some(graph_node) = partition.get_node_index(addr, spine) {
             node == graph_node
         } else {
@@ -718,15 +720,13 @@ fn is_satisfied(
 }
 
 fn merge_addrs(
-    addrs1: &[AddressWithBound],
-    addrs2: &[AddressWithBound],
-) -> Option<Vec<AddressWithBound>> {
+    addrs1: &[(Address, Ribs)],
+    addrs2: &[(Address, Ribs)],
+) -> Option<Vec<(Address, Ribs)>> {
     let mut addrs = Vec::from_iter(addrs1.iter().cloned());
-    for AddressWithBound(a, Skeleton { spine, ribs: rib_a }) in addrs2 {
-        let rib_a = rib_a.as_ref().unwrap();
+    for (a, rib_a) in addrs2 {
         let mut already_inserted = false;
-        for AddressWithBound(b, Skeleton { ribs: rib_b, .. }) in addrs.iter_mut() {
-            let rib_b = rib_b.as_mut().unwrap();
+        for (b, rib_b) in addrs.iter_mut() {
             if a == b {
                 // If they share the same address, then ribs is union of ribs
                 for (ra, rb) in rib_a.0.iter().zip(&mut rib_b.0) {
@@ -749,13 +749,7 @@ fn merge_addrs(
             }
         }
         if !already_inserted {
-            addrs.push(AddressWithBound(
-                a.clone(),
-                Skeleton {
-                    spine: spine.clone(),
-                    ribs: Some(rib_a.clone()),
-                },
-            ));
+            addrs.push((a.clone(), rib_a.clone()));
         }
     }
     Some(addrs)

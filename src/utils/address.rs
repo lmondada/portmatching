@@ -22,23 +22,25 @@ impl<'graph> fmt::Debug for LinePartition<'graph> {
     }
 }
 
-impl<'a> GraphCache<AddressWithBound> for LinePartition<'a> {
-    fn get_node(&self, addr: &AddressWithBound) -> Option<NodeIndex> {
-        self.get_node_index(&addr.0, addr.1.spine.as_ref()?)
-    }
+impl<'a> GraphCache<Address> for LinePartition<'a> {
+    type Boundary = Skeleton;
 
     fn graph(&self) -> &PortGraph {
         &self.graph
     }
 
-    fn get_addr(&self, node: NodeIndex, boundary: &<AddressWithBound as BoundedAddress>::Boundary) -> Option<AddressWithBound> {
+    fn get_node(&self, addr: &Address, boundary: &Self::Boundary) -> Option<NodeIndex> {
+        self.get_node_index(addr, boundary.spine.as_ref()?)
+    }
+
+    fn get_addr(&self, node: NodeIndex, boundary: &Self::Boundary) -> Option<Address> {
         let addr = self.get_address(node, boundary.spine.as_ref()?, boundary.ribs.as_ref())?;
-        Some(AddressWithBound(addr, boundary.clone()))
+        Some(addr)
     }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(crate) struct Address(pub(crate) usize, pub(crate) isize);
+pub struct Address(pub(crate) usize, pub(crate) isize);
 
 impl Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -91,14 +93,19 @@ impl Skeleton {
 pub struct AddressWithBound(pub(crate) Address, pub(crate) Skeleton);
 
 impl BoundedAddress for AddressWithBound {
+    type Main = Address;
     type Boundary = Skeleton;
 
     fn boundary(&self) -> &Self::Boundary {
         &self.1
     }
+
+    fn main(&self) -> &Self::Main {
+        &self.0
+    }
 }
 
-impl Display for AddressWithBound {
+impl<'a> Display for AddressWithBound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
