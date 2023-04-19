@@ -11,9 +11,11 @@ use portgraph::{
 };
 
 use crate::utils::{
-    address::{Address, LinePartition, Ribs, Spine},
+    address::{Address, AddressWithBound, LinePartition, Spine},
     cover::cover_nodes,
 };
+
+use super::{GraphTrie, StateTransition, StateID};
 
 /// A node in the GraphTrie
 ///
@@ -45,21 +47,6 @@ impl Display for NodeWeight {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StateID(pub(crate) NodeIndex);
-
-impl StateID {
-    pub fn root() -> Self {
-        StateID(NodeIndex::new(0))
-    }
-}
-
-impl From<NodeIndex> for StateID {
-    fn from(value: NodeIndex) -> Self {
-        StateID(value)
-    }
-}
-
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct PermPortIndex(usize);
 
@@ -70,13 +57,13 @@ impl PermPortIndex {
     }
 }
 
-pub(crate) struct GraphTrie {
+pub struct BaseGraphTrie {
     pub(crate) graph: PortGraph,
-    weights: Weights<NodeWeight, StateTransition>,
+    weights: Weights<NodeWeight, StateTransition<AddressWithBound>>,
     perm_indices: RefCell<BTreeMap<PermPortIndex, PortIndex>>,
 }
 
-impl Default for GraphTrie {
+impl Default for BaseGraphTrie {
     fn default() -> Self {
         let graph = Default::default();
         let weights = Default::default();
@@ -91,147 +78,71 @@ impl Default for GraphTrie {
     }
 }
 
+impl GraphTrie for BaseGraphTrie {
+    type Address = AddressWithBound;
+
+    fn trie(&self) -> &PortGraph {
+        &self.graph
+    }
+
+    fn address(&self, state: super::StateID) -> Option<Self::Address> {
+        let addr = self.weight(state).address.as_ref()?;
+        let spine = self.spine(state)?;
+        Some(AddressWithBound(addr.clone(), (spine.clone(), None)))
+    }
+
+    fn port_offset(&self, state: super::StateID) -> Option<PortOffset> {
+        self.weight(state).out_port.clone()
+    }
+
+    fn transition(&self, port: PortIndex) -> &StateTransition<Self::Address> {
+        &self.weights[port]
+    }
+
+    fn is_non_deterministic(&self, state: super::StateID) -> bool {
+        self.weights[state].non_deterministic
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub(crate) enum TrieTraversal {
     ReadOnly,
     Write,
 }
 
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub(crate) enum StateTransition {
-    Node(Vec<(Address, Ribs)>, PortOffset),
-    NoLinkedNode,
-    FAIL,
-}
+// #[allow(clippy::upper_case_acronyms)]
+// #[derive(Clone, PartialEq, Eq, Debug)]
+// pub(crate) enum StateTransition {
+//     Node(Vec<(Address, Ribs)>, PortOffset),
+//     NoLinkedNode,
+//     FAIL,
+// }
 
-impl Default for StateTransition {
-    fn default() -> Self {
-        Self::FAIL
-    }
-}
-
-impl Display for StateTransition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StateTransition::Node(addrs, port) => {
-                let addrs: Vec<_> = addrs
-                    .iter()
-                    .map(|(addr, _)| format!("{:?}", addr))
-                    .collect();
-                write!(f, "{}[{:?}]", addrs.join("/"), port)
-            }
-            StateTransition::NoLinkedNode => write!(f, "dangling"),
-            StateTransition::FAIL => write!(f, "fail"),
-        }
-    }
-}
-
-impl StateTransition {
-    fn transition_type(&self) -> usize {
-        match &self {
-            StateTransition::Node(_, _) => 0,
-            StateTransition::NoLinkedNode => 1,
-            StateTransition::FAIL => 2,
-        }
-    }
-}
-
-impl GraphTrie {
+impl BaseGraphTrie {
     /// An empty graph trie
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
     pub(crate) fn weight(&self, state: StateID) -> &NodeWeight {
-        &self.weights[state.0]
+        &self.weights[state]
     }
 
-    pub(crate) fn node(&self, state: StateID, graph_cache: &LinePartition) -> Option<NodeIndex> {
-        graph_cache.get_node_index(self.address(state)?, self.spine(state)?)
-    }
-
-    fn spine(&self, state: StateID) -> Option<&Spine> {
-        self.weight(state).spine.as_ref()
-    }
-
-    fn address(&self, state: StateID) -> Option<&Address> {
-        self.weight(state).address.as_ref()
-    }
-
-    pub(crate) fn out_port(
-        &self,
-        state: StateID,
-        graph_cache: &LinePartition,
-    ) -> Option<PortIndex> {
-        let NodeWeight { out_port, .. } = self.weight(state);
-        graph_cache
-            .graph
-            .port_index(self.node(state, graph_cache)?, (*out_port)?)
-    }
-
-    pub(crate) fn next_node_port(
-        &self,
-        state: StateID,
-        graph_cache: &LinePartition,
-    ) -> Option<(NodeIndex, PortOffset)> {
-        let graph = graph_cache.graph;
-        let in_port = graph.port_link(self.out_port(state, graph_cache)?)?;
-        Some((
-            graph.port_node(in_port).expect("invalid port"),
-            graph.port_offset(in_port).expect("invalid port"),
-        ))
-    }
-
-    /// The transitions to follow from `state`
-    ///
-    /// Works in both read (i.e. when traversing a graph online for matching)
-    /// and write (i.e. when adding patterns) modes.
-    ///
-    /// When reading, only return existing transitions. If the state is
-    /// furthermore deterministic, then a single transition is returned.
-    ///
-    /// Inversely, when writing in a non-deterministic state, a single
-    /// transition is returned. Furthermore, all the transitions returned
-    /// will always be of a single kind of the StateTransition enum:
-    ///   - StateTransition::Node(_) when there is a next node
-    ///   - StateTransition::NoLinkedNode when the out_port is dangling
-    ///   - StateTransition::FAIL when there is no such out_port
-    /// This works because even in deterministic read-only mode, a
-    /// FAIL or NoLinkedNode transition will only be followed if there is
-    /// no other match
-    pub(crate) fn get_transitions(
-        &self,
-        state: StateID,
-        graph: &PortGraph,
-        partition: &LinePartition,
-    ) -> Vec<StateTransition> {
-        let mut transitions = self
-            .compatible_transitions(state, graph, partition, TrieTraversal::ReadOnly)
-            .map(|out_p| self.weights[out_p].clone());
-        if self.weight(state).non_deterministic {
-            transitions.collect()
-        } else {
-            transitions.next().into_iter().collect()
-        }
-    }
     pub(crate) fn get_transitions_write(
         &mut self,
         state: StateID,
         graph: &PortGraph,
         partition: &LinePartition,
-    ) -> Vec<StateTransition> {
-        let (next_node, next_port) = self
-            .next_node_port(state, partition)
-            .map(|(n, p)| (Some(n), Some(p)))
-            .unwrap_or((None, None));
+    ) -> Vec<StateTransition<AddressWithBound>> {
+        let next_node = self.next_node(state, partition);
+        let next_port = self.next_port_offset(state, partition);
         let next_addr = next_node.map(|n| {
             let NodeWeight {
                 out_port,
                 address,
                 spine,
                 ..
-            } = &mut self.weights[state.0];
+            } = &mut self.weights[state];
             partition
                 .get_address(n, spine.as_ref().expect("next_node exists"), None)
                 .unwrap_or_else(|| {
@@ -265,7 +176,11 @@ impl GraphTrie {
                         {
                             let merged_addrs = merge_addrs(
                                 addrs,
-                                &[(new_addr.clone(), next_ribs.clone().unwrap())],
+                                &[AddressWithBound(
+                                    new_addr.clone(),
+                                    (vec![],
+                                    Some(next_ribs.clone()).unwrap(),)
+                                )],
                             )?;
                             if !is_satisfied(next_node?, &merged_addrs, partition, spine?) {
                                 return None;
@@ -278,33 +193,18 @@ impl GraphTrie {
         }
         // Append the perfect transition
         if let (Some(addr), Some(port)) = (next_addr, next_port) {
-            let ideal = StateTransition::Node(vec![(addr, next_ribs.unwrap())], port);
+            let ideal =
+                StateTransition::Node(vec![AddressWithBound(addr, (vec![], next_ribs))], port);
             if !transitions.contains(&ideal) {
                 transitions.push(ideal);
             }
-        } else if self.out_port(state, partition).is_some() {
+        } else if self.port(state, partition).is_some() {
             let ideal = StateTransition::NoLinkedNode;
             if !transitions.contains(&ideal) {
                 transitions.push(ideal);
             }
         }
         transitions
-    }
-
-    pub(crate) fn next_states(
-        &self,
-        state: StateID,
-        graph: &PortGraph,
-        partition: &LinePartition,
-    ) -> Vec<StateID> {
-        // Compute "ideal" transition
-        self.get_transitions(state, graph, partition)
-            .into_iter()
-            .map(|transition| {
-                self.transition(state, &transition)
-                    .expect("invalid transition")
-            })
-            .collect()
     }
 
     /// Split states so that all incoming links are within ports
@@ -332,7 +232,7 @@ impl GraphTrie {
                     weights[new_out_port] = weights[out_port].clone();
                 }
                 // callback
-                clone_state(StateID(state), StateID(new_state));
+                clone_state(state, new_state);
             },
             |old, new| {
                 let mut weights = weights.borrow_mut();
@@ -349,7 +249,6 @@ impl GraphTrie {
             },
         )
         .into_iter()
-        .map(StateID)
         .collect()
     }
 
@@ -366,10 +265,10 @@ impl GraphTrie {
     ) -> Result<PortIndex, portgraph::LinkError> {
         self.set_num_ports(
             in_node,
-            self.graph.num_inputs(in_node.0) + 1,
-            self.graph.num_outputs(in_node.0),
+            self.graph.num_inputs(in_node) + 1,
+            self.graph.num_outputs(in_node),
         );
-        let in_port = self.graph.inputs(in_node.0).last().expect("just created");
+        let in_port = self.graph.inputs(in_node).last().expect("just created");
         self.graph.link_ports(out_port, in_port).map(|_| in_port)
     }
 
@@ -381,12 +280,12 @@ impl GraphTrie {
         partition: &'a LinePartition,
         mode: TrieTraversal,
     ) -> impl Iterator<Item = PortIndex> + 'a {
-        let out_port = self.out_port(state, partition);
+        let out_port = self.port(state, partition);
         let in_port = out_port.and_then(|out_port| graph.port_link(out_port));
         let in_offset = in_port.map(|in_port| graph.port_offset(in_port).expect("invalid port"));
         let next_node = in_port.map(|in_port| graph.port_node(in_port).expect("invalid port"));
         self.graph
-            .outputs(state.0)
+            .outputs(state)
             .filter(move |&out_p| match self.weights[out_p] {
                 StateTransition::Node(ref addrs, offset) => {
                     let spine = self.spine(state).expect("from if condition");
@@ -394,17 +293,19 @@ impl GraphTrie {
                         return false;
                     }
                     match mode {
-                        TrieTraversal::ReadOnly => addrs.iter().all(|(addr, ribs)| {
-                            let Some(next_addr) = partition.get_address(
+                        TrieTraversal::ReadOnly => {
+                            addrs.iter().all(|AddressWithBound(addr, (_, ribs))| {
+                                let Some(next_addr) = partition.get_address(
                                     next_node.expect("from if condition"),
                                     spine,
-                                    Some(ribs)
+                                    ribs.as_ref()
                                 ) else {
                                     return false
                                 };
-                            &next_addr == addr
-                        }),
-                        TrieTraversal::Write => addrs.iter().all(|(addr, _)| {
+                                &next_addr == addr
+                            })
+                        }
+                        TrieTraversal::Write => addrs.iter().all(|AddressWithBound(addr, _)| {
                             let Some(node) = partition.get_node_index(
                                 addr,
                                 spine,
@@ -428,21 +329,10 @@ impl GraphTrie {
             })
     }
 
-    fn transition(&self, state: StateID, transition: &StateTransition) -> Option<StateID> {
-        self.graph
-            .outputs(state.0)
-            .find(|&p| &self.weights[p] == transition)
-            .and_then(|p| {
-                let in_p = self.graph.port_link(p)?;
-                let n = self.graph.port_node(in_p).expect("invalid port");
-                Some(StateID(n))
-            })
-    }
-
     fn get_or_insert(
         &mut self,
         state: StateID,
-        transition: &StateTransition,
+        transition: &StateTransition<AddressWithBound>,
         new_state: &mut Option<StateID>,
     ) -> PermPortIndex {
         if !matches!(
@@ -453,15 +343,15 @@ impl GraphTrie {
         }
         let out_port = self
             .graph
-            .outputs(state.0)
+            .outputs(state)
             .find(|&p| &self.weights[p] == transition)
             .unwrap_or_else(|| {
                 self.set_num_ports(
                     state,
-                    self.graph.num_inputs(state.0),
-                    self.graph.num_outputs(state.0) + 1,
+                    self.graph.num_inputs(state),
+                    self.graph.num_outputs(state) + 1,
                 );
-                let mut offset = self.graph.outputs(state.0).len() - 1;
+                let mut offset = self.graph.outputs(state).len() - 1;
                 // shift transitions until out_port is in the right place
                 loop {
                     if offset == 0 {
@@ -469,12 +359,12 @@ impl GraphTrie {
                     }
                     let prev_port = self
                         .graph
-                        .output(state.0, offset - 1)
+                        .output(state, offset - 1)
                         .expect("0 <= offset < len");
                     if self.weights[prev_port].transition_type() > transition.transition_type() {
                         let new = self
                             .graph
-                            .output(state.0, offset)
+                            .output(state, offset)
                             .expect("0 <= offset < len");
                         self.move_out_port(prev_port, new);
                     } else {
@@ -484,7 +374,7 @@ impl GraphTrie {
                 }
                 let out_port = self
                     .graph
-                    .output(state.0, offset)
+                    .output(state, offset)
                     .expect("0 <= offset < len");
                 self.weights[out_port] = transition.clone();
                 out_port
@@ -497,9 +387,9 @@ impl GraphTrie {
                 .index();
             let next_state = self
                 .graph
-                .output(state.0, offset + 1)
+                .output(state, offset + 1)
                 .and_then(|p| self.graph.port_link(p))
-                .map(|p| StateID(self.graph.port_node(p).expect("invalid port")))
+                .map(|p| self.graph.port_node(p).expect("invalid port"))
                 .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.add_state(true)));
             self.add_edge(out_port, next_state)
                 .expect("out_port is linked?")
@@ -533,18 +423,18 @@ impl GraphTrie {
             };
             let addr = self
                 .address(state)
-                .cloned()
+                .map(|addr| addr.0)
                 .unwrap_or_else(|| graph_addr().expect("Could not get address of current node"));
             if offset == start_offset && Some(&addr) == graph_addr().as_ref() {
-                self.weights[state.0].spine = Some(spine.clone());
-                self.weights[state.0].out_port = Some(offset);
-                self.weights[state.0].address = Some(addr);
+                self.weights[state].spine = Some(spine.clone());
+                self.weights[state].out_port = Some(offset);
+                self.weights[state].address = Some(addr);
                 start_states.push(state);
             } else {
                 if !self.weight(state).non_deterministic {
                     curr_states.extend(
                         self.graph
-                            .outputs(state.0)
+                            .outputs(state)
                             // Filter out FAIL as we add it below anyway
                             .filter(|&p| self.weights[p] != StateTransition::FAIL)
                             .filter_map(|p| Some(self.create_perm_port(self.graph.port_link(p)?)))
@@ -593,7 +483,7 @@ impl GraphTrie {
                     if !self.weight(state).non_deterministic {
                         in_ports.extend(
                             self.graph
-                                .outputs(state.0)
+                                .outputs(state)
                                 .filter(|&out_p| {
                                     !matches!(
                                         &self.weights[out_p],
@@ -618,7 +508,7 @@ impl GraphTrie {
                     // A vector of indices where new transitions should be inserted, along with
                     // the transition to be inserted
                     let mut new_transitions = Vec::new();
-                    for port in self.graph.outputs(state.0) {
+                    for port in self.graph.outputs(state) {
                         let curr_transition = &self.weights[port];
                         let port_offset =
                             self.graph.port_offset(port).expect("invalid port").index();
@@ -654,10 +544,11 @@ impl GraphTrie {
                             if curr_port != port {
                                 break;
                             }
-                            if curr_addrs.iter().all(|(c_addr, c_rib)| {
-                                addrs
-                                    .iter()
-                                    .any(|(addr, rib)| addr == c_addr && c_rib.within(rib))
+                            if curr_addrs.iter().all(|AddressWithBound(c_addr, (_, c_rib))| {
+                                let c_rib = c_rib.as_ref().unwrap();
+                                addrs.iter().any(|AddressWithBound(addr, (_, rib))| {
+                                    addr == c_addr && c_rib.within(rib.as_ref().unwrap())
+                                })
                             }) {
                                 new_transitions
                                     .push((port_offset, transitions_iter.next().unwrap().clone()));
@@ -667,7 +558,7 @@ impl GraphTrie {
                         }
                     }
                     // Insert remaining transitions at the end
-                    let n_ports = self.graph.num_outputs(state.0);
+                    let n_ports = self.graph.num_outputs(state);
                     new_transitions.extend(transitions_iter.map(|t| (n_ports, t.clone())));
                     // sort transitions
                     new_transitions.sort_by_key(|&(p, _)| p);
@@ -675,22 +566,22 @@ impl GraphTrie {
                     // Now shift ports to make space for new ones
                     self.set_num_ports(
                         state,
-                        self.graph.num_inputs(state.0),
-                        self.graph.num_outputs(state.0) + new_transitions.len(),
+                        self.graph.num_inputs(state),
+                        self.graph.num_outputs(state) + new_transitions.len(),
                     );
 
-                    let mut new_offset = self.graph.num_outputs(state.0);
+                    let mut new_offset = self.graph.num_outputs(state);
                     for offset in (0..=n_ports).rev() {
                         // move existing transition
                         let fallback = if offset < n_ports {
                             new_offset -= 1;
                             let old = self
                                 .graph
-                                .port_index(state.0, PortOffset::new_outgoing(offset))
+                                .port_index(state, PortOffset::new_outgoing(offset))
                                 .expect("invalid offset");
                             let new = self
                                 .graph
-                                .port_index(state.0, PortOffset::new_outgoing(new_offset))
+                                .port_index(state, PortOffset::new_outgoing(new_offset))
                                 .expect("invalid offset");
                             self.move_out_port(old, new);
                             self.graph
@@ -705,11 +596,11 @@ impl GraphTrie {
                             new_offset -= 1;
                             let new = self
                                 .graph
-                                .port_index(state.0, PortOffset::new_outgoing(new_offset))
+                                .port_index(state, PortOffset::new_outgoing(new_offset))
                                 .expect("invalid offset");
                             self.weights[new] = transition;
                             let next_state = if let Some(fallback) = fallback {
-                                StateID(fallback)
+                                fallback
                             } else {
                                 *new_state.get_or_insert_with(|| self.add_state(false))
                             };
@@ -730,7 +621,7 @@ impl GraphTrie {
 
     fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
         self.graph
-            .set_num_ports(state.0, incoming, outgoing, |old, new| {
+            .set_num_ports(state, incoming, outgoing, |old, new| {
                 rekey(
                     &mut self.weights,
                     &mut self.perm_indices.borrow_mut(),
@@ -774,7 +665,7 @@ impl GraphTrie {
 
     fn port_state(&self, port: PermPortIndex) -> Option<StateID> {
         let &port = self.perm_indices.borrow().get(&port)?;
-        self.graph.port_node(port).map(StateID)
+        self.graph.port_node(port)
     }
 
     pub(crate) fn free(&self, port: PermPortIndex) -> Option<PortIndex> {
@@ -798,15 +689,19 @@ impl GraphTrie {
     pub(crate) fn _dotstring(&self) -> String {
         dot_string_weighted(&self.graph, &self.str_weights())
     }
+
+    fn spine(&self, state: StateID) -> Option<&Vec<(Vec<PortOffset>, usize)>> {
+        self.weight(state).spine.as_ref()
+    }
 }
 
 fn is_satisfied(
     node: NodeIndex,
-    addrs: &[(Address, Ribs)],
+    addrs: &[AddressWithBound],
     partition: &LinePartition,
     spine: &Spine,
 ) -> bool {
-    addrs.iter().all(|(addr, _)| {
+    addrs.iter().all(|AddressWithBound(addr, _)| {
         if let Some(graph_node) = partition.get_node_index(addr, spine) {
             node == graph_node
         } else {
@@ -816,13 +711,15 @@ fn is_satisfied(
 }
 
 fn merge_addrs(
-    addrs1: &[(Address, Ribs)],
-    addrs2: &[(Address, Ribs)],
-) -> Option<Vec<(Address, Ribs)>> {
+    addrs1: &[AddressWithBound],
+    addrs2: &[AddressWithBound],
+) -> Option<Vec<AddressWithBound>> {
     let mut addrs = Vec::from_iter(addrs1.iter().cloned());
-    for (a, rib_a) in addrs2 {
+    for AddressWithBound(a, (spine, rib_a)) in addrs2 {
+        let rib_a = rib_a.as_ref().unwrap();
         let mut already_inserted = false;
-        for (b, rib_b) in addrs.iter_mut() {
+        for AddressWithBound(b, (_, rib_b)) in addrs.iter_mut() {
+            let rib_b = rib_b.as_mut().unwrap();
             if a == b {
                 // If they share the same address, then ribs is union of ribs
                 for (ra, rb) in rib_a.0.iter().zip(&mut rib_b.0) {
@@ -845,7 +742,11 @@ fn merge_addrs(
             }
         }
         if !already_inserted {
-            addrs.push((a.clone(), rib_a.clone()));
+            addrs.push(AddressWithBound(
+                a.clone(),
+                (spine.clone(),
+                Some(rib_a.clone()))
+            ));
         }
     }
     Some(addrs)
@@ -977,7 +878,7 @@ mod tests {
 
     use crate::utils::address::{Address, LinePartition};
 
-    use super::GraphTrie;
+    use super::BaseGraphTrie;
 
     fn link(graph: &mut PortGraph, (out_n, out_p): (usize, usize), (in_n, in_p): (usize, usize)) {
         let out_n = NodeIndex::new(out_n);
@@ -993,7 +894,7 @@ mod tests {
 
     #[test]
     fn test_add_transition_deterministic() {
-        let mut trie = GraphTrie::new();
+        let mut trie = BaseGraphTrie::new();
         let state = trie.add_state(false);
 
         // graph 1
@@ -1007,8 +908,8 @@ mod tests {
         let partition = LinePartition::new(&graph, root);
         let spine = partition.get_spine();
         let ribs = partition.get_ribs(&spine);
-        trie.weights[state.0].address = partition.get_address(root, &spine, Some(&ribs));
-        trie.weights[state.0].out_port = PortOffset::new_outgoing(1).into();
+        trie.weights[state].address = partition.get_address(root, &spine, Some(&ribs));
+        trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
 
         trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
 
@@ -1022,7 +923,7 @@ mod tests {
 
         trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
 
-        assert_eq!(trie.graph.num_outputs(state.0), 3);
+        assert_eq!(trie.graph.num_outputs(state), 3);
         assert_eq!(trie.graph.node_count(), 4);
 
         // graph 3
@@ -1035,7 +936,7 @@ mod tests {
         let partition = LinePartition::new(&graph, root);
         trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
 
-        assert_eq!(trie.graph.num_outputs(state.0), 4);
+        assert_eq!(trie.graph.num_outputs(state), 4);
         assert_eq!(trie.graph.node_count(), 6);
 
         // graph 4
@@ -1051,7 +952,7 @@ mod tests {
 
     #[test]
     fn test_add_transition_non_deterministic() {
-        let mut trie = GraphTrie::new();
+        let mut trie = BaseGraphTrie::new();
         let state = trie.add_state(true);
 
         // graph 1
@@ -1062,8 +963,8 @@ mod tests {
         link(&mut graph, (0, 0), (1, 0));
         link(&mut graph, (0, 1), (1, 1));
         let partition = LinePartition::new(&graph, root);
-        trie.weights[state.0].address = Address(0, 0).into();
-        trie.weights[state.0].out_port = PortOffset::new_outgoing(1).into();
+        trie.weights[state].address = Address(0, 0).into();
+        trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
 
         trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
 
@@ -1076,7 +977,7 @@ mod tests {
         let partition = LinePartition::new(&graph, root);
         trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
 
-        assert_eq!(trie.graph.num_outputs(state.0), 2);
+        assert_eq!(trie.graph.num_outputs(state), 2);
         assert_eq!(trie.graph.node_count(), 4);
     }
 }

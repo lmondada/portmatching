@@ -9,7 +9,7 @@ use crate::pattern::Pattern;
 
 use super::Matcher;
 
-mod graph_trie;
+pub mod graph_tries;
 mod line_based;
 mod naive;
 pub use line_based::LineGraphTrie;

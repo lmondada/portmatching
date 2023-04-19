@@ -5,55 +5,32 @@ use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 use crate::{
     matcher::Matcher,
     pattern::{Edge, Pattern},
-    utils::address::{AddressWithBound, LinePartition},
+    utils::address::LinePartition,
 };
 
 use super::{
-    graph_tries::{BaseGraphTrie, GraphTrie, StateID, root_state},
+    graph_trie::{GraphTrie, StateID},
     ManyPatternMatcher, PatternID, PatternMatch,
 };
 
-pub struct LineGraphTrie<T> {
-    trie: T,
-    match_states: BTreeMap<StateID, Vec<PatternID>>,
-    patterns: Vec<Pattern>,
-}
+#[derive(Default)]
+pub struct AddrCachedTrie(LineGraphTrie);
 
-impl<T: GraphTrie + Default> Default for LineGraphTrie<T> {
-    fn default() -> Self {
-        Self {
-            trie: T::default(),
-            match_states: Default::default(),
-            patterns: Default::default(),
-        }
-    }
-}
-
-impl<T: GraphTrie + Default> LineGraphTrie<T> {
+impl AddrCachedTrie {
     pub fn new() -> Self {
         Self::default()
     }
-}
 
-impl LineGraphTrie<BaseGraphTrie> {
     pub fn dotstring(&self) -> String {
-        let mut weights = self.trie.str_weights();
-        for n in self.trie.graph.nodes_iter() {
-            let empty = vec![];
-            let matches = self.match_states.get(&n).unwrap_or(&empty);
-            if !matches.is_empty() {
-                weights[n] += &format!("[{:?}]", matches);
-            }
-        }
-        dot_string_weighted(&self.trie.graph, &weights)
+        self.0.dotstring()
     }
 }
 
-impl<T: GraphTrie<Address = AddressWithBound>> Matcher for LineGraphTrie<T> {
+impl Matcher for AddrCachedTrie {
     type Match = PatternMatch;
 
     fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
-        let mut current_states = vec![root_state()];
+        let mut current_states = vec![StateID::root()];
         let mut matches = BTreeSet::new();
         let partition = LinePartition::new(graph, root);
         while !current_states.is_empty() {
@@ -75,7 +52,7 @@ impl<T: GraphTrie<Address = AddressWithBound>> Matcher for LineGraphTrie<T> {
     }
 }
 
-impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie> {
+impl ManyPatternMatcher for LineGraphTrie {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());
@@ -86,7 +63,7 @@ impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie> {
 
         // Stores the current positions in the graph trie, along with the
         // match that corresponds to that position
-        let mut current_states = vec![root_state()];
+        let mut current_states = vec![StateID::root()];
 
         // Decompose a pattern into "lines", which are paths in the pattern
         let all_lines = pattern.all_lines();
@@ -148,7 +125,7 @@ mod tests {
     use crate::{
         matcher::{
             many_patterns::{
-                line_based::LineGraphTrie, ManyPatternMatcher, PatternID, PatternMatch, graph_tries::BaseGraphTrie,
+                line_based::LineGraphTrie, ManyPatternMatcher, PatternID, PatternMatch,
             },
             Matcher, SinglePatternMatcher,
         },
@@ -161,7 +138,7 @@ mod tests {
         let mut g = PortGraph::new();
         g.add_node(0, 1);
         let p = Pattern::from_graph(g.clone()).unwrap();
-        let mut matcher = LineGraphTrie::<BaseGraphTrie>::new();
+        let mut matcher = LineGraphTrie::new();
         matcher.add_pattern(p);
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);

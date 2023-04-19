@@ -13,6 +13,7 @@ use portgraph::PortGraph;
 use portmatching::matcher::many_patterns::LineGraphTrie;
 use portmatching::matcher::many_patterns::ManyPatternMatcher;
 use portmatching::matcher::many_patterns::NaiveManyMatcher;
+use portmatching::matcher::many_patterns::graph_tries::BaseGraphTrie;
 use portmatching::pattern::Pattern;
 
 fn bench<T: ManyPatternMatcher>(
@@ -57,7 +58,7 @@ fn perform_benches(c: &mut Criterion) {
         .expect("Did not find any large graph");
 
     let mut group = c.benchmark_group("Many Patterns Matching");
-    bench::<LineGraphTrie>("Line-based Graph Trie", &mut group, &patterns, &graph);
+    bench::<LineGraphTrie<BaseGraphTrie>>("Line-based Graph Trie", &mut group, &patterns, &graph);
     bench::<NaiveManyMatcher>("Naive", &mut group, &patterns, &graph);
     group.finish();
 }

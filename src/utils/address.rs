@@ -1,10 +1,12 @@
 use std::{
     cmp,
     collections::{BTreeMap, BTreeSet, VecDeque},
-    fmt,
+    fmt::{self, Display},
 };
 
 use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
+
+use crate::matcher::many_patterns::graph_tries::{GraphCache, BoundedAddress};
 
 use super::pre_order::shortest_path;
 
@@ -17,6 +19,21 @@ pub(crate) struct LinePartition<'graph> {
 impl<'graph> fmt::Debug for LinePartition<'graph> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:#?}\n{:#?}", self.node2line, self.root)
+    }
+}
+
+impl<'a> GraphCache<AddressWithBound> for LinePartition<'a> {
+    fn get_node(&self, addr: &AddressWithBound) -> Option<NodeIndex> {
+        self.get_node_index(&addr.0, &addr.1.0)
+    }
+
+    fn graph(&self) -> &PortGraph {
+        &self.graph
+    }
+
+    fn get_addr(&self, node: NodeIndex, boundary: &<AddressWithBound as BoundedAddress>::Boundary) -> Option<AddressWithBound> {
+        let addr = self.get_address(node, &boundary.0, boundary.1.as_ref())?;
+        Some(AddressWithBound(addr, (boundary.0.clone(), boundary.1.clone())))
     }
 }
 
@@ -43,6 +60,12 @@ impl<'graph> fmt::Debug for LinePartition<'graph> {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) struct Address(pub(crate) usize, pub(crate) isize);
 
+impl Display for Address {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", (self.0, self.1))
+    }
+}
+
 impl Address {
     fn key(&self) -> (usize, usize, bool) {
         let &Address(fst, snd) = self;
@@ -62,9 +85,27 @@ impl Ord for Address {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct AddressWithBound(pub(crate) Address, pub(crate) (Spine, Option<Ribs>));
+
+impl BoundedAddress for AddressWithBound {
+    type Boundary = (Spine, Option<Ribs>);
+
+    fn boundary(&self) -> &Self::Boundary {
+        &self.1
+    }
+}
+
+impl Display for AddressWithBound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+
 pub(crate) type Spine = Vec<(Vec<PortOffset>, usize)>;
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Ribs(pub(crate) Vec<[isize; 2]>);
+pub struct Ribs(pub(crate) Vec<[isize; 2]>);
 
 impl Ribs {
     pub(crate) fn within(&self, ribs: &Ribs) -> bool {
