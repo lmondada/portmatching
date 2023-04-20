@@ -10,12 +10,10 @@ use portgraph::{
     dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights,
 };
 
-use crate::utils::{
-    cover::cover_nodes,
-};
 use crate::addresses::{Address, AddressWithBound, LinePartition, Ribs, Skeleton, Spine};
+use crate::utils::cover::cover_nodes;
 
-use super::{GraphTrie, StateID, StateTransition};
+use super::{CachedGraphTrie, GraphTrie, StateID, StateTransition};
 
 /// A node in the GraphTrie
 ///
@@ -57,6 +55,7 @@ impl PermPortIndex {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct BaseGraphTrie {
     pub(crate) graph: PortGraph,
     weights: Weights<NodeWeight, StateTransition<(Address, Ribs)>>,
@@ -704,6 +703,10 @@ impl BaseGraphTrie {
 
     fn spine(&self, state: StateID) -> Option<&Vec<(Vec<PortOffset>, usize)>> {
         self.weight(state).spine.as_ref()
+    }
+
+    pub(crate) fn to_cached_trie(&self) -> CachedGraphTrie {
+        CachedGraphTrie::new(self)
     }
 }
 

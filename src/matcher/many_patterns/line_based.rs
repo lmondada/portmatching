@@ -9,7 +9,9 @@ use crate::{
 };
 
 use super::{
-    graph_tries::{root_state, BaseGraphTrie, BoundedAddress, GraphCache, GraphTrie, StateID},
+    graph_tries::{
+        root_state, BaseGraphTrie, BoundedAddress, CachedGraphTrie, GraphCache, GraphTrie, StateID,
+    },
     ManyPatternMatcher, PatternID, PatternMatch,
 };
 
@@ -46,6 +48,14 @@ impl LineGraphTrie<BaseGraphTrie> {
             }
         }
         dot_string_weighted(&self.trie.graph, &weights)
+    }
+
+    pub fn to_cached_trie(&self) -> LineGraphTrie<CachedGraphTrie> {
+        LineGraphTrie {
+            trie: self.trie.to_cached_trie(),
+            match_states: self.match_states.clone(),
+            patterns: self.patterns.clone(),
+        }
     }
 }
 

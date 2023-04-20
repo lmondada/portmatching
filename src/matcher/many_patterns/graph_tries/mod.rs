@@ -3,7 +3,9 @@ use std::fmt::{self, Debug, Display};
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
 mod base;
+mod cached;
 pub use base::BaseGraphTrie;
+pub use cached::CachedGraphTrie;
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -80,13 +82,21 @@ pub trait GraphTrie<'graph> {
     fn is_non_deterministic(&self, state: StateID) -> bool;
 
     /// The node in the current graph at `state`
-    fn node<C: GraphCache<'graph, Self::Address>>(&self, state: StateID, cache: &C) -> Option<NodeIndex> {
+    fn node<C: GraphCache<'graph, Self::Address>>(
+        &self,
+        state: StateID,
+        cache: &C,
+    ) -> Option<NodeIndex> {
         let addr = self.address(state)?;
         cache.get_node(&addr.main(), addr.boundary())
     }
 
     /// The port in the current graph at `state`
-    fn port<C: GraphCache<'graph, Self::Address>>(&self, state: StateID, cache: &C) -> Option<PortIndex> {
+    fn port<C: GraphCache<'graph, Self::Address>>(
+        &self,
+        state: StateID,
+        cache: &C,
+    ) -> Option<PortIndex> {
         let offset = self.port_offset(state)?;
         cache.graph().port_index(self.node(state, cache)?, offset)
     }
