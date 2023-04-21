@@ -88,7 +88,7 @@ pub trait GraphTrie<'graph> {
         cache: &C,
     ) -> Option<NodeIndex> {
         let addr = self.address(state)?;
-        cache.get_node(&addr.main(), addr.boundary())
+        cache.get_node(addr.main(), addr.boundary())
     }
 
     /// The port in the current graph at `state`
@@ -176,7 +176,7 @@ pub trait GraphTrie<'graph> {
                 }
                 StateTransition::FAIL => true,
             })
-            .map(|out_p| self.transition(out_p).clone());
+            .map(|out_p| self.transition(out_p));
         if self.is_non_deterministic(state) {
             transitions.collect()
         } else {

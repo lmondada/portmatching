@@ -30,7 +30,7 @@ fn bench<'graph, M: Matcher<'graph>, F: FnMut(Vec<Pattern>) -> M>(
         group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
             let matcher = get_matcher(patterns);
-            b.iter(|| matcher.find_matches(&graph));
+            b.iter(|| matcher.find_matches(graph));
         });
     }
 }
@@ -65,7 +65,7 @@ fn perform_benches(c: &mut Criterion) {
         &mut group,
         &patterns,
         &graph,
-        |p| LineGraphTrie::<BaseGraphTrie>::from_patterns(p),
+        LineGraphTrie::<BaseGraphTrie>::from_patterns,
     );
     bench("Cached Graph Trie", &mut group, &patterns, &graph, |p| {
         LineGraphTrie::<BaseGraphTrie>::from_patterns(p).to_cached_trie()

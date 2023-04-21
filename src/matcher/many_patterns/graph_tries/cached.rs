@@ -39,7 +39,7 @@ impl<'graph> GraphTrie<'graph> for CachedGraphTrie {
         cache: &C,
     ) -> Option<portgraph::NodeIndex> {
         let addr = self.address(state)?;
-        cache.get_node(&addr.main(), addr.boundary())
+        cache.get_node(addr.main(), addr.boundary())
     }
 
     fn port<C: super::GraphCache<'graph, Self::Address>>(
@@ -107,7 +107,7 @@ impl<'graph> GraphTrie<'graph> for CachedGraphTrie {
                 }
                 super::StateTransition::FAIL => true,
             })
-            .map(|out_p| self.transition(out_p).clone());
+            .map(|out_p| self.transition(out_p));
         if self.is_non_deterministic(state) {
             transitions.collect()
         } else {

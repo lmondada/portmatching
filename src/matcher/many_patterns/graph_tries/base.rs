@@ -94,7 +94,7 @@ impl<'graph> GraphTrie<'graph> for BaseGraphTrie {
     }
 
     fn port_offset(&self, state: super::StateID) -> Option<PortOffset> {
-        self.weight(state).out_port.clone()
+        self.weight(state).out_port
     }
 
     fn transition(&self, port: PortIndex) -> StateTransition<Self::Address> {
@@ -275,7 +275,7 @@ impl BaseGraphTrie {
     fn add_state(&mut self, non_deterministic: bool) -> StateID {
         let node = self.graph.add_node(0, 0);
         self.weights[node].non_deterministic = non_deterministic;
-        node.into()
+        node
     }
 
     fn add_edge(

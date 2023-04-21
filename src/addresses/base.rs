@@ -28,7 +28,7 @@ impl<'graph> GraphCache<'graph, AddressWithBound> for LinePartition<'graph> {
     }
 
     fn graph(&self) -> &'graph PortGraph {
-        &self.graph
+        self.graph
     }
 
     fn get_node(&self, addr: &Address, boundary: &Skeleton) -> Option<NodeIndex> {
@@ -108,7 +108,7 @@ impl<'graph> BoundedAddress<'graph> for AddressWithBound {
     }
 }
 
-impl<'a> Display for AddressWithBound {
+impl Display for AddressWithBound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
@@ -356,7 +356,7 @@ impl<'graph> LinePartition<'graph> {
                 .expect("Spine root is not root");
             (line.ind, line.line_ind)
         };
-        let mut spine_to_node = vec![None; ind.unsigned_abs() as usize];
+        let mut spine_to_node = vec![None; ind.unsigned_abs()];
         self.node2line
             .values()
             .flatten()
@@ -367,7 +367,7 @@ impl<'graph> LinePartition<'graph> {
             .for_each(|line| {
                 let spine_dst = line.ind - spine_ind;
                 let port = if ind < 0 { line.in_port } else { line.out_port };
-                spine_to_node[spine_dst.unsigned_abs() as usize] =
+                spine_to_node[spine_dst.unsigned_abs()] =
                     self.graph.port_offset(port.expect("Cannot follow path"));
             });
         let mut path = path_to_spine;
