@@ -154,7 +154,12 @@ impl<'graph> GraphCache<'graph, AddressWithBound> for AddressCache<'graph> {
         Self {
             spine: SpineCache::new(root),
             address_cache: HashMap::new(),
-            node2line: lp.node2line,
+            node2line: lp
+                .node2line
+                .into_iter()
+                .enumerate()
+                .map(|(i, v)| (NodeIndex::new(i), v))
+                .collect(),
             graph,
             root,
         }

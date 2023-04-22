@@ -1,6 +1,6 @@
 use std::{
     cmp,
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, VecDeque},
     fmt::{self, Display},
 };
 
@@ -11,7 +11,7 @@ use crate::matcher::many_patterns::graph_tries::{BoundedAddress, GraphCache};
 use crate::utils::pre_order::shortest_path;
 
 pub struct LinePartition<'graph> {
-    pub(crate) node2line: BTreeMap<NodeIndex, Vec<LinePoint>>,
+    pub(crate) node2line: Vec<Vec<LinePoint>>,
     pub(crate) graph: &'graph PortGraph,
     pub(crate) root: NodeIndex,
 }
@@ -136,23 +136,20 @@ impl Ribs {
 impl<'graph> LinePartition<'graph> {
     pub(crate) fn new(graph: &'graph PortGraph, root: NodeIndex) -> Self {
         let mut port_queue = VecDeque::from_iter(graph.all_ports(root));
-        let mut node2line: BTreeMap<_, _> = graph.nodes_iter().map(|n| (n, Vec::new())).collect();
-        let mut visited_ports: BTreeSet<PortIndex> = BTreeSet::new();
+        let mut node2line = vec![Vec::new(); graph.node_capacity()];
+        let mut visited_ports = vec![false; graph.port_capacity()];
         let mut line_cnt = 0;
         if port_queue.is_empty() {
             // edge case with only root: add an empty (0, 0) line
-            node2line
-                .get_mut(&root)
-                .expect("added all nodes")
-                .push(LinePoint {
-                    line_ind: 0,
-                    ind: 0,
-                    in_port: None,
-                    out_port: None,
-                });
+            node2line[root.index()].push(LinePoint {
+                line_ind: 0,
+                ind: 0,
+                in_port: None,
+                out_port: None,
+            });
         }
         while let Some(port) = port_queue.pop_front() {
-            if visited_ports.contains(&port) {
+            if visited_ports[port.index()] {
                 continue;
             }
             let line = get_line(graph, port);
@@ -170,27 +167,23 @@ impl<'graph> LinePartition<'graph> {
             for (i, ps) in line.ports.iter().enumerate() {
                 let &p = ps.iter().flatten().next().expect("must have one port");
                 let node = graph.port_node(p).expect("invalid port");
-                node2line
-                    .get_mut(&node)
-                    .expect("added all nodes")
-                    .push(LinePoint {
+                node2line[node.index()].push(LinePoint {
+                    line_ind: line_cnt,
+                    ind: (i as isize) - ind_offset,
+                    in_port: ps[0],
+                    out_port: ps[1],
+                });
+                if line.is_cyclic && i != 0 {
+                    node2line[node.index()].push(LinePoint {
                         line_ind: line_cnt,
-                        ind: (i as isize) - ind_offset,
+                        ind: (i as isize) - (line.ports.len() as isize),
                         in_port: ps[0],
                         out_port: ps[1],
                     });
-                if line.is_cyclic && i != 0 {
-                    node2line
-                        .get_mut(&node)
-                        .expect("added all nodes")
-                        .push(LinePoint {
-                            line_ind: line_cnt,
-                            ind: (i as isize) - (line.ports.len() as isize),
-                            in_port: ps[0],
-                            out_port: ps[1],
-                        });
                 }
-                visited_ports.extend(ps.iter().flatten());
+                for &p in ps.iter().flatten() {
+                    visited_ports[p.index()] = true;
+                }
                 port_queue.extend(graph.all_ports(node));
             }
             line_cnt += 1;
@@ -208,15 +201,16 @@ impl<'graph> LinePartition<'graph> {
             let nodes_on_line: Vec<_> = self
                 .node2line
                 .iter()
+                .enumerate()
                 .filter(|(_, lines)| lines.iter().any(|line| line.line_ind == line_ind))
-                .map(|(&n, _)| n)
+                .map(|(n, _)| NodeIndex::new(n))
                 .collect();
             if nodes_on_line.is_empty() {
                 break;
             }
             let path = shortest_path(self.graph, [self.root], nodes_on_line.iter().copied())
                 .expect("got no path");
-            let spine_lp = self.node2line[&path.target]
+            let spine_lp = self.node2line[path.target.index()]
                 .iter()
                 .filter(|line| line.line_ind == line_ind)
                 .min_by_key(|line| line.ind.abs())
@@ -245,7 +239,7 @@ impl<'graph> LinePartition<'graph> {
             }
         }
         let mut all_addrs = Vec::new();
-        for line in self.node2line[&node].iter() {
+        for line in self.node2line[node.index()].iter() {
             for &spine_ind in rev_inds.get(&line.line_ind).unwrap_or(&Vec::new()) {
                 let spine = spine[spine_ind].expect("By construction of in rev_inds");
                 let ind = line.ind - spine.ind;
@@ -304,7 +298,7 @@ impl<'graph> LinePartition<'graph> {
             .iter()
             .map(|(path, out_port)| {
                 let n = follow_path(path, self.root, self.graph)?;
-                self.node2line[&n].iter().find(|line| {
+                self.node2line[n.index()].iter().find(|line| {
                     for port in [line.out_port, line.in_port].into_iter().flatten() {
                         let offset = self.graph.port_offset(port).expect("invalid port");
                         if offset.index() == *out_port {
@@ -344,7 +338,7 @@ impl<'graph> LinePartition<'graph> {
         let (spine_ind, l_ind) = {
             let spine_root = follow_path(&path_to_spine, self.root, self.graph)
                 .expect("cannot reach spine root");
-            let line = self.node2line[&spine_root]
+            let line = self.node2line[spine_root.index()]
                 .iter()
                 .find(|l| {
                     let Some(port) = l.out_port.or(l.in_port) else {
@@ -358,7 +352,7 @@ impl<'graph> LinePartition<'graph> {
         };
         let mut spine_to_node = vec![None; ind.unsigned_abs()];
         self.node2line
-            .values()
+            .iter()
             .flatten()
             .filter(|line| {
                 let spine_dst = line.ind - spine_ind;
@@ -456,7 +450,7 @@ pub(crate) fn port_opposite(port: PortIndex, graph: &PortGraph) -> Option<PortIn
 }
 
 /// A node on a line
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct LinePoint {
     pub(crate) line_ind: usize,
     pub(crate) ind: isize,
@@ -521,11 +515,11 @@ mod tests {
         link(&mut g, (4, 0), (0, 0));
 
         let partition = LinePartition::new(&g, NodeIndex::new(0)).node2line;
-        assert_eq!(partition[&NodeIndex::new(0)].len(), 3);
-        assert_eq!(partition[&NodeIndex::new(1)].len(), 2);
-        assert_eq!(partition[&NodeIndex::new(2)].len(), 2);
-        assert_eq!(partition[&NodeIndex::new(3)].len(), 1);
-        assert_eq!(partition[&NodeIndex::new(4)].len(), 2);
+        assert_eq!(partition[0].len(), 3);
+        assert_eq!(partition[1].len(), 2);
+        assert_eq!(partition[2].len(), 2);
+        assert_eq!(partition[3].len(), 1);
+        assert_eq!(partition[4].len(), 2);
     }
 
     #[test]
@@ -614,7 +608,7 @@ mod tests {
 
             // Every port appears exactly once
             let mut port_cnt = BTreeMap::new();
-            for v in partition.values().flatten() {
+            for v in partition.iter().flatten() {
                 if let Some(in_port) = v.in_port {
                     *port_cnt.entry(in_port).or_insert(0) += 1;
                 }
