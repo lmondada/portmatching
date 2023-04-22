@@ -9,7 +9,7 @@ use crate::addresses::{follow_path, port_opposite, LinePartition, LinePoint, Rib
 
 use super::{BaseGraphTrie, BoundedAddress, GraphCache, GraphTrie, StateID, StateTransition};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct SpineID(usize);
 
 struct SpineCache {
@@ -65,12 +65,6 @@ impl SpineCache {
         self.cache.get(spine.0)?.as_ref()
     }
 
-    // fn insert(&mut self, node: NodeIndex, offset: usize) -> SpineID {
-    //     let ret = SpineID(self.cache.len());
-    //     self.cache.push(Some((node, offset)));
-    //     ret
-    // }
-
     fn get_or_insert_with<'a, F: FnOnce() -> (&'a Vec<PortOffset>, usize)>(
         &'a mut self,
         spine: SpineID,
@@ -100,6 +94,7 @@ impl SpineCache {
 
 pub struct AddressCache<'graph> {
     spine: SpineCache,
+    address_cache: HashMap<Address, NodeIndex>,
     node2line: BTreeMap<NodeIndex, Vec<LinePoint>>,
     graph: &'graph PortGraph,
     root: NodeIndex,
@@ -158,6 +153,7 @@ impl<'graph> GraphCache<'graph, AddressWithBound> for AddressCache<'graph> {
         let lp = LinePartition::new(graph, root);
         Self {
             spine: SpineCache::new(root),
+            address_cache: HashMap::new(),
             node2line: lp.node2line,
             graph,
             root,
@@ -169,38 +165,44 @@ impl<'graph> GraphCache<'graph, AddressWithBound> for AddressCache<'graph> {
         (spine_id, ind): &<AddressWithBound as BoundedAddress>::Main,
         boundary: &<AddressWithBound as BoundedAddress>::Boundary,
     ) -> Option<NodeIndex> {
-        let find_spine = || {
-            let lp = boundary
-                .spine
-                .as_ref()
-                .expect("invalid spine")
-                .iter()
-                .find(|(s, _, _)| s == spine_id)
-                .expect("invalid spine ID");
-            (&lp.1, lp.2)
-        };
-        let sp = self
-            .spine
-            .get_or_insert_with(
-                *spine_id,
-                find_spine,
-                &self.node2line,
-                self.graph,
-                self.root,
-            )
-            .expect("could not find spine");
-        let mut port = match *ind {
-            ind if ind > 0 => sp.out_port(self.graph),
-            ind if ind < 0 => sp.in_port(self.graph),
-            _ => sp.out_port(self.graph).or(sp.in_port(self.graph)),
-        };
-        let mut node = self.graph.port_node(port?).expect("invalid port");
-        for _ in 0..ind.abs() {
-            let next_port = self.graph.port_link(port?)?;
-            node = self.graph.port_node(next_port).expect("invalid port");
-            port = port_opposite(next_port, self.graph);
-        }
-        Some(node)
+        self.address_cache
+            .get(&(*spine_id, *ind))
+            .copied()
+            .or_else(|| {
+                let find_spine = || {
+                    let lp = boundary
+                        .spine
+                        .as_ref()
+                        .expect("invalid spine")
+                        .iter()
+                        .find(|(s, _, _)| s == spine_id)
+                        .expect("invalid spine ID");
+                    (&lp.1, lp.2)
+                };
+                let sp = self
+                    .spine
+                    .get_or_insert_with(
+                        *spine_id,
+                        find_spine,
+                        &self.node2line,
+                        self.graph,
+                        self.root,
+                    )
+                    .expect("could not find spine");
+                let mut port = match *ind {
+                    ind if ind > 0 => sp.out_port(self.graph),
+                    ind if ind < 0 => sp.in_port(self.graph),
+                    _ => sp.out_port(self.graph).or(sp.in_port(self.graph)),
+                };
+                let mut node = self.graph.port_node(port?).expect("invalid port");
+                for _ in 0..ind.abs() {
+                    let next_port = self.graph.port_link(port?)?;
+                    node = self.graph.port_node(next_port).expect("invalid port");
+                    port = port_opposite(next_port, self.graph);
+                }
+                self.address_cache.insert((*spine_id, *ind), node);
+                Some(node)
+            })
     }
 
     fn get_addr(
