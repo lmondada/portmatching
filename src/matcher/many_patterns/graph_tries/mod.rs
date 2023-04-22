@@ -61,8 +61,9 @@ pub trait BoundedAddress<'graph>: Sized {
 
 pub trait GraphCache<'graph, Address: BoundedAddress<'graph>> {
     fn init(graph: &'graph PortGraph, root: NodeIndex) -> Self;
-    fn get_node(&self, addr: &Address::Main, boundary: &Address::Boundary) -> Option<NodeIndex>;
-    fn get_addr(&self, node: NodeIndex, boundary: &Address::Boundary) -> Option<Address::Main>;
+    fn get_node(&mut self, addr: &Address::Main, boundary: &Address::Boundary)
+        -> Option<NodeIndex>;
+    fn get_addr(&mut self, node: NodeIndex, boundary: &Address::Boundary) -> Option<Address::Main>;
     fn graph(&self) -> &'graph PortGraph;
 }
 
@@ -85,7 +86,7 @@ pub trait GraphTrie<'graph> {
     fn node<C: GraphCache<'graph, Self::Address>>(
         &self,
         state: StateID,
-        cache: &C,
+        cache: &mut C,
     ) -> Option<NodeIndex> {
         let addr = self.address(state)?;
         cache.get_node(addr.main(), addr.boundary())
@@ -95,7 +96,7 @@ pub trait GraphTrie<'graph> {
     fn port<C: GraphCache<'graph, Self::Address>>(
         &self,
         state: StateID,
-        cache: &C,
+        cache: &mut C,
     ) -> Option<PortIndex> {
         let offset = self.port_offset(state)?;
         cache.graph().port_index(self.node(state, cache)?, offset)
@@ -105,7 +106,7 @@ pub trait GraphTrie<'graph> {
     fn next_node<C: GraphCache<'graph, Self::Address>>(
         &self,
         state: StateID,
-        cache: &C,
+        cache: &mut C,
     ) -> Option<NodeIndex> {
         let graph = cache.graph();
         let in_port = graph.port_link(self.port(state, cache)?)?;
@@ -116,7 +117,7 @@ pub trait GraphTrie<'graph> {
     fn next_port_offset<C: GraphCache<'graph, Self::Address>>(
         &self,
         state: StateID,
-        cache: &C,
+        cache: &mut C,
     ) -> Option<PortOffset> {
         let graph = cache.graph();
         let in_port = graph.port_link(self.port(state, cache)?)?;
@@ -144,7 +145,7 @@ pub trait GraphTrie<'graph> {
         &self,
         state: StateID,
         graph: &'graph PortGraph,
-        partition: &C,
+        partition: &mut C,
     ) -> Vec<StateTransition<Self::Address>> {
         // All transitions in `state` that are allowed for `graph`
         let out_port = self.port(state, partition);
@@ -188,7 +189,7 @@ pub trait GraphTrie<'graph> {
         &self,
         state: StateID,
         graph: &'graph PortGraph,
-        partition: &C,
+        partition: &mut C,
     ) -> Vec<StateID> {
         // Compute "ideal" transition
         self.get_transitions(state, graph, partition)

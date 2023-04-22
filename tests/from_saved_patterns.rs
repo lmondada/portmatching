@@ -76,6 +76,25 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
     Err(io::Error::new(io::ErrorKind::Other, "no file found"))
 }
 
+fn test<'a, M: Matcher<'a, Match = PatternMatch>>(
+    matcher: M,
+    graph: &'a PortGraph,
+    exp: &[Vec<PatternMatch>],
+    n_patterns: usize,
+) {
+    let many_matches = matcher.find_matches(&graph);
+    let many_matches = (0..n_patterns)
+        .map(|i| {
+            many_matches
+                .iter()
+                .filter(|m| m.id == PatternID(i))
+                .cloned()
+                .collect_vec()
+        })
+        .collect_vec();
+    assert_eq!(many_matches, exp);
+}
+
 #[test]
 fn from_saved_patterns() {
     let testcases = [
@@ -111,29 +130,26 @@ fn from_saved_patterns() {
         "30",
         "31",
     ];
-    for test in testcases {
-        println!("{test}...");
-        let path: PathBuf = ["tests", "saved_patterns", test].iter().collect();
+    for test_name in testcases {
+        println!("{test_name}...");
+        let path: PathBuf = ["tests", "saved_patterns", test_name].iter().collect();
         let patterns = load_patterns(&path).unwrap();
         let graph = load_graph(&path).unwrap();
         let exp = load_results(&path).unwrap();
 
         let matcher = LineGraphTrie::from_patterns(patterns.clone());
+        let matcher2 = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
         // {
-        //     let mut path = path;
-        //     path.push("patterntrie.gv");
+        //     let mut path = path.clone();
+        //     path.push("trie.gv");
         //     fs::write(path, matcher.dotstring()).unwrap();
         // }
-        let many_matches = matcher.find_matches(&graph);
-        let many_matches = (0..patterns.len())
-            .map(|i| {
-                many_matches
-                    .iter()
-                    .filter(|m| m.id == PatternID(i))
-                    .cloned()
-                    .collect_vec()
-            })
-            .collect_vec();
-        assert_eq!(many_matches, exp);
+        // {
+        //     let mut path = path;
+        //     path.push("trie2.gv");
+        //     fs::write(path, matcher2.dotstring()).unwrap();
+        // }
+        test(matcher, &graph, &exp, patterns.len());
+        test(matcher2, &graph, &exp, patterns.len());
     }
 }

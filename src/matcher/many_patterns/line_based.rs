@@ -59,6 +59,20 @@ impl LineGraphTrie<BaseGraphTrie> {
     }
 }
 
+impl LineGraphTrie<CachedGraphTrie> {
+    pub fn dotstring(&self) -> String {
+        let mut weights = self.trie.str_weights();
+        for n in self.trie.graph.nodes_iter() {
+            let empty = vec![];
+            let matches = self.match_states.get(&n).unwrap_or(&empty);
+            if !matches.is_empty() {
+                weights[n] += &format!("[{:?}]", matches);
+            }
+        }
+        dot_string_weighted(&self.trie.graph, &weights)
+    }
+}
+
 impl<'graph, T> Matcher<'graph> for LineGraphTrie<T>
 where
     T: GraphTrie<'graph>,
@@ -68,7 +82,7 @@ where
     fn find_anchored_matches(&self, graph: &'graph PortGraph, root: NodeIndex) -> Vec<Self::Match> {
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
-        let partition = <T::Address as BoundedAddress>::Cache::init(graph, root);
+        let mut partition = <T::Address as BoundedAddress>::Cache::init(graph, root);
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
             for state in current_states {
@@ -78,7 +92,7 @@ where
                         root,
                     });
                 }
-                for next_state in self.trie.next_states(state, graph, &partition) {
+                for next_state in self.trie.next_states(state, graph, &mut partition) {
                     new_states.push(next_state);
                 }
             }

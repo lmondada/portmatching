@@ -13,7 +13,7 @@ use portgraph::{
 use crate::addresses::{Address, AddressWithBound, LinePartition, Ribs, Skeleton, Spine};
 use crate::utils::cover::cover_nodes;
 
-use super::{CachedGraphTrie, GraphTrie, StateID, StateTransition};
+use super::{BoundedAddress, CachedGraphTrie, GraphTrie, StateID, StateTransition};
 
 /// A node in the GraphTrie
 ///
@@ -25,10 +25,10 @@ use super::{CachedGraphTrie, GraphTrie, StateID, StateTransition};
 /// an unset field is seen as a license to assign whatever is most convenient.
 #[derive(Clone, Default, Debug)]
 pub(crate) struct NodeWeight {
-    out_port: Option<PortOffset>,
-    address: Option<Address>,
-    spine: Option<Spine>,
-    non_deterministic: bool,
+    pub(crate) out_port: Option<PortOffset>,
+    pub(crate) address: Option<Address>,
+    pub(crate) spine: Option<Spine>,
+    pub(crate) non_deterministic: bool,
 }
 
 impl Display for NodeWeight {
@@ -58,7 +58,7 @@ impl PermPortIndex {
 #[derive(Clone, Debug)]
 pub struct BaseGraphTrie {
     pub(crate) graph: PortGraph,
-    weights: Weights<NodeWeight, StateTransition<(Address, Ribs)>>,
+    pub(crate) weights: Weights<NodeWeight, StateTransition<(Address, Ribs)>>,
     perm_indices: RefCell<BTreeMap<PermPortIndex, PortIndex>>,
 }
 
@@ -132,14 +132,6 @@ pub(crate) enum TrieTraversal {
     Write,
 }
 
-// #[allow(clippy::upper_case_acronyms)]
-// #[derive(Clone, PartialEq, Eq, Debug)]
-// pub(crate) enum StateTransition {
-//     Node(Vec<(Address, Ribs)>, PortOffset),
-//     NoLinkedNode,
-//     FAIL,
-// }
-
 impl BaseGraphTrie {
     /// An empty graph trie
     pub fn new() -> Self {
@@ -156,8 +148,8 @@ impl BaseGraphTrie {
         graph: &PortGraph,
         partition: &LinePartition,
     ) -> Vec<StateTransition<(Address, Ribs)>> {
-        let next_node = self.next_node(state, partition);
-        let next_port = self.next_port_offset(state, partition);
+        let next_node = self.next_node_nomut(state, partition);
+        let next_port = self.next_port_offset_nomut(state, partition);
         let next_addr = next_node.map(|n| {
             let NodeWeight {
                 out_port,
@@ -218,13 +210,38 @@ impl BaseGraphTrie {
             if !transitions.contains(&ideal) {
                 transitions.push(ideal);
             }
-        } else if self.port(state, partition).is_some() {
+        } else if self.port_nomut(state, partition).is_some() {
             let ideal = StateTransition::NoLinkedNode;
             if !transitions.contains(&ideal) {
                 transitions.push(ideal);
             }
         }
         transitions
+    }
+
+    fn port_nomut(&self, state: StateID, cache: &LinePartition) -> Option<PortIndex> {
+        let offset = self.port_offset(state)?;
+        cache
+            .graph
+            .port_index(self.node_nomut(state, cache)?, offset)
+    }
+
+    fn node_nomut(&self, state: StateID, cache: &LinePartition) -> Option<NodeIndex> {
+        let addr = self.address(state)?;
+        cache.get_node_index(addr.main(), addr.boundary().spine.as_ref()?)
+    }
+
+    fn next_node_nomut(&self, state: StateID, cache: &LinePartition) -> Option<NodeIndex> {
+        let graph = cache.graph;
+        let in_port = graph.port_link(self.port_nomut(state, cache)?)?;
+        graph.port_node(in_port)
+    }
+
+    /// The next port in the current graph if we follow one transition
+    fn next_port_offset_nomut(&self, state: StateID, cache: &LinePartition) -> Option<PortOffset> {
+        let graph = cache.graph;
+        let in_port = graph.port_link(self.port_nomut(state, cache)?)?;
+        graph.port_offset(in_port)
     }
 
     /// Split states so that all incoming links are within ports
@@ -300,7 +317,7 @@ impl BaseGraphTrie {
         partition: &'a LinePartition<'b>,
         mode: TrieTraversal,
     ) -> impl Iterator<Item = PortIndex> + 'a {
-        let out_port = self.port(state, partition);
+        let out_port = self.port_nomut(state, partition);
         let in_port = out_port.and_then(|out_port| graph.port_link(out_port));
         let in_offset = in_port.map(|in_port| graph.port_offset(in_port).expect("invalid port"));
         let next_node = in_port.map(|in_port| graph.port_node(in_port).expect("invalid port"));

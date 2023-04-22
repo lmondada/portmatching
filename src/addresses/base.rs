@@ -31,11 +31,11 @@ impl<'graph> GraphCache<'graph, AddressWithBound> for LinePartition<'graph> {
         self.graph
     }
 
-    fn get_node(&self, addr: &Address, boundary: &Skeleton) -> Option<NodeIndex> {
+    fn get_node(&mut self, addr: &Address, boundary: &Skeleton) -> Option<NodeIndex> {
         self.get_node_index(addr, boundary.spine.as_ref()?)
     }
 
-    fn get_addr(&self, node: NodeIndex, boundary: &Skeleton) -> Option<Address> {
+    fn get_addr(&mut self, node: NodeIndex, boundary: &Skeleton) -> Option<Address> {
         let addr = self.get_address(node, boundary.spine.as_ref()?, boundary.ribs.as_ref())?;
         Some(addr)
     }
@@ -431,7 +431,11 @@ fn get_line(graph: &PortGraph, port: PortIndex) -> Line {
     }
 }
 
-fn follow_path(path: &Vec<PortOffset>, root: NodeIndex, graph: &PortGraph) -> Option<NodeIndex> {
+pub(crate) fn follow_path(
+    path: &Vec<PortOffset>,
+    root: NodeIndex,
+    graph: &PortGraph,
+) -> Option<NodeIndex> {
     let mut curr_node = root;
     for &offset in path {
         let out_port = graph.port_index(curr_node, offset)?;
@@ -454,10 +458,10 @@ pub(crate) fn port_opposite(port: PortIndex, graph: &PortGraph) -> Option<PortIn
 /// A node on a line
 #[derive(Debug)]
 pub(crate) struct LinePoint {
-    line_ind: usize,
-    ind: isize,
-    in_port: Option<PortIndex>,
-    out_port: Option<PortIndex>,
+    pub(crate) line_ind: usize,
+    pub(crate) ind: isize,
+    pub(crate) in_port: Option<PortIndex>,
+    pub(crate) out_port: Option<PortIndex>,
 }
 
 #[cfg(test)]
