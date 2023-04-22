@@ -44,24 +44,30 @@ struct Args {
     #[arg(short = 'd')]
     #[arg(default_value_t = 5)]
     d_small: usize,
+
+    // Graph location
+    #[arg(short = 'o')]
+    #[arg(default_value = "datasets")]
+    directory: String,
 }
 
 fn main() {
     let args = Args::parse();
 
     // large graphs
+    let dir = args.directory;
     {
-        fs::create_dir_all("datasets/large_graphs").expect("could not create directory");
+        fs::create_dir_all(format!("{dir}/large_graphs")).expect("could not create directory");
         let (n_graphs, n, m, d) = (args.n_large, args.v_large, args.e_large, args.d_large);
         for i in 0..n_graphs {
             let g = gen_graph(n, m, d).expect("could not generate graph");
-            let f = format!("datasets/large_graphs/graph_{i}.bin");
+            let f = format!("{dir}/large_graphs/graph_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
         }
     }
     // small graphs
     {
-        fs::create_dir_all("datasets/small_graphs").expect("could not create directory");
+        fs::create_dir_all(format!("{dir}/small_graphs")).expect("could not create directory");
         let (n_graphs, n, m, d) = (args.n_small, args.v_small, args.e_small, args.d_small);
         for i in 0..n_graphs {
             let mut g = gen_graph(n, m, d).expect("could not generate graph");
@@ -73,7 +79,7 @@ fn main() {
                     panic!("could not create connected graph with n={n}, m={m}, d={d}")
                 }
             }
-            let f = format!("datasets/small_graphs/pattern_{i}.bin");
+            let f = format!("{dir}/small_graphs/pattern_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
         }
     }

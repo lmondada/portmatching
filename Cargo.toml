@@ -36,6 +36,10 @@ git = "https://github.com/cqcl/portgraph"
 rev = "52a4439"
 features = ["proptest", "serde"]
 
+[[example]]
+name = "large_graph"
+required-features = ["serde"]
+
 [[test]]
 name = "from_saved_patterns"
 required-features = ["serde"]

@@ -1,9 +1,7 @@
 on:
-  push:
-    branches: [main]
-    paths: [src/bin/data_generation.rs]
+  push: [main]
 
-name: "Data Generation for Benchmarking"
+name: "Profiling"
 
 permissions:
   contents: write
@@ -13,12 +11,17 @@ concurrency: datasets
 jobs:
   all:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v3
         name: Check out repo
         with:
           fetch-depth: 0
+      
+      - name: Install flamegraph
+        run: |
+          sudo apt install linux-tools-common linux-tools-generic linux-tools-`uname -r`
+          cargo install flamegraph
       
       - name: Set up git name
         run: |
@@ -31,14 +34,12 @@ jobs:
           git merge -Xtheirs -m "Merge branch main into bench" origin/main
           git push
 
-      - name: Generate datasets
+      - name: Run Flamegraphs
         run: |
-          cargo run --bin=data_generation --all-features
-          cargo run --bin=data_generation --all-features -- -K1 -k100 -N500 -E1000 -D10 -o examples/data
+          cargo flamegraph --example=large_graph --features="serde"
 
       - name: Push to repo
         run: |
-          git add -f datasets
-          git add -f examples/data
-          git commit -m "New datasets"
+          git add -f flamegraph.svg
+          git commit -m "New flamegraph"
           git push
