@@ -10,7 +10,6 @@ rust-version = "1.68"
 
 [dependencies]
 bimap = "0.6.2"
-bitvec = "1.0.1"
 portgraph = { git = "https://github.com/cqcl/portgraph", rev = "52a4439" }
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 
@@ -18,6 +17,7 @@ serde = { version = "1.0.152", features = ["derive"], optional = true }
 rand = { version = "0.8.5", optional = true }
 rmp-serde = { version = "1.1.1", optional = true }
 clap = { version = "4.2.2", features = ["derive"], optional = true }
+bitvec = "1.0.1"
 
 [features]
 serde = ["dep:serde", "portgraph/serde"]

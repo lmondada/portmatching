@@ -683,10 +683,6 @@ impl BaseGraphTrie {
         next_ind
     }
 
-    // pub(crate) fn reset_perm_ports(&mut self) {
-    //     self.perm_indices = Default::default();
-    // }
-
     fn all_perm_ports(&self) -> Vec<PermPortIndex> {
         self.perm_indices.borrow().keys().copied().collect()
     }
@@ -795,108 +791,6 @@ fn rekey<K: Clone, V: Clone + Default>(
         }
     }
 }
-
-// impl ReadGraphTrie for GraphTrie {
-//     type StateID = StateID;
-
-//     type MatchObject = ();
-
-//     fn init(&self, root: NodeIndex) -> (Self::StateID, Self::MatchObject) {
-//         (StateID::ROOT, ())
-//     }
-
-//     fn next_states(
-//         &self,
-//         &state: &Self::StateID,
-//         graph: &PortGraph,
-//         current_match: &Self::MatchObject,
-//     ) -> Vec<(Self::StateID, Self::MatchObject)> {
-//         // Compute "ideal" transition
-//         let mut next_states: Vec<_> = self
-//             .get_transitions(state, graph, current_match, TrieTraversal::ReadOnly)
-//             .into_iter()
-//             .filter_map(|(transition, current_match)| {
-//                 Some((self.transition(state, &transition)?, current_match))
-//             })
-//             .collect();
-
-//         // Add epsilon transition if we are at a root (i.e. non-deterministic)
-//         if self.is_root(state) {
-//             if let Some(next_state) = self.transition(state, &NodeTransition::Fail) {
-//                 next_states.push((next_state, current_match.clone()));
-//             }
-//         }
-//         next_states
-//     }
-// }
-
-// impl WriteGraphTrie for GraphTrie {
-//     fn create_next_states<F: FnMut(Self::StateID, Self::StateID)>(
-//         &mut self,
-//         states: Vec<(Self::StateID, Self::MatchObject)>,
-//         &Edge(out_port, _): &Edge,
-//         graph: &PortGraph,
-//         mut clone_state: F,
-//     ) -> Vec<(Self::StateID, Self::MatchObject)> {
-//         // Technically unnecessary
-//         self.reset_perm_ports();
-
-//         // Find the states that correspond to out_port
-//         let prev_states: Vec<_> = states.iter().map(|(state, _)| *state).collect();
-//         let states = self.valid_start_states(states, out_port, graph);
-
-//         self.create_owned_states(prev_states, self.all_perm_ports(), &mut clone_state);
-//         let prev_states: Vec<_> = states.iter().map(|(state, _)| *state).collect();
-
-//         let mut next_states = BTreeSet::new();
-//         let mut new_node = None;
-//         for (state, current_match) in states {
-//             // For every allowable transition, insert it if it does not exist
-//             // and return it
-//             let (next_ports, next_matches): (Vec<_>, Vec<_>) = self
-//                 .get_transition(state, graph, &current_match, TrieTraversal::Write)
-//                 .into_iter()
-//                 .flat_map(|(mut transition, next_match)| {
-//                     if let NodeTransition::NoLinkedNode = &transition {
-//                         self.carriage_return(state, current_match.clone(), &mut new_node, true)
-//                     } else {
-//                         self.expand_addrs(&mut transition, state, graph, &current_match);
-//                         [(
-//                             self.transition_port(state, &transition).unwrap_or_else(|| {
-//                                 let next_addr = next_match.current_addr.clone();
-//                                 let next_state = self.extend_tree(
-//                                     state,
-//                                     next_addr,
-//                                     &mut new_node,
-//                                     matches!(transition, NodeTransition::NewNode(_)),
-//                                 );
-//                                 let port = self
-//                                     .set_transition(state, next_state, transition)
-//                                     .expect("Changing existing value");
-//                                 self.create_perm_port(port)
-//                             }),
-//                             next_match,
-//                         )]
-//                         .into()
-//                     }
-//                 })
-//                 .unzip();
-//             next_states.extend(
-//                 next_ports
-//                     .iter()
-//                     .map(|&p| self.get_state(p).expect("Invalid port"))
-//                     .zip(next_matches),
-//             );
-//         }
-
-//         // Finally, wherever not all inputs come from known nodes, split the
-//         // state into two
-//         self.create_owned_states(prev_states, self.all_perm_ports(), clone_state);
-
-//         // Merge next states
-//         merge_states(next_states)
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

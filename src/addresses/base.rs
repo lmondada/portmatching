@@ -10,6 +10,8 @@ use crate::matcher::many_patterns::graph_tries::{BoundedAddress, GraphCache};
 
 use crate::utils::pre_order::shortest_path;
 
+use bitvec::prelude::*;
+
 pub struct LinePartition<'graph> {
     pub(crate) node2line: Vec<Vec<LinePoint>>,
     pub(crate) graph: &'graph PortGraph,
@@ -137,7 +139,7 @@ impl<'graph> LinePartition<'graph> {
     pub(crate) fn new(graph: &'graph PortGraph, root: NodeIndex) -> Self {
         let mut port_queue = VecDeque::from_iter(graph.all_ports(root));
         let mut node2line = vec![Vec::new(); graph.node_capacity()];
-        let mut visited_ports = vec![false; graph.port_capacity()];
+        let mut visited_ports = bitvec![0; graph.port_capacity()];
         let mut line_cnt = 0;
         if port_queue.is_empty() {
             // edge case with only root: add an empty (0, 0) line
@@ -182,7 +184,7 @@ impl<'graph> LinePartition<'graph> {
                     });
                 }
                 for &p in ps.iter().flatten() {
-                    visited_ports[p.index()] = true;
+                    visited_ports.set(p.index(), true);
                 }
                 port_queue.extend(graph.all_ports(node));
             }
