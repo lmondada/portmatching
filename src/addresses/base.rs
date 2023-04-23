@@ -605,8 +605,8 @@ mod tests {
             let root = NodeIndex::new(0);
             let partition = LinePartition::new(&g, root).node2line;
 
-            // Every node has an entry
-            prop_assert_eq!(partition.len(), g.node_count());
+            // Every node has an entry (this is a capacity -- not exact)
+            prop_assert!(partition.len() >= g.node_count());
 
             // Every port appears exactly once
             let mut port_cnt = BTreeMap::new();
