@@ -2,3 +2,4 @@
 /Cargo.lock
 /datasets
 /examples/**/*.bin
+/flamegraph.svg
