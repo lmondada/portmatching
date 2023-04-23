@@ -1,13 +1,12 @@
 on:
   push:
-    branches: [main]
+    branches: [bench]
+    paths: [examples/data]
 
 name: "Profiling"
 
 permissions:
   contents: write
-
-concurrency: datasets
 
 jobs:
   all:
@@ -30,18 +29,13 @@ jobs:
           git config user.name "GitHub Actions Bot"
           git config user.email "<>"
       
-      - name: Merge main into bench
-        run: |
-          git switch bench
-          git merge -Xtheirs -m "Merge branch main into bench" origin/main
-          git push
-
       - name: Run Flamegraphs
         run: |
           cargo flamegraph --example=large_graph --features="serde"
 
       - name: Push to repo
         run: |
+          git switch bench
           git add -f flamegraph.svg
           git commit -m "New flamegraph"
           git push

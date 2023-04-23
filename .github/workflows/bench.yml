@@ -1,16 +1,12 @@
 on:
   push:
-    branches: [main]
-    paths:
-      - "src/**"
-      - "!src/bin/**"
+    branches: [bench]
+    paths: [datasets/**]
 
 name: "Benchmarking"
 
 permissions:
   contents: write
-
-concurrency: datasets
 
 jobs:
   all:
@@ -27,18 +23,13 @@ jobs:
           git config user.name "GitHub Actions Bot"
           git config user.email "<>"
       
-      - name: Merge main into bench
-        run: |
-          git switch bench
-          git merge -Xtheirs -m "Merge branch main into bench" origin/main
-          git push
-
       - name: Generate benchmarks
         run: |
           cargo bench
 
       - name: Push to repo
         run: |
+          git switch bench
           git add -f target/criterion
           git commit -m "New benchmarking results"
           git push

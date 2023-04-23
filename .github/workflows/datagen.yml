@@ -10,8 +10,6 @@ name: "Data Generation for Benchmarking"
 permissions:
   contents: write
 
-concurrency: datasets
-
 jobs:
   all:
     runs-on: ubuntu-latest
