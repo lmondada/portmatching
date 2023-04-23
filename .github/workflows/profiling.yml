@@ -15,8 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         name: Check out repo
-        with:
-          fetch-depth: 0
       
       - name: Install flamegraph
         run: |
@@ -35,7 +33,6 @@ jobs:
 
       - name: Push to repo
         run: |
-          git switch bench
           git add -f flamegraph.svg
           git commit -m "New flamegraph"
           git push

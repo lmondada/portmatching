@@ -15,8 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         name: Check out repo
-        with:
-          fetch-depth: 0
       
       - name: Set up git name
         run: |
@@ -29,7 +27,6 @@ jobs:
 
       - name: Push to repo
         run: |
-          git switch bench
           git add -f target/criterion
           git commit -m "New benchmarking results"
           git push
