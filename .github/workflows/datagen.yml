@@ -1,7 +1,9 @@
 on:
   push:
     branches: [main]
-    paths: [src/bin/data_generation.rs]
+    paths:
+      - src/bin/data_generation.rs
+      - .github/workflows/datagen.yml
 
 name: "Data Generation for Benchmarking"
 
@@ -33,7 +35,7 @@ jobs:
 
       - name: Generate datasets
         run: |
-          cargo run --bin=data_generation --all-features
+          cargo run --bin=data_generation --all-features -- -k1000 -N500 -E1000 -D10
           cargo run --bin=data_generation --all-features -- -K1 -k100 -N500 -E1000 -D10 -o examples/data
 
       - name: Push to repo
