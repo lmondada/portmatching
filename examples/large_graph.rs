@@ -21,8 +21,7 @@ fn main() {
     let graph: PortGraph = rmp_serde::from_read(fs::File::open(&path).unwrap()).unwrap();
 
     println!("Loaded graph and patterns");
-    let matcher = LineGraphTrie::from_patterns(patterns.clone());
-    // let matcher2 = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
+    let matcher = LineGraphTrie::from_patterns(patterns.clone()).to_no_cached_trie();
     println!("Built matcher");
     matcher.find_matches(&graph);
 }

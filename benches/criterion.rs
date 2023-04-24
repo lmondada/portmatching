@@ -67,6 +67,9 @@ fn perform_benches(c: &mut Criterion) {
         &graph,
         LineGraphTrie::<BaseGraphTrie>::from_patterns,
     );
+    bench("No Cached Graph Trie", &mut group, &patterns, &graph, |p| {
+        LineGraphTrie::<BaseGraphTrie>::from_patterns(p).to_no_cached_trie()
+    });
     bench("Cached Graph Trie", &mut group, &patterns, &graph, |p| {
         LineGraphTrie::<BaseGraphTrie>::from_patterns(p).to_cached_trie()
     });

@@ -13,7 +13,9 @@ use portgraph::{
 use crate::addresses::{Address, AddressWithBound, LinePartition, Ribs, Skeleton, Spine};
 use crate::utils::cover::cover_nodes;
 
-use super::{BoundedAddress, CachedGraphTrie, GraphTrie, StateID, StateTransition};
+use super::{
+    BoundedAddress, CachedGraphTrie, GraphTrie, NoCachedGraphTrie, StateID, StateTransition,
+};
 
 /// A node in the GraphTrie
 ///
@@ -720,6 +722,10 @@ impl BaseGraphTrie {
 
     pub(crate) fn to_cached_trie(&self) -> CachedGraphTrie {
         CachedGraphTrie::new(self)
+    }
+
+    pub(crate) fn to_no_cached_trie(&self) -> NoCachedGraphTrie {
+        NoCachedGraphTrie::new(self)
     }
 }
 

@@ -4,8 +4,10 @@ use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
 mod base;
 mod cached;
+mod no_cached;
 pub use base::BaseGraphTrie;
 pub use cached::CachedGraphTrie;
+pub use no_cached::NoCachedGraphTrie;
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, PartialEq, Eq, Debug)]

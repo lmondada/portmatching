@@ -10,7 +10,8 @@ use crate::{
 
 use super::{
     graph_tries::{
-        root_state, BaseGraphTrie, BoundedAddress, CachedGraphTrie, GraphCache, GraphTrie, StateID,
+        root_state, BaseGraphTrie, BoundedAddress, CachedGraphTrie, GraphCache, GraphTrie,
+        NoCachedGraphTrie, StateID,
     },
     ManyPatternMatcher, PatternID, PatternMatch,
 };
@@ -57,9 +58,31 @@ impl LineGraphTrie<BaseGraphTrie> {
             patterns: self.patterns.clone(),
         }
     }
+
+    pub fn to_no_cached_trie(&self) -> LineGraphTrie<NoCachedGraphTrie> {
+        LineGraphTrie {
+            trie: self.trie.to_no_cached_trie(),
+            match_states: self.match_states.clone(),
+            patterns: self.patterns.clone(),
+        }
+    }
 }
 
 impl LineGraphTrie<CachedGraphTrie> {
+    pub fn dotstring(&self) -> String {
+        let mut weights = self.trie.str_weights();
+        for n in self.trie.graph.nodes_iter() {
+            let empty = vec![];
+            let matches = self.match_states.get(&n).unwrap_or(&empty);
+            if !matches.is_empty() {
+                weights[n] += &format!("[{:?}]", matches);
+            }
+        }
+        dot_string_weighted(&self.trie.graph, &weights)
+    }
+}
+
+impl LineGraphTrie<NoCachedGraphTrie> {
     pub fn dotstring(&self) -> String {
         let mut weights = self.trie.str_weights();
         for n in self.trie.graph.nodes_iter() {
