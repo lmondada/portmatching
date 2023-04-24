@@ -1,7 +1,12 @@
 on:
   push:
     branches: [bench]
-    paths: [datasets/**]
+    paths: 
+      - datasets/**
+      - src/**
+      - "!src/bin/**"
+      - .github/workflows/bench.yml
+      - benches/criterion.rs
 
 name: "Benchmarking"
 

@@ -1,0 +1,29 @@
+on:
+  push:
+    branches: [main]
+
+name: "Update origin/bench"
+
+permissions:
+  contents: write
+
+jobs:
+  all:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+        name: Check out repo
+        with:
+          fetch-depth: 0
+      
+      - name: Set up git name
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "<>"
+      
+      - name: Merge main into bench
+        run: |
+          git switch bench
+          git merge -Xtheirs -m "Merge branch main into bench" origin/main
+          git push

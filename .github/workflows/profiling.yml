@@ -1,7 +1,12 @@
 on:
   push:
     branches: [bench]
-    paths: [examples/data]
+    paths: 
+      - examples/data/**
+      - examples/large_graph.rs
+      - .github/workflows/profiling.yml
+      - src/**
+      - "!src/bin/**"
 
 name: "Profiling"
 

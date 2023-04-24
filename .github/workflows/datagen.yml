@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [main]
+    branches: [bench]
     paths:
       - src/bin/data_generation.rs
       - .github/workflows/datagen.yml
@@ -17,20 +17,12 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         name: Check out repo
-        with:
-          fetch-depth: 0
       
       - name: Set up git name
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "<>"
       
-      - name: Merge main into bench
-        run: |
-          git switch bench
-          git merge -Xtheirs -m "Merge branch main into bench" origin/main
-          git push
-
       - name: Generate datasets
         run: |
           cargo run --bin=data_generation --all-features -- -k1000 -N500 -E1000 -D10
