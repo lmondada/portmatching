@@ -8,16 +8,16 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights}
 
 use crate::addresses::{follow_path, port_opposite, Ribs};
 
-use super::{BaseGraphTrie, BoundedAddress, GraphCache, GraphTrie, StateID, StateTransition};
+use super::{BaseGraphTrie, BoundedAddress, GraphCache, GraphTrie, StateID, StateTransition, CacheOption};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct SpineID(usize);
 
 struct SpineCache {
-    cache: Vec<Option<SpinePoint>>,
+    cache: Vec<CacheOption<SpinePoint>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct SpinePoint {
     node: NodeIndex,
     offset: usize,
@@ -43,13 +43,9 @@ impl SpineCache {
             cache: vec![Some(SpinePoint {
                 offset: 0,
                 node: root,
-                // spine_id: SpineID(0),
-            })],
+            })
+            .into()],
         }
-    }
-
-    fn _get(&self, spine: SpineID) -> Option<&SpinePoint> {
-        self.cache.get(spine.0)?.as_ref()
     }
 
     fn get_or_insert_with<'a, F: FnOnce() -> (&'a Vec<PortOffset>, usize)>(
@@ -60,12 +56,14 @@ impl SpineCache {
         root: NodeIndex,
     ) -> Option<&SpinePoint> {
         if self.cache.len() <= spine.0 {
-            self.cache.resize(spine.0, None);
+            self.cache.resize(spine.0 + 1, CacheOption::NoCache);
+        }
+        if self.cache[spine.0].no_cache() {
             let (path, offset) = find_spine();
             let n = follow_path(path, root, graph)?;
-            self.cache.push(Some(SpinePoint::new(n, offset)));
+            self.cache[spine.0] = Some(SpinePoint::new(n, offset)).into();
         }
-        self.cache[spine.0].as_ref()
+        self.cache[spine.0].as_ref().cached()
     }
 }
 
@@ -107,8 +105,7 @@ impl<'graph> GraphCache<'graph, AddressWithBound> for AddressNoCache<'graph> {
                 };
                 let sp = self
                     .spine
-                    .get_or_insert_with(*spine_id, find_spine, self.graph, self.root)
-                    .expect("could not find spine");
+                    .get_or_insert_with(*spine_id, find_spine, self.graph, self.root)?;
                 let mut port = match *ind {
                     ind if ind > 0 => sp.out_port(self.graph),
                     ind if ind < 0 => sp.in_port(self.graph),

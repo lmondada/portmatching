@@ -7,13 +7,15 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights}
 
 use crate::addresses::{follow_path, port_opposite, LinePartition, LinePoint, Ribs};
 
-use super::{BaseGraphTrie, BoundedAddress, GraphCache, GraphTrie, StateID, StateTransition};
+use super::{
+    BaseGraphTrie, BoundedAddress, CacheOption, GraphCache, GraphTrie, StateID, StateTransition,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct SpineID(usize);
 
 struct SpineCache {
-    cache: Vec<Option<SpinePoint>>,
+    cache: Vec<CacheOption<SpinePoint>>,
 }
 
 #[derive(Clone)]
@@ -57,12 +59,13 @@ impl SpineCache {
                 offset: 0,
                 node: root,
                 spine_id: SpineID(0),
-            })],
+            })
+            .into()],
         }
     }
 
     fn get(&self, spine: SpineID) -> Option<&SpinePoint> {
-        self.cache.get(spine.0)?.as_ref()
+        self.cache.get(spine.0)?.as_ref().to_option()
     }
 
     fn get_or_insert_with<'a, F: FnOnce() -> (&'a Vec<PortOffset>, usize)>(
@@ -74,7 +77,9 @@ impl SpineCache {
         root: NodeIndex,
     ) -> Option<&SpinePoint> {
         if self.cache.len() <= spine.0 {
-            self.cache.resize(spine.0, None);
+            self.cache.resize(spine.0 + 1, CacheOption::NoCache);
+        }
+        if self.cache[spine.0].no_cache() {
             let (path, offset) = find_spine();
             let n = follow_path(path, root, graph)?;
             let lp = node2line[&n].iter().find(|line| {
@@ -86,9 +91,9 @@ impl SpineCache {
                 }
                 false
             })?;
-            self.cache.push(Some(SpinePoint::new(lp, graph, spine)));
+            self.cache[spine.0] = Some(SpinePoint::new(lp, graph, spine)).into();
         }
-        self.cache[spine.0].as_ref()
+        self.cache[spine.0].as_ref().cached()
     }
 }
 

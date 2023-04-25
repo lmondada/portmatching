@@ -218,3 +218,52 @@ pub trait GraphTrie<'graph> {
             })
     }
 }
+
+#[derive(Clone, Debug)]
+enum CacheOption<T> {
+    NoCache,
+    None,
+    Some(T),
+}
+
+impl<T> CacheOption<T> {
+    fn cached(self) -> Option<T> {
+        match self {
+            CacheOption::NoCache => panic!("No cache"),
+            CacheOption::None => None,
+            CacheOption::Some(t) => Some(t),
+        }
+    }
+
+    fn to_option(self) -> Option<T> {
+        match self {
+            CacheOption::NoCache => None,
+            CacheOption::None => None,
+            CacheOption::Some(t) => Some(t),
+        }
+    }
+
+    fn as_ref(&self) -> CacheOption<&T> {
+        match self {
+            CacheOption::NoCache => CacheOption::NoCache,
+            CacheOption::None => CacheOption::None,
+            CacheOption::Some(t) => CacheOption::Some(t),
+        }
+    }
+
+    fn no_cache(&self) -> bool {
+        match self {
+            CacheOption::NoCache => true,
+            _ => false,
+        }
+    }
+}
+
+impl<T> From<Option<T>> for CacheOption<T> {
+    fn from(o: Option<T>) -> Self {
+        match o {
+            None => CacheOption::None,
+            Some(t) => CacheOption::Some(t),
+        }
+    }
+}
