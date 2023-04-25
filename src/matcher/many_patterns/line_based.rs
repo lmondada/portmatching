@@ -185,8 +185,8 @@ impl<'graph> ManyPatternMatcher<'graph> for LineGraphTrie<BaseGraphTrie> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use glob::glob;
+    // use std::fs;
+    // use glob::glob;
 
     #[cfg(feature = "serde")]
     use itertools::Itertools;
@@ -463,7 +463,7 @@ mod tests {
             prop_assert_eq!(many_matches, single_matches);
         }
     }
-    
+
     proptest! {
         #[ignore = "a bit slow"]
         #[cfg(feature = "serde")]

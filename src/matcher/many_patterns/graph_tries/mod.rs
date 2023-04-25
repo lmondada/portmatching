@@ -235,7 +235,7 @@ impl<T> CacheOption<T> {
         }
     }
 
-    fn to_option(self) -> Option<T> {
+    fn into_option(self) -> Option<T> {
         match self {
             CacheOption::NoCache => None,
             CacheOption::None => None,
@@ -252,10 +252,7 @@ impl<T> CacheOption<T> {
     }
 
     fn no_cache(&self) -> bool {
-        match self {
-            CacheOption::NoCache => true,
-            _ => false,
-        }
+        matches!(self, CacheOption::NoCache)
     }
 }
 

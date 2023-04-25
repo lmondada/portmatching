@@ -65,7 +65,7 @@ impl SpineCache {
     }
 
     fn get(&self, spine: SpineID) -> Option<&SpinePoint> {
-        self.cache.get(spine.0)?.as_ref().to_option()
+        self.cache.get(spine.0)?.as_ref().into_option()
     }
 
     fn get_or_insert_with<'a, F: FnOnce() -> (&'a Vec<PortOffset>, usize)>(

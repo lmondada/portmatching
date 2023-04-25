@@ -1,7 +1,7 @@
 [package]
 name = "portmatching"
 description = "Fast Graph Matching for Port Graphs"
-author = "Luca Mondada"
+authors = ["Luca Mondada"]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.68"

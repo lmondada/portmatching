@@ -8,7 +8,9 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights}
 
 use crate::addresses::{follow_path, port_opposite, Ribs};
 
-use super::{BaseGraphTrie, BoundedAddress, GraphCache, GraphTrie, StateID, StateTransition, CacheOption};
+use super::{
+    BaseGraphTrie, BoundedAddress, CacheOption, GraphCache, GraphTrie, StateID, StateTransition,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct SpineID(usize);
@@ -138,27 +140,31 @@ impl<'graph> GraphCache<'graph, AddressWithBound> for AddressNoCache<'graph> {
                 self.spine
                     .get_or_insert_with(spine_id, || (path, offset), self.graph, self.root);
             if let Some(sp) = sp {
-                let [bef, aft] = rib.map(|r| r.map(Some)).unwrap_or_default();
+                let &[bef, aft] = rib.unwrap_or(&[isize::MIN, isize::MAX]);
                 let mut ind = 0;
                 let mut port = sp.out_port(self.graph);
-                while port.is_some() && (aft.is_none() || ind < aft.unwrap()) {
+                if sp.node == node && ind >= bef && ind <= aft {
+                    return Some((spine_id, ind));
+                }
+                while port.is_some() && ind < aft {
                     port = self.graph.port_link(port.unwrap());
                     ind += 1;
                     if let Some(port_some) = port {
                         let curr_node = self.graph.port_node(port_some).expect("invalid port");
-                        if curr_node == node {
+                        if curr_node == node && ind >= bef {
                             return Some((spine_id, ind));
                         }
                         port = port_opposite(port_some, self.graph);
                     }
                 }
                 port = sp.in_port(self.graph);
-                while port.is_some() && (bef.is_none() || ind > bef.unwrap()) {
+                ind = 0;
+                while port.is_some() && ind > bef {
                     port = self.graph.port_link(port.unwrap());
                     ind -= 1;
                     if let Some(port_some) = port {
                         let curr_node = self.graph.port_node(port_some).expect("invalid port");
-                        if curr_node == node {
+                        if curr_node == node && ind <= aft {
                             return Some((spine_id, ind));
                         }
                         port = port_opposite(port_some, self.graph);
