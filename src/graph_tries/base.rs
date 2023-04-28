@@ -3,21 +3,27 @@ use std::{
     cmp,
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::{self, Display},
+    iter::{Cloned, Empty},
     mem,
+    slice::Iter,
+    vec,
 };
 
 use portgraph::{
     dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights,
 };
 
-use crate::addresses::{Address, AddressWithBound, LinePartition, Ribs, Skeleton, Spine};
-use crate::utils::cover::cover_nodes;
-
-use super::{
-    BoundedAddress, CachedGraphTrie, GraphTrie, NoCachedGraphTrie, StateID, StateTransition,
+use crate::{
+    addressing::{
+        cache::SpineID, Address, AddressCache, AsPathOffset, AsSpineID, PortGraphAddressing, Rib,
+        Skeleton, SkeletonAddressing, Spine, SpineAddress,
+    },
+    utils::{cover::cover_nodes, iter::AddAsRefIt},
 };
 
-/// A node in the GraphTrie
+use super::{GraphTrie, StateID, StateTransition};
+
+/// A node in the GraphTrie.
 ///
 /// The pair `port_offset` and `address` indicate the next edge to follow.
 /// The `find_port` serves to store the map NodeTransition => PortIndex.
@@ -26,14 +32,14 @@ use super::{
 /// transition Fail is the only one that should be followed. At write time,
 /// an unset field is seen as a license to assign whatever is most convenient.
 #[derive(Clone, Default, Debug)]
-pub(crate) struct NodeWeight {
+pub(crate) struct NodeWeight<T> {
     pub(crate) out_port: Option<PortOffset>,
-    pub(crate) address: Option<Address>,
-    pub(crate) spine: Option<Spine>,
+    pub(crate) address: Option<Address<usize>>,
+    pub(crate) spine: Option<Spine<T>>,
     pub(crate) non_deterministic: bool,
 }
 
-impl Display for NodeWeight {
+impl<T> Display for NodeWeight<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(addr) = &self.address {
             write!(f, "{:?}", addr)?;
@@ -47,6 +53,14 @@ impl Display for NodeWeight {
     }
 }
 
+impl<'n, T: SpineAddress> NodeWeight<T> {
+    fn address(&'n self) -> Option<Address<T::AsRef<'n>>> {
+        let (spine_ind, ind) = self.address?;
+        let spine = self.spine.as_ref()?[spine_ind].as_ref();
+        Some((spine, ind))
+    }
+}
+
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct PermPortIndex(usize);
 
@@ -57,14 +71,43 @@ impl PermPortIndex {
     }
 }
 
+/// A graph trie implementation using portgraph.
+/// 
+/// The parameter T is the type of the spine. Any type that implements
+/// [`SpineAddress`] can be used as spine in theory, however constructing such
+/// a trie is only supported for very specific types.
+/// 
+/// The construction of such tries is the most complex logic in this
+/// crate.
+/// 
+/// There are deterministic and non-deterministic states, describing how
+/// the state automaton in that state should behave.
+/// Roughly speaking, the role of deterministic and non-deterministic states is
+/// inverted when writing to the trie (as opposed to reading):
+///  * a deterministic state at read time means that every possible transition must
+///    be considered at write time (as we do not know which one will be taken)
+///  * a non-deterministic state at read time on the other hand is guaranteed to
+///    follow any allowed transition, and thus at write time we can just follow
+///    one of the transitions.
+/// 
+/// The deterministic states are thus the harder states to handle at write time.
+/// The main idea is that transitions are considered from left to right, so when
+/// adding a new transition, all the transitions to its right might get
+/// "shadowed" by it. That means that we must make sure that if an input graph
+/// chooses the new transition over the old one, then all the patterns that would 
+/// have been discovered along the old path will still be discovered.
+/// 
+/// Similarly, transitions to the left of a new transition can shadow the new
+/// transition, so we must make sure that if an input graph chooses one of these
+/// higher priority transition, it still discovers the pattern that is being added.
 #[derive(Clone, Debug)]
-pub struct BaseGraphTrie {
+pub struct BaseGraphTrie<T> {
     pub(crate) graph: PortGraph,
-    pub(crate) weights: Weights<NodeWeight, StateTransition<(Address, Ribs)>>,
+    pub(crate) weights: Weights<NodeWeight<T>, StateTransition<(Address<usize>, Vec<Rib>)>>,
     perm_indices: RefCell<BTreeMap<PermPortIndex, PortIndex>>,
 }
 
-impl Default for BaseGraphTrie {
+impl Default for BaseGraphTrie<(Vec<PortOffset>, usize)> {
     fn default() -> Self {
         let graph = Default::default();
         let weights = Default::default();
@@ -79,40 +122,53 @@ impl Default for BaseGraphTrie {
     }
 }
 
-impl<'graph> GraphTrie<'graph> for BaseGraphTrie {
-    type Address = AddressWithBound;
+impl SpineAddress for (Vec<PortOffset>, usize) {
+    type AsRef<'n> = (&'n [PortOffset], usize);
+
+    fn as_ref<'n>(&'n self) -> Self::AsRef<'n> {
+        (self.0.as_slice(), self.1)
+    }
+}
+
+impl<S> GraphTrie for BaseGraphTrie<S>
+where
+    S: SpineAddress + Clone,
+    for<'n> S::AsRef<'n>: Copy + Default + PartialEq + AsPathOffset + AsSpineID,
+{
+    type Addressing<'g, 'n> = PortGraphAddressing<'g, 'n, S> where S: 'n;
+    type SpineAddress = S;
 
     fn trie(&self) -> &PortGraph {
         &self.graph
     }
 
-    fn address(&self, state: super::StateID) -> Option<Self::Address> {
-        let addr = self.weight(state).address.as_ref()?;
-        let spine = self.spine(state)?;
-        Some(AddressWithBound(
-            addr.clone(),
-            Skeleton::from_spine(spine.clone()),
-        ))
+    fn address<'n>(&'n self, state: StateID) -> Option<Address<S::AsRef<'n>>> {
+        self.weights[state].address()
     }
 
-    fn port_offset(&self, state: super::StateID) -> Option<PortOffset> {
-        self.weight(state).out_port
+    fn port_offset(&self, state: StateID) -> Option<PortOffset> {
+        self.weights[state].out_port
     }
 
-    fn transition(&self, port: PortIndex) -> StateTransition<Self::Address> {
+    fn transition<'g, 'n>(
+        &'n self,
+        port: PortIndex,
+        addressing: &Self::Addressing<'g, 'n>,
+    ) -> StateTransition<(Self::Addressing<'g, 'n>, Address<S::AsRef<'n>>)> {
         let node = self.graph.port_node(port).expect("invalid port");
         let spine = self.spine(node);
+
         match &self.weights[port] {
             StateTransition::Node(addrs, port) => StateTransition::Node(
                 addrs
                     .iter()
                     .map(|(addr, ribs)| {
-                        AddressWithBound(
-                            addr.clone(),
-                            Skeleton {
-                                spine: spine.cloned(),
-                                ribs: Some(ribs.clone()),
-                            },
+                        let &(spine_ind, ind) = addr;
+                        let vert = &spine.expect("address with no spine")[spine_ind];
+                        let addr = (vert.as_ref(), ind);
+                        (
+                            addressing.with_spine(&spine.unwrap()).with_ribs(&ribs),
+                            addr,
                         )
                     })
                     .collect(),
@@ -123,47 +179,80 @@ impl<'graph> GraphTrie<'graph> for BaseGraphTrie {
         }
     }
 
-    fn is_non_deterministic(&self, state: super::StateID) -> bool {
+    fn is_non_deterministic(&self, state: StateID) -> bool {
         self.weights[state].non_deterministic
+    }
+
+    fn spine<'n>(&'n self, state: StateID) -> Option<&'n Vec<S>> {
+        self.weights[state].spine.as_ref()
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub(crate) enum TrieTraversal {
-    ReadOnly,
-    Write,
+impl<T: Clone> BaseGraphTrie<T> {
+    pub(crate) fn str_weights(&self) -> Weights<String, String> {
+        let mut str_weights = Weights::new();
+        for p in self.graph.ports_iter() {
+            str_weights[p] = match self.graph.port_direction(p).unwrap() {
+                Direction::Incoming => "".to_string(),
+                Direction::Outgoing => self.weights[p].to_string(),
+            }
+        }
+        for n in self.graph.nodes_iter() {
+            str_weights[n] = self.weights[n].to_string();
+        }
+        str_weights
+    }
+
+    pub(crate) fn _dotstring(&self) -> String {
+        dot_string_weighted(&self.graph, &self.str_weights())
+    }
 }
 
-impl BaseGraphTrie {
+impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     /// An empty graph trie
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub(crate) fn weight(&self, state: StateID) -> &NodeWeight {
+    pub(crate) fn weight<'a>(&'a self, state: StateID) -> &'a NodeWeight<(Vec<PortOffset>, usize)> {
         &self.weights[state]
     }
 
     pub(crate) fn get_transitions_write(
         &mut self,
         state: StateID,
-        graph: &PortGraph,
-        partition: &LinePartition,
-    ) -> Vec<StateTransition<(Address, Ribs)>> {
-        let next_node = self.next_node_nomut(state, partition);
-        let next_port = self.next_port_offset_nomut(state, partition);
+        skeleton: &Skeleton,
+    ) -> Vec<StateTransition<(Address<usize>, Vec<Rib>)>> {
+        let addressing =
+            PortGraphAddressing::new(skeleton.root(), skeleton.graph(), self.spine(state), None);
+        let graph = skeleton.graph();
+        let next_node = self.next_node(state, &addressing, &mut ());
+        let next_port = self.next_port_offset(state, &addressing, &mut ());
         let next_addr = next_node.map(|n| {
-            let NodeWeight {
-                out_port,
-                address,
-                spine,
-                ..
-            } = &mut self.weights[state];
-            partition
-                .get_address(n, spine.as_ref().expect("next_node exists"), None)
+            let addressing =
+                PortGraphAddressing::new(skeleton.root(), skeleton.graph(), self.spine(state), None);
+            addressing
+                .get_addr(n, &mut ())
+                .map(|((path, offset), ind)| {
+                    let line_ind = self.weights[state]
+                        .spine
+                        .as_ref()
+                        .expect("next_node exists")
+                        .iter()
+                        .position(|(p, o)| p.as_slice() == path && *o == offset)
+                        .expect("could not find address in spine");
+                    (line_ind, ind)
+                })
                 .unwrap_or_else(|| {
-                    let Address(line_ind, _) = partition.extend_spine(
-                        spine.as_mut().expect("next_node exists"),
+                    let NodeWeight {
+                        out_port,
+                        address,
+                        spine,
+                        ..
+                    } = &mut self.weights[state];
+                    let spine = spine.as_mut().expect("next_node exists");
+                    let (line_ind, _) = skeleton.extend_spine(
+                        spine,
                         address.as_ref().expect("next_node exists"),
                         out_port.expect("next_node exists"),
                     );
@@ -172,36 +261,37 @@ impl BaseGraphTrie {
                     } else {
                         -1
                     };
-                    Address(line_ind, ind)
+                    (line_ind, ind)
                 })
         });
         let spine = self.spine(state);
-        let next_ribs = self.spine(state).and_then(|spine| {
-            let mut ribs = partition.get_ribs(spine);
-            ribs.add_addr(next_addr.as_ref()?.clone());
+        let next_ribs = spine.and_then(|spine| {
+            let mut ribs = skeleton.get_ribs(spine);
+            update_ribs(&mut ribs, next_addr.as_ref()?.clone());
             Some(ribs)
         });
         let mut transitions = Vec::new();
+        let addressing =
+            PortGraphAddressing::new(skeleton.root(), skeleton.graph(), self.spine(state), None);
         if !self.weight(state).non_deterministic {
-            transitions.extend(
-                self.compatible_transitions(state, graph, partition, TrieTraversal::Write)
-                    .filter_map(|out_p| {
-                        let mut transition = self.weights[out_p].clone();
-                        if let (StateTransition::Node(addrs, _), Some(new_addr)) =
-                            (&mut transition, &next_addr)
-                        {
-                            let merged_addrs = merge_addrs(
-                                addrs,
-                                &[(new_addr.clone(), next_ribs.clone().unwrap())],
-                            )?;
-                            if !is_satisfied(next_node?, &merged_addrs, partition, spine?) {
-                                return None;
-                            }
-                            *addrs = merged_addrs;
+            transitions.extend(self.compatible_transitions(state, &addressing).filter_map(
+                |out_p| {
+                    let mut transition = self.weights[out_p].clone();
+                    if let (StateTransition::Node(addrs, _), Some(new_addr)) =
+                        (&mut transition, &next_addr)
+                    {
+                        let merged_addrs = merge_addrs(
+                            addrs.as_slice(),
+                            &[(new_addr.clone(), next_ribs.clone().unwrap())],
+                        )?;
+                        if !is_satisfied(next_node?, &merged_addrs, &addressing, spine?) {
+                            return None;
                         }
-                        Some(transition)
-                    }),
-            );
+                        *addrs = merged_addrs;
+                    }
+                    Some(transition)
+                },
+            ));
         }
         // Append the perfect transition
         if let (Some(addr), Some(port)) = (next_addr, next_port) {
@@ -212,38 +302,13 @@ impl BaseGraphTrie {
             if !transitions.contains(&ideal) {
                 transitions.push(ideal);
             }
-        } else if self.port_nomut(state, partition).is_some() {
+        } else if self.port(state, &addressing, &mut ()).is_some() {
             let ideal = StateTransition::NoLinkedNode;
             if !transitions.contains(&ideal) {
                 transitions.push(ideal);
             }
         }
         transitions
-    }
-
-    fn port_nomut(&self, state: StateID, cache: &LinePartition) -> Option<PortIndex> {
-        let offset = self.port_offset(state)?;
-        cache
-            .graph
-            .port_index(self.node_nomut(state, cache)?, offset)
-    }
-
-    fn node_nomut(&self, state: StateID, cache: &LinePartition) -> Option<NodeIndex> {
-        let addr = self.address(state)?;
-        cache.get_node_index(addr.main(), addr.boundary().spine.as_ref()?)
-    }
-
-    fn next_node_nomut(&self, state: StateID, cache: &LinePartition) -> Option<NodeIndex> {
-        let graph = cache.graph;
-        let in_port = graph.port_link(self.port_nomut(state, cache)?)?;
-        graph.port_node(in_port)
-    }
-
-    /// The next port in the current graph if we follow one transition
-    fn next_port_offset_nomut(&self, state: StateID, cache: &LinePartition) -> Option<PortOffset> {
-        let graph = cache.graph;
-        let in_port = graph.port_link(self.port_nomut(state, cache)?)?;
-        graph.port_offset(in_port)
     }
 
     /// Split states so that all incoming links are within ports
@@ -312,14 +377,13 @@ impl BaseGraphTrie {
     }
 
     /// All transitions in `state` that are allowed for `graph`
-    fn compatible_transitions<'a, 'b: 'a>(
-        &'b self,
+    fn compatible_transitions<'g: 'n, 'n>(
+        &'n self,
         state: StateID,
-        graph: &'a PortGraph,
-        partition: &'a LinePartition<'b>,
-        mode: TrieTraversal,
-    ) -> impl Iterator<Item = PortIndex> + 'a {
-        let out_port = self.port_nomut(state, partition);
+        addressing: &'g PortGraphAddressing<'g, 'n, (Vec<PortOffset>, usize)>,
+    ) -> impl Iterator<Item = PortIndex> + 'n {
+        let graph = addressing.graph();
+        let out_port = self.port(state, addressing, &mut ());
         let in_port = out_port.and_then(|out_port| graph.port_link(out_port));
         let in_offset = in_port.map(|in_port| graph.port_offset(in_port).expect("invalid port"));
         let next_node = in_port.map(|in_port| graph.port_node(in_port).expect("invalid port"));
@@ -327,41 +391,30 @@ impl BaseGraphTrie {
             .outputs(state)
             .filter(move |&out_p| match self.weights[out_p] {
                 StateTransition::Node(ref addrs, offset) => {
-                    let spine = self.spine(state).expect("from if condition");
                     if in_offset != Some(offset) {
                         return false;
                     }
-                    match mode {
-                        TrieTraversal::ReadOnly => addrs.iter().all(|(addr, ribs)| {
-                            let Some(next_addr) = partition.get_address(
-                                    next_node.expect("from if condition"),
-                                    spine,
-                                    Some(ribs)
-                                ) else {
-                                    return false
-                                };
-                            &next_addr == addr
-                        }),
-                        TrieTraversal::Write => addrs.iter().all(|(addr, _)| {
-                            let Some(node) = partition.get_node_index(
-                                addr,
-                                spine,
+                    addrs.iter().all(|(addr, _)| {
+                        let &(line_ind, ind) = addr;
+                        let (ref path, offset) =
+                            self.spine(state).expect("invalid state")[line_ind];
+                        let addr = ((path.as_slice(), offset), ind);
+                        let Some(node) = addressing.get_node(
+                                &addr,
+                                &mut ()
                             ) else {
                                 return true
                             };
-                            node == next_node.expect("from if condition")
-                        }),
-                    }
+                        node == next_node.expect("from if condition")
+                    })
                 }
                 StateTransition::NoLinkedNode => {
-                    // In read mode, out_port existing is enough
                     // In write mode, out_port must be dangling
-                    out_port.is_some() && (mode == TrieTraversal::ReadOnly || in_port.is_none())
+                    out_port.is_some() && in_port.is_none()
                 }
                 StateTransition::FAIL => {
-                    // In read mode, FAIL is always an option
                     // In write mode only if the port does not exist
-                    mode == TrieTraversal::ReadOnly || out_port.is_none()
+                    out_port.is_none()
                 }
             })
     }
@@ -369,15 +422,12 @@ impl BaseGraphTrie {
     fn get_or_insert(
         &mut self,
         state: StateID,
-        transition: &StateTransition<(Address, Ribs)>,
+        transition: &StateTransition<((usize, isize), Vec<[isize; 2]>)>,
         new_state: &mut Option<StateID>,
     ) -> PermPortIndex {
-        if !matches!(
-            transition,
-            StateTransition::FAIL | StateTransition::NoLinkedNode
-        ) {
-            panic!("can only insert FAIL or NoLinkedNode");
-        }
+        if matches!(transition, StateTransition::Node(_, _)) {
+            panic!("can only insert FAIL or NoLinkedNode")
+        };
         let out_port = self
             .graph
             .outputs(state)
@@ -432,10 +482,10 @@ impl BaseGraphTrie {
         &mut self,
         out_port: PortIndex,
         state: StateID,
-        graph: &PortGraph,
-        partition: &LinePartition,
+        skeleton: &Skeleton,
         new_start_state: &mut Option<StateID>,
     ) -> Vec<StateID> {
+        let graph = skeleton.graph();
         let mut start_states = Vec::new();
         let start_node = graph.port_node(out_port).expect("invalid port");
         let start_offset = graph.port_offset(out_port).expect("invalid port");
@@ -444,19 +494,27 @@ impl BaseGraphTrie {
             let offset = self.weight(state).out_port.unwrap_or(start_offset);
             let mut fallback_spine = None;
             let spine = self.spine(state).unwrap_or_else(|| {
-                fallback_spine = Some(partition.get_spine());
+                fallback_spine = Some(skeleton.get_spine());
                 fallback_spine.as_ref().unwrap()
             });
-            let mut graph_addr_cache = None;
-            let mut graph_addr = || {
-                graph_addr_cache = partition.get_address(start_node, spine, None);
-                graph_addr_cache.clone()
+            let graph_addr = {
+                let addressing =
+                    PortGraphAddressing::new(skeleton.root(), skeleton.graph(), Some(spine), None);
+                addressing
+                    .get_addr(start_node, &mut ())
+                    .map(|((path, offset), ind)| {
+                        let line_ind = spine
+                            .iter()
+                            .position(|&(ref a, b)| a == path && b == offset)
+                            .expect("Could not find path in spine");
+                        (line_ind, ind)
+                    })
             };
             let addr = self
-                .address(state)
-                .map(|addr| addr.0)
-                .unwrap_or_else(|| graph_addr().expect("Could not get address of current node"));
-            if offset == start_offset && Some(&addr) == graph_addr().as_ref() {
+                .weight(state)
+                .address
+                .unwrap_or(graph_addr.expect("Could not get address of current node"));
+            if offset == start_offset && Some(&addr) == graph_addr.as_ref() {
                 self.weights[state].spine = Some(spine.clone());
                 self.weights[state].out_port = Some(offset);
                 self.weights[state].address = Some(addr);
@@ -496,16 +554,15 @@ impl BaseGraphTrie {
         &mut self,
         out_port: PortIndex,
         state: StateID,
-        graph: &PortGraph,
-        partition: &LinePartition,
+        skeleton: &Skeleton,
         new_state: &mut Option<StateID>,
         new_start_state: &mut Option<StateID>,
     ) -> Vec<PermPortIndex> {
         let start_states =
-            self.get_or_create_start_states(out_port, state, graph, partition, new_start_state);
+            self.get_or_create_start_states(out_port, state, skeleton, new_start_state);
         let mut in_ports = Vec::new();
         for state in start_states {
-            let transitions = self.get_transitions_write(state, graph, partition);
+            let transitions = self.get_transitions_write(state, &skeleton);
             let mut transitions_iter = transitions.iter().peekable();
             match transitions_iter.peek() {
                 Some(StateTransition::FAIL) => panic!("invalid start state"),
@@ -578,7 +635,7 @@ impl BaseGraphTrie {
                             if curr_addrs.iter().all(|(c_addr, c_ribs)| {
                                 addrs
                                     .iter()
-                                    .any(|(addr, ribs)| addr == c_addr && c_ribs.within(ribs))
+                                    .any(|(addr, ribs)| addr == c_addr && ribs_within(c_ribs, ribs))
                             }) {
                                 new_transitions
                                     .push((port_offset, transitions_iter.next().unwrap().clone()));
@@ -698,45 +755,37 @@ impl BaseGraphTrie {
         self.perm_indices.borrow_mut().remove(&port)
     }
 
-    pub(crate) fn str_weights(&self) -> Weights<String, String> {
-        let mut str_weights = Weights::new();
-        for p in self.graph.ports_iter() {
-            str_weights[p] = match self.graph.port_direction(p).unwrap() {
-                Direction::Incoming => "".to_string(),
-                Direction::Outgoing => self.weights[p].to_string(),
-            }
-        }
-        for n in self.graph.nodes_iter() {
-            str_weights[n] = self.weights[n].to_string();
-        }
-        str_weights
-    }
-
-    pub(crate) fn _dotstring(&self) -> String {
-        dot_string_weighted(&self.graph, &self.str_weights())
-    }
-
     fn spine(&self, state: StateID) -> Option<&Vec<(Vec<PortOffset>, usize)>> {
         self.weight(state).spine.as_ref()
     }
 
-    pub(crate) fn to_cached_trie(&self) -> CachedGraphTrie {
-        CachedGraphTrie::new(self)
-    }
-
-    pub(crate) fn to_no_cached_trie(&self) -> NoCachedGraphTrie {
-        NoCachedGraphTrie::new(self)
+    pub(crate) fn to_cached_trie(&self) -> BaseGraphTrie<(SpineID, Vec<PortOffset>, usize)> {
+        BaseGraphTrie::<(SpineID, Vec<PortOffset>, usize)>::new(self)
     }
 }
 
-fn is_satisfied(
+fn ribs_within(a: &[[isize; 2]], b: &[[isize; 2]]) -> bool {
+    a.iter()
+        .zip(b.iter())
+        .all(|(a, b)| a[0] >= b[0] && a[1] <= b[1])
+}
+
+fn update_ribs(ribs: &mut [[isize; 2]], (line, ind): (usize, isize)) {
+    let [min, max] = &mut ribs[line];
+    *min = cmp::min(*min, ind);
+    *max = cmp::max(*max, ind);
+}
+
+fn is_satisfied<'g, 'n>(
     node: NodeIndex,
-    addrs: &[(Address, Ribs)],
-    partition: &LinePartition,
-    spine: &Spine,
+    addrs: &[(Address<usize>, Vec<Rib>)],
+    addressing: &'n PortGraphAddressing<'g, 'n, (Vec<PortOffset>, usize)>,
+    spine: &'n Spine<(Vec<PortOffset>, usize)>,
 ) -> bool {
-    addrs.iter().all(|(addr, _)| {
-        if let Some(graph_node) = partition.get_node_index(addr, spine) {
+    addrs.iter().all(|&((line_ind, ind), _)| {
+        let spine = spine[line_ind].as_ref();
+        let addr = (spine, ind);
+        if let Some(graph_node) = addressing.get_node(&addr, &mut ()) {
             node == graph_node
         } else {
             true
@@ -744,17 +793,17 @@ fn is_satisfied(
     })
 }
 
-fn merge_addrs(
-    addrs1: &[(Address, Ribs)],
-    addrs2: &[(Address, Ribs)],
-) -> Option<Vec<(Address, Ribs)>> {
+fn merge_addrs<'a>(
+    addrs1: &[(Address<usize>, Vec<Rib>)],
+    addrs2: &[(Address<usize>, Vec<Rib>)],
+) -> Option<Vec<(Address<usize>, Vec<Rib>)>> {
     let mut addrs = Vec::from_iter(addrs1.iter().cloned());
     for (a, rib_a) in addrs2 {
         let mut already_inserted = false;
         for (b, rib_b) in addrs.iter_mut() {
             if a == b {
                 // If they share the same address, then ribs is union of ribs
-                for (ra, rb) in rib_a.0.iter().zip(&mut rib_b.0) {
+                for (ra, rb) in rib_a.iter().zip(rib_b.iter_mut()) {
                     rb[0] = cmp::min(ra[0], rb[0]);
                     rb[1] = cmp::max(ra[1], rb[1]);
                 }
@@ -766,7 +815,7 @@ fn merge_addrs(
                 } else {
                     (b as &_, rib_a)
                 };
-                let b_int = rib_b.0[a.0];
+                let b_int = rib_b[a.0];
                 if b_int[0] <= a.1 && b_int[1] >= a.1 {
                     // Then address A < B would have been chosen as B's address!
                     return None;
@@ -802,7 +851,7 @@ fn rekey<K: Clone, V: Clone + Default>(
 mod tests {
     use portgraph::{NodeIndex, PortGraph, PortOffset};
 
-    use crate::addresses::{Address, LinePartition};
+    use crate::addressing::{PortGraphAddressing, Skeleton, SkeletonAddressing};
 
     use super::BaseGraphTrie;
 
@@ -820,7 +869,7 @@ mod tests {
 
     #[test]
     fn test_add_transition_deterministic() {
-        let mut trie = BaseGraphTrie::new();
+        let mut trie = BaseGraphTrie::<(Vec<PortOffset>, usize)>::new();
         let state = trie.add_state(false);
 
         // graph 1
@@ -831,13 +880,22 @@ mod tests {
         link(&mut graph, (0, 0), (1, 0));
         link(&mut graph, (0, 1), (1, 1));
 
-        let partition = LinePartition::new(&graph, root);
-        let spine = partition.get_spine();
-        let ribs = partition.get_ribs(&spine);
-        trie.weights[state].address = partition.get_address(root, &spine, Some(&ribs));
+        let skel = Skeleton::new(&graph, root);
+        let addressing = PortGraphAddressing::from_skeleton(&skel);
+        let addr = addressing
+            .get_addr(root, &mut ())
+            .map(|((path, offset), ind)| {
+                let line_ind = skel
+                    .get_spine()
+                    .iter()
+                    .position(|&(ref a, b)| a == path && b == offset)
+                    .expect("Could not find path in spine");
+                (line_ind, ind)
+            });
+        trie.weights[state].address = addr;
         trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
 
-        trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
+        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
 
         // graph 2
         let mut graph = PortGraph::new();
@@ -845,9 +903,9 @@ mod tests {
         graph.add_node(2, 0);
         let out_port = graph.port_index(root, PortOffset::new_outgoing(1)).unwrap();
         link(&mut graph, (0, 1), (1, 1));
-        let partition = LinePartition::new(&graph, root);
+        let skel = Skeleton::new(&graph, root);
 
-        trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
+        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
 
         assert_eq!(trie.graph.num_outputs(state), 3);
         assert_eq!(trie.graph.node_count(), 4);
@@ -859,8 +917,8 @@ mod tests {
         let out_port = graph.port_index(root, PortOffset::new_outgoing(0)).unwrap();
         link(&mut graph, (0, 0), (1, 1));
 
-        let partition = LinePartition::new(&graph, root);
-        trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
+        let skel = Skeleton::new(&graph, root);
+        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
 
         assert_eq!(trie.graph.num_outputs(state), 4);
         assert_eq!(trie.graph.node_count(), 6);
@@ -869,16 +927,16 @@ mod tests {
         let mut graph = PortGraph::new();
         let root = graph.add_node(0, 1);
         let out_port = graph.port_index(root, PortOffset::new_outgoing(0)).unwrap();
-        let partition = LinePartition::new(&graph, root);
+        let skel = Skeleton::new(&graph, root);
 
-        trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
+        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
 
         assert_eq!(trie.graph.node_count(), 7);
     }
 
     #[test]
     fn test_add_transition_non_deterministic() {
-        let mut trie = BaseGraphTrie::new();
+        let mut trie = BaseGraphTrie::<(Vec<PortOffset>, usize)>::new();
         let state = trie.add_state(true);
 
         // graph 1
@@ -888,11 +946,11 @@ mod tests {
         let out_port = graph.port_index(root, PortOffset::new_outgoing(1)).unwrap();
         link(&mut graph, (0, 0), (1, 0));
         link(&mut graph, (0, 1), (1, 1));
-        let partition = LinePartition::new(&graph, root);
-        trie.weights[state].address = Address(0, 0).into();
+        let skel = Skeleton::new(&graph, root);
+        trie.weights[state].address = (0, 0).into();
         trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
 
-        trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
+        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
 
         // graph 2
         let mut graph = PortGraph::new();
@@ -900,8 +958,8 @@ mod tests {
         graph.add_node(2, 0);
         let out_port = graph.port_index(root, PortOffset::new_outgoing(1)).unwrap();
         link(&mut graph, (0, 1), (1, 1));
-        let partition = LinePartition::new(&graph, root);
-        trie.add_transition(out_port, state, &graph, &partition, &mut None, &mut None);
+        let skel = Skeleton::new(&graph, root);
+        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
 
         assert_eq!(trie.graph.num_outputs(state), 2);
         assert_eq!(trie.graph.node_count(), 4);
