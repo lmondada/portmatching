@@ -17,19 +17,19 @@
 //! induced subgraph unchanged, it will still be unique once embedded within a
 //! larger graph.
 
-pub mod portgraph;
 pub mod cache;
+pub mod portgraph;
 mod skeleton;
 
 #[doc(inline)]
 pub use self::portgraph::PortGraphAddressing;
 pub use cache::CachedOption;
 
+pub(crate) use self::cache::{AddressCache, AsSpineID};
 pub(crate) use skeleton::Skeleton;
 
-use self::cache::{AddressCache, AsSpineID};
-use ::portgraph::{NodeIndex, PortGraph};
 use crate::utils::port_opposite;
+use ::portgraph::{NodeIndex, PortGraph};
 
 /// A node address with vertebra ID and path index
 pub(crate) type Address<SpineID> = (SpineID, isize);
@@ -56,13 +56,13 @@ type NodeOffset = (NodeIndex, usize);
 /// are defined by a spine, made of vertebrae, and (optionally) of ribs.
 /// There are always as many vertebrae as there are ribs.
 /// You can optionally provide an [`AddressCache`] to cache address computation.
-/// 
+///
 /// An addressing scheme is specific to a graph (with lifetime `'g`) and spines
 /// and ribs (with lifetime `'n`). These are stored as references.
 /// Addresses are composed of a vertebra and an index along its rib. As vertebrae
 /// are typically defined by a path from a fixed root vertex, they can be expensive
 /// to copy, which is what the copyable reference type [`SpineAddress::AsRef`] is for.
-/// 
+///
 /// In principle, this trait would not have to be specific to [`PortGraph`]s, as
 /// the actual graph data structure could be abstracted away with only the addresses
 /// being exposed to the graph trie. This would require a (welcome) refactor.
@@ -139,12 +139,12 @@ where
     fn init(root: NodeIndex, graph: &'g PortGraph) -> Self;
 
     /// Return a copy of self with new ribs.
-    /// 
+    ///
     /// Mostly useful to specify ribs when the addressing scheme has none.
     fn with_ribs(&self, ribs: &'n Vec<Rib>) -> Self;
 
     /// Return a copy of self with a new spine.
-    /// 
+    ///
     /// Also resets the ribs, as they are defined relative to the spine.
     fn with_spine(&self, spine: &'n Vec<T>) -> Self;
 
@@ -188,7 +188,11 @@ where
     }
 
     /// Get the address corresponding to a node index.
-    fn get_addr<C: AddressCache>(&'n self, node: NodeIndex, cache: &mut C) -> Option<Address<T::AsRef<'n>>> {
+    fn get_addr<C: AddressCache>(
+        &'n self,
+        node: NodeIndex,
+        cache: &mut C,
+    ) -> Option<Address<T::AsRef<'n>>> {
         for (spine, rib) in self.skeleton_iter() {
             if let Some((root, offset)) = cache
                 .get_node(&(spine, 0))

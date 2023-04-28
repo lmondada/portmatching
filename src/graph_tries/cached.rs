@@ -1,6 +1,9 @@
 use std::{
     collections::HashMap,
-    fmt::{self, Display}, vec, slice::Iter, iter::Cloned,
+    fmt::{self, Display},
+    iter::Cloned,
+    slice::Iter,
+    vec,
 };
 
 use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights};
@@ -8,18 +11,18 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights}
 use crate::{
     addressing::{
         cache::{Cache, SpineID},
-        Address, Rib, PortGraphAddressing, SkeletonAddressing,
+        Address, PortGraphAddressing, Rib, SkeletonAddressing,
     },
     utils::{follow_path, port_opposite},
 };
 
-use super::{BaseGraphTrie, GraphTrie, StateID, StateTransition, base::NodeWeight};
+use super::{base::NodeWeight, BaseGraphTrie, GraphTrie, StateID, StateTransition};
 
 type S = (SpineID, Vec<PortOffset>, usize);
 
 impl BaseGraphTrie<S> {
     //! A graph trie enabling caching using [`SpineID`]s.
-    //! 
+    //!
     //! This trie is constructed from another [`BaseGraphTrie`]. The addresses
     //! are re-computed and optimised for caching by introducing [`SpineID`]s.
     pub fn new(base: &BaseGraphTrie<(Vec<PortOffset>, usize)>) -> Self {
@@ -53,7 +56,7 @@ impl BaseGraphTrie<S> {
         Self {
             graph: base.graph.clone(),
             weights,
-            perm_indices: Default::default()
+            perm_indices: Default::default(),
         }
     }
 }

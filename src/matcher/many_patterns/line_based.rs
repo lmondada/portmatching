@@ -11,17 +11,15 @@ use crate::{
     pattern::{Edge, Pattern},
 };
 
-use super::{
-    ManyPatternMatcher, PatternID, PatternMatch,
-};
-use crate::graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
+use super::{ManyPatternMatcher, PatternID, PatternMatch};
+use crate::graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID};
 
 /// A graph trie matcher based on skeleton partitioning of graphs.
-/// 
+///
 /// There is some freedom in how a graph trie is built from patterns.
 /// This matcher is based on partitions of the graph patterns
 /// into skeleton paths.
-/// 
+///
 /// This spreads out the occurence of non-deterministic (expensive) states in the trie
 /// in-between deterministic (cheap) ones.
 pub struct LineGraphTrie<T> {

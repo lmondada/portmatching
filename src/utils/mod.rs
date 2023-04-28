@@ -1,7 +1,7 @@
 pub(crate) mod cover;
 mod depth;
-pub(crate) mod pre_order;
 pub(crate) mod iter;
+pub(crate) mod pre_order;
 
 pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
@@ -9,7 +9,7 @@ pub(crate) use depth::{centre, NoCentreError};
 #[cfg(test)]
 pub(crate) mod test_utils;
 
-use portgraph::{PortIndex, PortGraph, PortOffset, Direction, NodeIndex};
+use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
 
 /// Returns the port on the opposite side of the same node
 pub(crate) fn port_opposite(port: PortIndex, graph: &PortGraph) -> Option<PortIndex> {

@@ -4,7 +4,7 @@ use portgraph::{NodeIndex, PortGraph, PortOffset};
 
 use crate::utils::{follow_path, iter::AddAsRefIt};
 
-use super::{SpineAddress, NodeOffset, Rib, SkeletonAddressing, cache::AsSpineID};
+use super::{cache::AsSpineID, NodeOffset, Rib, SkeletonAddressing, SpineAddress};
 
 pub(crate) trait AsPathOffset {
     fn as_path_offset(&self) -> (&[PortOffset], usize);
@@ -20,8 +20,8 @@ impl AsPathOffset for (&[PortOffset], usize) {
 ///
 /// Vertebrae are given by paths from the root node. Graph, spine and
 /// ribs are stored as references.
-/// 
-/// If the spine is [`None`], the addressing scheme is not defined. If 
+///
+/// If the spine is [`None`], the addressing scheme is not defined. If
 /// the ribs are [`None`], any index is valid.
 ///
 /// # Example
@@ -85,7 +85,7 @@ impl<'g, 'n, S: SpineAddress> PortGraphAddressing<'g, 'n, S> {
 
 impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
     /// Return a copy of self with a new spine.
-    /// 
+    ///
     /// Also resets the ribs, as they are defined relative to the spine.
     pub fn with_spine(&self, spine: &'n Vec<S>) -> Self {
         PortGraphAddressing {
@@ -97,7 +97,7 @@ impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
     }
 
     /// Return a copy of self with new ribs.
-    /// 
+    ///
     /// Mostly useful to specify ribs when the addressing scheme has none.
     pub fn with_ribs(&self, ribs: &'n Vec<Rib>) -> Self {
         PortGraphAddressing {
@@ -122,7 +122,7 @@ impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
 type SIx<'a> = (&'a [PortOffset], usize);
 
 /// Iterator over the spine and ribs for [`PortGraphAddressing`].
-/// 
+///
 /// This is basically a zip iterator over the spine and ribs, but with
 /// some extra logic to handle the case where the spine or ribs are
 /// [`None`].

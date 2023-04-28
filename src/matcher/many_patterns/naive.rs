@@ -6,7 +6,7 @@ use crate::{
 use super::{ManyPatternMatcher, PatternID, PatternMatch};
 
 /// A simple matcher for matching multiple patterns.
-/// 
+///
 /// This matcher uses [`SinglePatternMatcher`]s to match each pattern separately.
 /// Useful as a baseline in benchmarking.
 #[derive(Default)]

@@ -1,5 +1,5 @@
 //! Compute skeletons of port graphs.
-//! 
+//!
 //! This module contains the [`Skeleton`] data structure, which can be used to
 //! compute the spine and ribs of a graph, relative to a root node.
 use std::{
@@ -310,8 +310,7 @@ impl<'g: 'n, 'n> PortGraphAddressing<'g, 'n, (Vec<PortOffset>, usize)> {
             skel.root,
             skel.graph,
             Some(spine),
-            None
-            // Some(&ribs)
+            None, // Some(&ribs)
         )
     }
 }
