@@ -1,18 +1,29 @@
+//! Patterns for graph matching.
+//! 
+//! Patterns are graphs that can be matched against other graphs.
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::utils::{centre, NoCentreError};
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
+/// A pattern graph.
+/// 
+/// Patterns must be connected and have a fixed `root` node,
+/// which by default is chosen to be the centre of the graph, for fast
+/// matching and short relative paths to the root.
 #[derive(Debug, Clone)]
 pub struct Pattern {
+    /// The pattern graph.
     pub(crate) graph: PortGraph,
+    /// The root of the pattern.
     pub(crate) root: NodeIndex,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct Edge(pub(crate) PortIndex, pub(crate) Option<PortIndex>);
+pub(crate) struct Edge(pub(crate) PortIndex, pub(crate) Option<PortIndex>);
 
 impl Pattern {
+    /// Create a new pattern from a graph.
     pub fn from_graph(graph: PortGraph) -> Result<Self, InvalidPattern> {
         let root = centre(&graph).map_err(|err| match err {
             NoCentreError::DisconnectedGraph => InvalidPattern::DisconnectedPattern,
@@ -22,6 +33,7 @@ impl Pattern {
     }
 
     /// Every pattern has a unique canonical ordering of its edges.
+    /// 
     /// Pattern matching can be done by matching these edges one-by-one
     pub(crate) fn canonical_edge_ordering(&self) -> Vec<Edge> {
         self.all_lines().into_iter().flatten().collect()
@@ -50,6 +62,10 @@ impl Pattern {
         all_lines
     }
 
+    /// Get the boundary of this pattern in a graph.
+    /// 
+    /// This is useful to get the location of a pattern in a graph
+    /// given a mapping of its root.
     pub fn get_boundary(&self, root: NodeIndex, graph: &PortGraph) -> PatternBoundaries {
         let mut out_edges = Vec::new();
         let mut in_edges = Vec::new();
@@ -80,6 +96,9 @@ impl Pattern {
     }
 }
 
+/// The boundary of a pattern in a graph.
+/// 
+/// Given as a list of in- and out-edges.
 #[derive(Debug)]
 pub struct PatternBoundaries {
     _in_edges: Vec<PortIndex>,
@@ -126,9 +145,12 @@ fn traverse_node(graph: &PortGraph, port: PortIndex) -> Option<PortIndex> {
     }
 }
 
+/// Error that can occur when creating a pattern from a graph.
 #[derive(Debug, PartialEq, Eq)]
 pub enum InvalidPattern {
+    /// A pattern must always be connected.
     DisconnectedPattern,
+    /// Empty patterns are not allowed.
     EmptyPattern,
 }
 

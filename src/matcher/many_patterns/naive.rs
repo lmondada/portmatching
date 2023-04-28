@@ -5,12 +5,16 @@ use crate::{
 
 use super::{ManyPatternMatcher, PatternID, PatternMatch};
 
+/// A simple matcher for matching multiple patterns.
+/// 
+/// This matcher uses [`SinglePatternMatcher`]s to match each pattern separately.
+/// Useful as a baseline in benchmarking.
 #[derive(Default)]
 pub struct NaiveManyMatcher {
     matchers: Vec<SinglePatternMatcher>,
 }
 
-impl<'graph> Matcher<'graph> for NaiveManyMatcher {
+impl Matcher for NaiveManyMatcher {
     type Match = PatternMatch;
 
     fn find_anchored_matches(
@@ -33,7 +37,7 @@ impl<'graph> Matcher<'graph> for NaiveManyMatcher {
     }
 }
 
-impl<'graph> ManyPatternMatcher<'graph> for NaiveManyMatcher {
+impl ManyPatternMatcher for NaiveManyMatcher {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         self.matchers
             .push(SinglePatternMatcher::from_pattern(pattern));

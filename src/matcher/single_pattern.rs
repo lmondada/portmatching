@@ -12,12 +12,12 @@ pub struct SinglePatternMatcher {
     edges: Vec<Edge>,
 }
 
-impl<'graph> Matcher<'graph> for SinglePatternMatcher {
+impl Matcher for SinglePatternMatcher {
     type Match = BTreeMap<NodeIndex, NodeIndex>;
 
     fn find_anchored_matches(
         &self,
-        graph: &'graph PortGraph,
+        graph: &PortGraph,
         anchor: NodeIndex,
     ) -> Vec<Self::Match> {
         self.find_anchored_match(graph, anchor)

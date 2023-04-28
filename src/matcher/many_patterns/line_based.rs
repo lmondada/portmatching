@@ -1,28 +1,36 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
+use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortOffset};
 
 use crate::{
-    addresses::LinePartition,
+    addressing::{
+        cache::{self, SpineID},
+        AddressCache, Skeleton, SkeletonAddressing, SpineAddress,
+    },
     matcher::Matcher,
     pattern::{Edge, Pattern},
 };
 
 use super::{
-    graph_tries::{
-        root_state, BaseGraphTrie, BoundedAddress, CachedGraphTrie, GraphCache, GraphTrie,
-        NoCachedGraphTrie, StateID,
-    },
     ManyPatternMatcher, PatternID, PatternMatch,
 };
+use crate::graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
 
+/// A graph trie matcher based on skeleton partitioning of graphs.
+/// 
+/// There is some freedom in how a graph trie is built from patterns.
+/// This matcher is based on partitions of the graph patterns
+/// into skeleton paths.
+/// 
+/// This spreads out the occurence of non-deterministic (expensive) states in the trie
+/// in-between deterministic (cheap) ones.
 pub struct LineGraphTrie<T> {
     trie: T,
     match_states: BTreeMap<StateID, Vec<PatternID>>,
     patterns: Vec<Pattern>,
 }
 
-impl<'graph, T: GraphTrie<'graph> + Default> Default for LineGraphTrie<T> {
+impl<T: Default> Default for LineGraphTrie<T> {
     fn default() -> Self {
         Self {
             trie: T::default(),
@@ -32,13 +40,15 @@ impl<'graph, T: GraphTrie<'graph> + Default> Default for LineGraphTrie<T> {
     }
 }
 
-impl<'graph, T: GraphTrie<'graph> + Default> LineGraphTrie<T> {
+impl<T: Default> LineGraphTrie<T> {
+    /// Create a new empty matcher.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl LineGraphTrie<BaseGraphTrie> {
+impl<S: Clone> LineGraphTrie<BaseGraphTrie<S>> {
+    /// A dotstring representation of the trie.
     pub fn dotstring(&self) -> String {
         let mut weights = self.trie.str_weights();
         for n in self.trie.graph.nodes_iter() {
@@ -50,62 +60,32 @@ impl LineGraphTrie<BaseGraphTrie> {
         }
         dot_string_weighted(&self.trie.graph, &weights)
     }
+}
 
-    pub fn to_cached_trie(&self) -> LineGraphTrie<CachedGraphTrie> {
+impl<'a> LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
+    /// Convert the trie to using [`SpineID`]s for caching.
+    pub fn to_cached_trie(
+        &self,
+    ) -> LineGraphTrie<BaseGraphTrie<(SpineID, Vec<PortOffset>, usize)>> {
         LineGraphTrie {
             trie: self.trie.to_cached_trie(),
             match_states: self.match_states.clone(),
             patterns: self.patterns.clone(),
         }
     }
-
-    pub fn to_no_cached_trie(&self) -> LineGraphTrie<NoCachedGraphTrie> {
-        LineGraphTrie {
-            trie: self.trie.to_no_cached_trie(),
-            match_states: self.match_states.clone(),
-            patterns: self.patterns.clone(),
-        }
-    }
 }
 
-impl LineGraphTrie<CachedGraphTrie> {
-    pub fn dotstring(&self) -> String {
-        let mut weights = self.trie.str_weights();
-        for n in self.trie.graph.nodes_iter() {
-            let empty = vec![];
-            let matches = self.match_states.get(&n).unwrap_or(&empty);
-            if !matches.is_empty() {
-                weights[n] += &format!("[{:?}]", matches);
-            }
-        }
-        dot_string_weighted(&self.trie.graph, &weights)
-    }
-}
-
-impl LineGraphTrie<NoCachedGraphTrie> {
-    pub fn dotstring(&self) -> String {
-        let mut weights = self.trie.str_weights();
-        for n in self.trie.graph.nodes_iter() {
-            let empty = vec![];
-            let matches = self.match_states.get(&n).unwrap_or(&empty);
-            if !matches.is_empty() {
-                weights[n] += &format!("[{:?}]", matches);
-            }
-        }
-        dot_string_weighted(&self.trie.graph, &weights)
-    }
-}
-
-impl<'graph, T> Matcher<'graph> for LineGraphTrie<T>
+impl<T> Matcher for LineGraphTrie<T>
 where
-    T: GraphTrie<'graph>,
+    T: GraphTrie,
 {
     type Match = PatternMatch;
 
-    fn find_anchored_matches(&self, graph: &'graph PortGraph, root: NodeIndex) -> Vec<Self::Match> {
+    fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
-        let mut partition = <T::Address as BoundedAddress>::Cache::init(graph, root);
+        let addressing = T::Addressing::init(root, graph);
+        let mut cache = T::Cache::default();
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
             for state in current_states {
@@ -115,7 +95,7 @@ where
                         root,
                     });
                 }
-                for next_state in self.trie.next_states(state, graph, &mut partition) {
+                for next_state in self.trie.next_states(state, &addressing, &mut cache) {
                     new_states.push(next_state);
                 }
             }
@@ -125,14 +105,14 @@ where
     }
 }
 
-impl<'graph> ManyPatternMatcher<'graph> for LineGraphTrie<BaseGraphTrie> {
+impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());
         self.patterns.push(pattern);
         let pattern = &self.patterns[pattern_id.0];
         let graph = &pattern.graph;
-        let partition = LinePartition::new(graph, pattern.root);
+        let skeleton = Skeleton::new(graph, pattern.root);
 
         // Stores the current positions in the graph trie, along with the
         // match that corresponds to that position
@@ -163,8 +143,7 @@ impl<'graph> ManyPatternMatcher<'graph> for LineGraphTrie<BaseGraphTrie> {
                     next_ports.append(&mut self.trie.add_transition(
                         out_port,
                         state,
-                        graph,
-                        &partition,
+                        &skeleton,
                         &mut new_state,
                         &mut new_start_state,
                     ))
