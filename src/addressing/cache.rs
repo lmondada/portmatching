@@ -1,17 +1,15 @@
 //! Caching for addressing schemes.
-//! 
+//!
 //! Vertebrae are typically refered to by their canonical path
 //! from the root node. This is impractical for caching, as the hashing performance
 //! would be poor. Instead, we define a spine ID, a unique vertebra identifier.
-//! 
+//!
 //! SpineIDs are chosen to be as small as possible by reusing the same ID when
 //! to vertebrae are mutually exclusive (i.e. if they are used in different
 //! parts of the trie).
 use portgraph::{NodeIndex, PortOffset};
 
-use super::{
-    Address, NodeOffset,
-};
+use super::{Address, NodeOffset};
 
 /// A unique identifier for a vertebra.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, Default)]
@@ -44,7 +42,7 @@ pub trait AddressCache {
 impl AddressCache for () {}
 
 /// A simple cache for addresses on the spine.
-/// 
+///
 /// Note that this does not cache non-spine addresses.
 #[derive(Default)]
 pub(crate) struct Cache(Vec<CachedOption<NodeOffset>>);
@@ -74,7 +72,7 @@ impl<'a> AddressCache for Cache {
 }
 
 /// An Option type in the cache.
-/// 
+///
 /// Returning [`Option::None`] would be ambiguous, as it could mean that the
 /// address is not in the cache, or that the address is in the cache, but
 /// the value is [`Option::None`].
@@ -87,11 +85,11 @@ pub enum CachedOption<T> {
 
 impl<T> CachedOption<T> {
     /// Get the cached value if it exists.
-    /// 
+    ///
     /// A returned [`None`] should be taken as a definitive no, i.e.
     /// the address is in the cache AND it is [`Option::None`].
     /// This allows for short-circuiting.
-    /// 
+    ///
     /// On the other hand, a value that is not in the cache will be returned
     /// as [`Some(None)`], meaning that the computation should go ahead
     /// and compute the value.

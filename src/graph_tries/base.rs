@@ -72,14 +72,14 @@ impl PermPortIndex {
 }
 
 /// A graph trie implementation using portgraph.
-/// 
+///
 /// The parameter T is the type of the spine. Any type that implements
 /// [`SpineAddress`] can be used as spine in theory, however constructing such
 /// a trie is only supported for very specific types.
-/// 
+///
 /// The construction of such tries is the most complex logic in this
 /// crate.
-/// 
+///
 /// There are deterministic and non-deterministic states, describing how
 /// the state automaton in that state should behave.
 /// Roughly speaking, the role of deterministic and non-deterministic states is
@@ -89,14 +89,14 @@ impl PermPortIndex {
 ///  * a non-deterministic state at read time on the other hand is guaranteed to
 ///    follow any allowed transition, and thus at write time we can just follow
 ///    one of the transitions.
-/// 
+///
 /// The deterministic states are thus the harder states to handle at write time.
 /// The main idea is that transitions are considered from left to right, so when
 /// adding a new transition, all the transitions to its right might get
 /// "shadowed" by it. That means that we must make sure that if an input graph
-/// chooses the new transition over the old one, then all the patterns that would 
+/// chooses the new transition over the old one, then all the patterns that would
 /// have been discovered along the old path will still be discovered.
-/// 
+///
 /// Similarly, transitions to the left of a new transition can shadow the new
 /// transition, so we must make sure that if an input graph chooses one of these
 /// higher priority transition, it still discovers the pattern that is being added.
@@ -229,8 +229,12 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         let next_node = self.next_node(state, &addressing, &mut ());
         let next_port = self.next_port_offset(state, &addressing, &mut ());
         let next_addr = next_node.map(|n| {
-            let addressing =
-                PortGraphAddressing::new(skeleton.root(), skeleton.graph(), self.spine(state), None);
+            let addressing = PortGraphAddressing::new(
+                skeleton.root(),
+                skeleton.graph(),
+                self.spine(state),
+                None,
+            );
             addressing
                 .get_addr(n, &mut ())
                 .map(|((path, offset), ind)| {

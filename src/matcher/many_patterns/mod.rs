@@ -1,8 +1,8 @@
 //! Pattern matchers for many patterns simultaneously.
-//! 
+//!
 //! The [`NaiveManyMatcher`] is a simple matcher that uses [`SinglePatternMatcher`]s
 //! to match each pattern separately.
-//! 
+//!
 //! The [`LineGraphTrie`] is a more sophisticated matcher that uses a graph trie
 //! data structure to match all patterns at once.
 mod line_based;
@@ -12,14 +12,14 @@ pub use line_based::LineGraphTrie;
 #[doc(inline)]
 pub use naive::NaiveManyMatcher;
 
-use std::fmt;
 use portgraph::NodeIndex;
+use std::fmt;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::pattern::Pattern;
 use super::Matcher;
+use crate::pattern::Pattern;
 
 /// A match instance returned by a ManyPatternMatcher instance.
 ///
@@ -32,7 +32,7 @@ pub struct PatternMatch {
     /// The ID of the pattern that matches.
     pub id: PatternID,
     /// The root node of the match.
-    /// 
+    ///
     /// The entire match can be recovered from the root mapping
     /// using [`portmatching::pattern::Pattern::get_boundary`].
     pub root: NodeIndex,
@@ -56,10 +56,10 @@ impl fmt::Display for PatternID {
 }
 
 /// A trait for pattern matchers that can match many patterns at once.
-/// 
+///
 /// This trait extends the [`Matcher`] trait with the ability to add
 /// additional patterns to the matcher.
-/// 
+///
 /// Note that not all matchers meant to match multiple patterns at once
 /// implement this trait, as some matchers are obtained by converting
 /// previously constructed matchers and thus do not support adding patterns

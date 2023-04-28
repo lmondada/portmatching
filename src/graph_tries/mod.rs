@@ -1,12 +1,12 @@
 //! Graph trie data structures.
-//! 
+//!
 //! A graph trie is a data structure that stores a set of pattern graphs in a tree-like
 //! structure (except that it has fallback edges, making it a directed acyclic graph).
-//! 
+//!
 //! Traversing the trie from top to bottom along a path that is given
 //! by the input graph yields all matches of the pattern graphs.
 mod base;
-mod no_cached;
+mod cached;
 #[doc(inline)]
 pub use base::BaseGraphTrie;
 
@@ -17,7 +17,7 @@ use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 use crate::addressing::{Address, AddressCache, AsSpineID, SkeletonAddressing, SpineAddress};
 
 /// A state transition in a graph trie.
-/// 
+///
 /// This corresponds to following an edge of the input graph.
 /// This edge is given by one of the outgoing port at the current node.
 /// Either the port exists and is connected to another port, or the port exist
@@ -26,9 +26,9 @@ use crate::addressing::{Address, AddressCache, AsSpineID, SkeletonAddressing, Sp
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum StateTransition<Address> {
     /// The port exists and is linked to another port.
-    /// 
+    ///
     /// The addresses are the possible addresses that the other node is allowed
-    /// to have, the port offset is the offset of the port at the other node. 
+    /// to have, the port offset is the offset of the port at the other node.
     Node(Vec<Address>, PortOffset),
     /// The port exists but is not linked to anything.
     NoLinkedNode,
@@ -77,7 +77,7 @@ impl<A> StateTransition<A> {
 }
 
 /// A state in a graph trie.
-/// 
+///
 /// Graph tries are stored themselves as port graphs, so a state is just a
 /// node index in a `PortGraph`.
 pub type StateID = NodeIndex;
@@ -86,22 +86,21 @@ pub fn root_state() -> NodeIndex {
 }
 
 /// A graph trie.
-/// 
+///
 /// The trie is stored as a port graph. Each state (node) of the trie has
 /// an [`GraphTrie::address`], which makes it correspond to a vertex in the
 /// input graph. This address is encoded using the state's [`GraphTrie::spine`].
-/// 
+///
 /// To follow an edge transition from the current state, [`GraphTrie::port_offset`]
 /// indicates the outgoing port that should be followed to the next node.
 /// Which [`StateTransition`] that edge corresponds to defines which children
 /// of the trie should be explored next.
-/// 
+///
 /// States can be deterministic or non-deterministic. If it is deterministic,
 /// then children are considered in order, and the first one that matches is
 /// chosen. If it is non-deterministic, then all children for which the transition
 /// conditions are satisfied must be considered.
-pub trait GraphTrie
-{
+pub trait GraphTrie {
     type SpineAddress: SpineAddress
     where
         for<'n> <Self::SpineAddress as SpineAddress>::AsRef<'n>: Copy + AsSpineID;
@@ -112,15 +111,18 @@ pub trait GraphTrie
     /// The underlying graph structure of the trie.
     fn trie(&self) -> &PortGraph;
     /// The address of a trie state.
-    fn address<'n>(&'n self, state: StateID) -> Option<Address<<Self::SpineAddress as SpineAddress>::AsRef<'n>>>;
+    fn address<'n>(
+        &'n self,
+        state: StateID,
+    ) -> Option<Address<<Self::SpineAddress as SpineAddress>::AsRef<'n>>>;
     /// The spine of a trie state.
-    /// 
+    ///
     /// Useful for the address encoding.
     fn spine<'n>(&'n self, state: StateID) -> Option<&'n Vec<Self::SpineAddress>>;
     /// The port offset for the transition from `state`.
     fn port_offset(&self, state: StateID) -> Option<PortOffset>;
     /// The transition condition for the child linked at `port`.
-    /// 
+    ///
     /// `port` must be an outgoing port of the trie.
     fn transition<'g, 'n>(
         &'n self,
