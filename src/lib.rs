@@ -11,12 +11,16 @@
 //!
 //! ```
 //! use portgraph::PortGraph;
-//! use portmatching::{LineGraphTrie, Pattern};
+//! use portmatching::*;
+//! # use portmatching::pattern::InvalidPattern;
 //!
 //! let (mut g1, mut g2) = (PortGraph::new(), PortGraph::new());
-//! let (p1, p2) = (Pattern::from_graph(g1), Pattern::from_graph(g2));
+//! g1.add_node(0, 0);
+//! g2.add_node(1, 1);
+//! let (p1, p2) = (Pattern::from_graph(g1.clone())?, Pattern::from_graph(g2)?);
 //! let trie = LineGraphTrie::from_patterns([p1, p2]);
 //! trie.find_matches(&g1);
+//! # Ok::<(), InvalidPattern>(())
 //! ```
 
 pub mod addressing;
@@ -25,5 +29,5 @@ pub mod matcher;
 pub mod pattern;
 pub mod utils;
 
-pub use matcher::{LineGraphTrie, Matcher, NaiveManyMatcher, PatternID, SinglePatternMatcher};
+pub use matcher::{LineGraphTrie, Matcher, NaiveManyMatcher, PatternID, SinglePatternMatcher, ManyPatternMatcher};
 pub use pattern::Pattern;

@@ -319,7 +319,7 @@ mod tests {
         let n1 = p2.add_node(0, 2);
         link(&mut p2, (n1, 0), (n0, 1));
         link(&mut p2, (n1, 1), (n0, 0));
-        LineGraphTrie::from_patterns([p1, p2].map(|p| Pattern::from_graph(p).unwrap()).into());
+        LineGraphTrie::from_patterns([p1, p2].map(|p| Pattern::from_graph(p).unwrap()));
     }
 
     #[test]

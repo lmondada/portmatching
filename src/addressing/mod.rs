@@ -27,7 +27,7 @@ pub use pg::PortGraphAddressing;
 
 pub(crate) use self::cache::{AddressCache, AsSpineID};
 use self::pg::AsPathOffset;
-pub(crate) use skeleton::Skeleton;
+pub use skeleton::Skeleton;
 
 use crate::utils::port_opposite;
 use ::portgraph::{NodeIndex, PortGraph};

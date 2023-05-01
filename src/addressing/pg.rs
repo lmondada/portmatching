@@ -31,6 +31,8 @@ impl AsPathOffset for (&[PortOffset], usize) {
 ///
 /// ```
 /// use portgraph::{PortGraph, NodeIndex, PortOffset};
+/// use portmatching::addressing::*;
+/// 
 /// let mut g = PortGraph::new();
 /// let n0 = g.add_node(0, 1);
 /// let n1 = g.add_node(1, 2);
@@ -45,8 +47,8 @@ impl AsPathOffset for (&[PortOffset], usize) {
 /// let skel = Skeleton::new(&g, n0);
 /// let addressing = PortGraphAddressing::from_skeleton(&skel);
 /// assert_eq!(
-///     addressing.get_addr(n2),
-///     ((&[PortOffset::new_outgoing(0)], 1), 1)
+///     addressing.get_addr(n2, &mut ()),
+///     Some(((&[PortOffset::new_outgoing(0)] as &[PortOffset], 1), 1))
 /// );
 /// ```
 #[derive(Clone)]

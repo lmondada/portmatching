@@ -31,7 +31,7 @@ struct LinePoint {
 /// This data structure can be used to obtain the spine and ribs of a graph,
 /// relative to a root node.
 #[derive(Debug)]
-pub(crate) struct Skeleton<'g> {
+pub struct Skeleton<'g> {
     node2line: Vec<Vec<LinePoint>>,
     graph: &'g PortGraph,
     root: NodeIndex,
@@ -39,15 +39,18 @@ pub(crate) struct Skeleton<'g> {
 }
 
 impl<'g> Skeleton<'g> {
-    pub(crate) fn graph(&self) -> &PortGraph {
+    /// A reference to the skeleton's graph
+    pub fn graph(&self) -> &PortGraph {
         &self.graph
     }
 
-    pub(crate) fn root(&self) -> NodeIndex {
+    /// The root node of the graph of the skeleton
+    pub fn root(&self) -> NodeIndex {
         self.root
     }
 
-    pub(crate) fn new(graph: &'g PortGraph, root: NodeIndex) -> Self {
+    /// Create a [`Skeleton`] from a graph and a root node.
+    pub fn new(graph: &'g PortGraph, root: NodeIndex) -> Self {
         let mut port_queue = VecDeque::from_iter(graph.all_ports(root));
         let mut node2line = vec![Vec::new(); graph.node_capacity()];
         let mut visited_ports = bitvec![0; graph.port_capacity()];
@@ -303,8 +306,8 @@ fn get_line(graph: &PortGraph, port: PortIndex) -> Line {
 }
 
 impl<'g: 'n, 'n> PortGraphAddressing<'g, 'n, (Vec<PortOffset>, usize)> {
-    #[cfg(test)]
-    pub(crate) fn from_skeleton(skel: &'g Skeleton) -> Self {
+    /// Create a new [`PortGraphAddressing`] from a [`Skeleton`]
+    pub fn from_skeleton(skel: &'g Skeleton) -> Self {
         let spine = &skel.spine;
         // let ribs = skel.get_ribs(spine);
         PortGraphAddressing::new(
