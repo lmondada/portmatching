@@ -1,3 +1,7 @@
+//! Utility functions.
+//!
+//! Much of this should probably be moved upstream to `portgraph`.
+
 pub(crate) mod cover;
 mod depth;
 pub(crate) mod iter;

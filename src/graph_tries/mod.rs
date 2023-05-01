@@ -14,7 +14,9 @@ use std::fmt::{self, Debug, Display};
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
-use crate::addressing::{Address, AddressCache, AsSpineID, SkeletonAddressing, SpineAddress};
+use crate::addressing::{
+    pg::AsPathOffset, Address, AddressCache, AsSpineID, SkeletonAddressing, SpineAddress,
+};
 
 /// A state transition in a graph trie.
 ///
@@ -81,7 +83,7 @@ impl<A> StateTransition<A> {
 /// Graph tries are stored themselves as port graphs, so a state is just a
 /// node index in a `PortGraph`.
 pub type StateID = NodeIndex;
-pub fn root_state() -> NodeIndex {
+pub(crate) fn root_state() -> NodeIndex {
     NodeIndex::new(0)
 }
 
@@ -100,13 +102,20 @@ pub fn root_state() -> NodeIndex {
 /// then children are considered in order, and the first one that matches is
 /// chosen. If it is non-deterministic, then all children for which the transition
 /// conditions are satisfied must be considered.
-pub trait GraphTrie {
-    type SpineAddress: SpineAddress
+pub trait GraphTrie
+where
+    for<'n> <<Self as GraphTrie>::SpineID as SpineAddress>::AsRef<'n>:
+        Copy + AsSpineID + AsPathOffset + PartialEq,
+{
+    /// The addressing scheme used for the spine.
+    type SpineID: SpineAddress;
+    // where
+    //     for<'n> <Self::SpineID as SpineAddress>::AsRef<'n>: Copy + AsSpineID;
+
+    /// The addressing scheme used for the trie.
+    type Addressing<'g, 'n>: SkeletonAddressing<'g, 'n, Self::SpineID> + Clone
     where
-        for<'n> <Self::SpineAddress as SpineAddress>::AsRef<'n>: Copy + AsSpineID;
-    type Addressing<'g, 'n>: SkeletonAddressing<'g, 'n, Self::SpineAddress> + Clone
-    where
-        Self::SpineAddress: 'n;
+        Self::SpineID: 'n;
 
     /// The underlying graph structure of the trie.
     fn trie(&self) -> &PortGraph;
@@ -114,23 +123,23 @@ pub trait GraphTrie {
     fn address<'n>(
         &'n self,
         state: StateID,
-    ) -> Option<Address<<Self::SpineAddress as SpineAddress>::AsRef<'n>>>;
+    ) -> Option<Address<<Self::SpineID as SpineAddress>::AsRef<'n>>>;
     /// The spine of a trie state.
     ///
     /// Useful for the address encoding.
-    fn spine<'n>(&'n self, state: StateID) -> Option<&'n Vec<Self::SpineAddress>>;
+    fn spine<'n>(&'n self, state: StateID) -> Option<&'n Vec<Self::SpineID>>;
     /// The port offset for the transition from `state`.
     fn port_offset(&self, state: StateID) -> Option<PortOffset>;
     /// The transition condition for the child linked at `port`.
     ///
     /// `port` must be an outgoing port of the trie.
-    fn transition<'g, 'n>(
+    fn transition<'g, 'n, 'm: 'n>(
         &'n self,
         port: PortIndex,
-        addressing: &Self::Addressing<'g, 'n>,
+        addressing: &Self::Addressing<'g, 'm>,
     ) -> StateTransition<(
         Self::Addressing<'g, 'n>,
-        Address<<Self::SpineAddress as SpineAddress>::AsRef<'n>>,
+        Address<<Self::SpineID as SpineAddress>::AsRef<'n>>,
     )>;
     /// Whether the current state is not deterministic.
     fn is_non_deterministic(&self, state: StateID) -> bool;
@@ -186,12 +195,12 @@ pub trait GraphTrie {
     }
 
     /// The transitions to follow from `state`
-    fn get_transitions<'g, 'n, C: AddressCache>(
-        &self,
+    fn get_transitions<'g, 'n, 'm: 'n, C: AddressCache>(
+        &'n self,
         state: StateID,
-        addressing: &Self::Addressing<'g, 'n>,
+        addressing: &Self::Addressing<'g, 'm>,
         cache: &mut C,
-    ) -> Vec<StateTransition<Address<<Self::SpineAddress as SpineAddress>::AsRef<'n>>>> {
+    ) -> Vec<StateTransition<Address<<Self::SpineID as SpineAddress>::AsRef<'n>>>> {
         // All transitions in `state` that are allowed for `graph`
         let out_port = self.port(state, addressing, cache);
         let in_port = out_port.and_then(|out_port| addressing.graph().port_link(out_port));
@@ -240,8 +249,9 @@ pub trait GraphTrie {
         }
     }
 
+    /// All allowed state transitions from `state`.
     fn next_states<'g, 'n, C: AddressCache>(
-        &self,
+        &'n self,
         state: StateID,
         addressing: &Self::Addressing<'g, 'n>,
         cache: &mut C,
@@ -261,10 +271,11 @@ pub trait GraphTrie {
             .collect()
     }
 
-    fn follow_transition<'g, 'n>(
-        &self,
+    /// State transition from `state` following `transition`
+    fn follow_transition<'g, 'n: 'm, 'm>(
+        &'m self,
         state: StateID,
-        transition: &StateTransition<Address<<Self::SpineAddress as SpineAddress>::AsRef<'n>>>,
+        transition: &StateTransition<Address<<Self::SpineID as SpineAddress>::AsRef<'m>>>,
         addressing: &Self::Addressing<'g, 'n>,
     ) -> Option<StateID> {
         self.trie()

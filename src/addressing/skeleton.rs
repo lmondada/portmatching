@@ -303,6 +303,7 @@ fn get_line(graph: &PortGraph, port: PortIndex) -> Line {
 }
 
 impl<'g: 'n, 'n> PortGraphAddressing<'g, 'n, (Vec<PortOffset>, usize)> {
+    #[cfg(test)]
     pub(crate) fn from_skeleton(skel: &'g Skeleton) -> Self {
         let spine = &skel.spine;
         // let ribs = skel.get_ribs(spine);

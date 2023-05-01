@@ -1,3 +1,4 @@
+//! Addressing scheme for the `portgraph` crate.
 use std::{iter::Cloned, slice::Iter};
 
 use portgraph::{NodeIndex, PortGraph, PortOffset};
@@ -6,7 +7,9 @@ use crate::utils::{follow_path, iter::AddAsRefIt};
 
 use super::{cache::AsSpineID, NodeOffset, Rib, SkeletonAddressing, SpineAddress};
 
-pub(crate) trait AsPathOffset {
+/// Obtain portgraph paths from addresses.
+pub trait AsPathOffset {
+    /// The path from the root node to the addressed node.
     fn as_path_offset(&self) -> (&[PortOffset], usize);
 }
 
@@ -16,7 +19,7 @@ impl AsPathOffset for (&[PortOffset], usize) {
     }
 }
 
-/// Addressing scheme for [`PortGraph`]s.
+/// Addressing scheme for the `portgraph` crate.
 ///
 /// Vertebrae are given by paths from the root node. Graph, spine and
 /// ribs are stored as references.
@@ -76,10 +79,10 @@ impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
 impl<'g, 'n, S: SpineAddress> PortGraphAddressing<'g, 'n, S> {
     /// Iterate over the spine and ribs.
     pub fn iter(&self) -> SkeletonIt<AddAsRefIt<Iter<'n, S>>, Cloned<Iter<'n, Rib>>> {
-        SkeletonIt::new(
+        SkeletonIt(SkeletonItEnum::new(
             self.spine.map(|spine| AddAsRefIt::new(spine.iter())),
             self.ribs.map(|ribs| ribs.iter().cloned()),
-        )
+        ))
     }
 }
 
@@ -119,21 +122,21 @@ impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
     }
 }
 
-type SIx<'a> = (&'a [PortOffset], usize);
-
 /// Iterator over the spine and ribs for [`PortGraphAddressing`].
 ///
 /// This is basically a zip iterator over the spine and ribs, but with
 /// some extra logic to handle the case where the spine or ribs are
 /// [`None`].
-pub enum SkeletonIt<IS, IR> {
+pub struct SkeletonIt<IS, IR>(SkeletonItEnum<IS, IR>);
+
+enum SkeletonItEnum<IS, IR> {
     SomeSome(IS, IR),
     SomeNone(IS),
     One,
     None,
 }
 
-impl<IS, IR> SkeletonIt<IS, IR> {
+impl<IS, IR> SkeletonItEnum<IS, IR> {
     /// New iterator over the spine and ribs.
     pub fn new(spine: Option<IS>, ribs: Option<IR>) -> Self {
         match (spine, ribs) {
@@ -153,17 +156,17 @@ where
     type Item = (IS::Item, Option<IR::Item>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::SomeSome(spine, ribs) => spine
+        match &mut self.0 {
+            SkeletonItEnum::SomeSome(spine, ribs) => spine
                 .next()
                 .zip(ribs.next())
                 .map(|(spine, ribs)| (spine, Some(ribs))),
-            Self::SomeNone(spine) => spine.next().map(|spine| (spine, None)),
-            Self::One => {
-                *self = Self::None;
+            SkeletonItEnum::SomeNone(spine) => spine.next().map(|spine| (spine, None)),
+            SkeletonItEnum::One => {
+                *self = Self(SkeletonItEnum::None);
                 Some((Default::default(), None))
             }
-            Self::None => None,
+            SkeletonItEnum::None => None,
         }
     }
 }
@@ -171,7 +174,7 @@ where
 impl<'g, 'n, S> SkeletonAddressing<'g, 'n, S> for PortGraphAddressing<'g, 'n, S>
 where
     S: SpineAddress,
-    S::AsRef<'n>: Copy + Default + AsPathOffset + AsSpineID,
+    for<'m> S::AsRef<'m>: Copy + Default + AsPathOffset + AsSpineID,
 {
     type SkeletonIt = SkeletonIt<AddAsRefIt<Iter<'n, S>>, Cloned<Iter<'n, Rib>>>;
 
@@ -183,7 +186,7 @@ where
         self.root
     }
 
-    fn graph(&self) -> &PortGraph {
+    fn graph(&self) -> &'g PortGraph {
         &self.graph
     }
 
@@ -191,7 +194,7 @@ where
         self.iter()
     }
 
-    fn compute_vertebra(&self, spine: S::AsRef<'n>) -> Option<NodeOffset> {
+    fn compute_vertebra<A: AsSpineID + AsPathOffset>(&self, spine: A) -> Option<NodeOffset> {
         let (path, offset) = spine.as_path_offset();
         follow_path(path, self.root, self.graph()).map(|s| (s, offset))
     }
