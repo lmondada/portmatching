@@ -200,7 +200,7 @@ where
         state: StateID,
         addressing: &Self::Addressing<'g, 'm>,
         cache: &mut C,
-    ) -> Vec<StateTransition<Address<<Self::SpineID as SpineAddress>::AsRef<'n>>>> {
+    ) -> Vec<PortIndex> {
         // All transitions in `state` that are allowed for `graph`
         let out_port = self.port(state, addressing, cache);
         let in_port = out_port.and_then(|out_port| addressing.graph().port_link(out_port));
@@ -212,13 +212,13 @@ where
         });
         let next_node =
             in_port.map(|in_port| addressing.graph().port_node(in_port).expect("invalid port"));
-        let mut transitions = self.trie().outputs(state).filter_map(move |out_p| {
+        let mut transitions = self.trie().outputs(state).filter(move |&out_p| {
             match self.transition(out_p, addressing) {
                 StateTransition::Node(addrs, offset) => {
                     if in_offset != Some(offset) {
-                        return None;
+                        return false
                     }
-                    if addrs.iter().all(|(addressing, addr)| {
+                    addrs.iter().all(|(addressing, addr)| {
                         let Some(next_addr) = addressing.get_addr(
                                     next_node.expect("from if condition"),
                                     cache
@@ -226,20 +226,13 @@ where
                                     return false
                                 };
                         &next_addr == addr
-                    }) {
-                        Some(StateTransition::Node(
-                            addrs.into_iter().map(|(_, addr)| addr).collect(),
-                            offset,
-                        ))
-                    } else {
-                        None
-                    }
+                    })
                 }
                 StateTransition::NoLinkedNode => {
                     // In read mode, out_port existing is enough
-                    out_port.is_some().then_some(StateTransition::NoLinkedNode)
+                    out_port.is_some()
                 }
-                StateTransition::FAIL => Some(StateTransition::FAIL),
+                StateTransition::FAIL => true,
             }
         });
         if self.is_non_deterministic(state) {
@@ -261,12 +254,11 @@ where
         } else {
             addressing.clone()
         };
-        // Compute "ideal" transition
         self.get_transitions(state, &addressing, cache)
             .into_iter()
-            .map(|transition| {
-                self.follow_transition(state, &transition, &addressing)
-                    .expect("invalid transition")
+            .filter_map(|out_p| {
+                let in_p = self.trie().port_link(out_p)?;
+                self.trie().port_node(in_p)
             })
             .collect()
     }
