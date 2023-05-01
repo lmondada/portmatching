@@ -1,6 +1,6 @@
 //! Pattern matchers for many patterns simultaneously.
 //!
-//! The [`NaiveManyMatcher`] is a simple matcher that uses [`SinglePatternMatcher`]s
+//! The [`NaiveManyMatcher`] is a simple matcher that uses [`super::SinglePatternMatcher`]s
 //! to match each pattern separately.
 //!
 //! The [`LineGraphTrie`] is a more sophisticated matcher that uses a graph trie
@@ -34,7 +34,7 @@ pub struct PatternMatch {
     /// The root node of the match.
     ///
     /// The entire match can be recovered from the root mapping
-    /// using [`portmatching::pattern::Pattern::get_boundary`].
+    /// using [`crate::Pattern::get_boundary`].
     pub root: NodeIndex,
 }
 
@@ -65,8 +65,13 @@ impl fmt::Display for PatternID {
 /// previously constructed matchers and thus do not support adding patterns
 /// one-by-one.
 pub trait ManyPatternMatcher: Default + Matcher {
+    /// Add a pattern to the matcher.
+    ///
+    /// Patterns are assigned a unique ID, which is returned by this method. All
+    /// patterns must be connected.
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID;
 
+    /// Construct a pattern matcher from patterns.
     fn from_patterns(patterns: Vec<Pattern>) -> Self {
         let mut obj = Self::default();
         for pattern in patterns {

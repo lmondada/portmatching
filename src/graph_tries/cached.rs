@@ -1,30 +1,33 @@
-use std::{
-    collections::HashMap,
-    fmt::{self, Display},
-    iter::Cloned,
-    slice::Iter,
-    vec,
-};
+use std::collections::HashMap;
 
-use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights};
+use portgraph::{PortOffset, Weights};
 
-use crate::{
-    addressing::{
-        cache::{Cache, SpineID},
-        Address, PortGraphAddressing, Rib, SkeletonAddressing,
-    },
-    utils::{follow_path, port_opposite},
-};
+use crate::addressing::{cache::SpineID, pg::AsPathOffset, SpineAddress};
 
-use super::{base::NodeWeight, BaseGraphTrie, GraphTrie, StateID, StateTransition};
+use super::{base::NodeWeight, BaseGraphTrie};
 
 type S = (SpineID, Vec<PortOffset>, usize);
+type SRef<'n> = (SpineID, &'n [PortOffset], usize);
+
+impl SpineAddress for S {
+    type AsRef<'n> = SRef<'n>;
+
+    fn as_ref<'n>(&'n self) -> Self::AsRef<'n> {
+        (self.0, self.1.as_slice(), self.2)
+    }
+}
+
+impl<'n> AsPathOffset for SRef<'n> {
+    fn as_path_offset(&self) -> (&[PortOffset], usize) {
+        (self.1, self.2)
+    }
+}
 
 impl BaseGraphTrie<S> {
-    //! A graph trie enabling caching using [`SpineID`]s.
-    //!
-    //! This trie is constructed from another [`BaseGraphTrie`]. The addresses
-    //! are re-computed and optimised for caching by introducing [`SpineID`]s.
+    /// A graph trie enabling caching using [`SpineID`]s.
+    ///
+    /// This trie is constructed from another [`BaseGraphTrie`]. The addresses
+    /// are re-computed and optimised for caching by introducing [`SpineID`]s.
     pub fn new(base: &BaseGraphTrie<(Vec<PortOffset>, usize)>) -> Self {
         let mut weights = Weights::new();
         let mut existing_spines = HashMap::new();

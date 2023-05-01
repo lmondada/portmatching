@@ -7,7 +7,7 @@
 //! SpineIDs are chosen to be as small as possible by reusing the same ID when
 //! to vertebrae are mutually exclusive (i.e. if they are used in different
 //! parts of the trie).
-use portgraph::{NodeIndex, PortOffset};
+use portgraph::PortOffset;
 
 use super::{Address, NodeOffset};
 
@@ -15,19 +15,29 @@ use super::{Address, NodeOffset};
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, Default)]
 pub struct SpineID(pub(crate) usize);
 
-pub(crate) trait AsSpineID {
-    fn as_spine_id(&self) -> SpineID;
+/// Obtain spine IDs from addresses, for caching.
+pub trait AsSpineID {
+    /// Get the spine ID of the address, if it exists.
+    ///
+    /// Returning None will disable caching
+    fn as_spine_id(&self) -> Option<SpineID>;
 }
 
-impl AsSpineID for (SpineID, &[PortOffset], usize) {
-    fn as_spine_id(&self) -> SpineID {
-        self.0
+impl<'a> AsSpineID for (SpineID, &'a [PortOffset], usize) {
+    fn as_spine_id(&self) -> Option<SpineID> {
+        Some(self.0)
+    }
+}
+
+impl<'a> AsSpineID for (&'a [PortOffset], usize) {
+    fn as_spine_id(&self) -> Option<SpineID> {
+        None
     }
 }
 
 /// Cache address computations
 ///
-/// Provide an implementation of [`AddressCache`] to [`SkeletonAddressing`] to
+/// Provide an implementation of [`AddressCache`] to [`super::SkeletonAddressing`] to
 /// cache expensive computations.
 pub trait AddressCache {
     /// Get the cached node index if it exists.
@@ -36,7 +46,7 @@ pub trait AddressCache {
     }
 
     /// Insert an address to node index map in the cache.
-    fn set_node(&mut self, _addr: &Address<SpineID>, _node: NodeIndex) {}
+    fn set_node(&mut self, _addr: &Address<SpineID>, _node: NodeOffset) {}
 }
 
 impl AddressCache for () {}
@@ -55,18 +65,18 @@ impl<'a> AddressCache for Cache {
         }
         let spine_id = addr.0 .0;
         self.0
-            .get(spine_id.0)
+            .get(spine_id)
             .unwrap_or(&CachedOption::NoCache)
             .clone()
     }
 
-    fn set_node(&mut self, addr: &Address<SpineID>, node: NodeIndex) {
+    fn set_node(&mut self, addr: &Address<SpineID>, node: NodeOffset) {
         if addr.1 == 0 {
             let spine_id = addr.0 .0;
-            if self.0.len() <= spine_id.0 {
-                self.0.resize(spine_id.0 + 1, CachedOption::NoCache);
+            if self.0.len() <= spine_id {
+                self.0.resize(spine_id + 1, CachedOption::NoCache);
             }
-            self.0[spine_id.0] = Some((node, addr.0 .2)).into();
+            self.0[spine_id] = Some(node).into();
         }
     }
 }
@@ -78,8 +88,11 @@ impl<'a> AddressCache for Cache {
 /// the value is [`Option::None`].
 #[derive(Clone, Debug)]
 pub enum CachedOption<T> {
+    /// The value is not in the cache.
     NoCache,
+    /// The value is in the cache, and it is [`Option::None`].
     None,
+    /// The value is in the cache, and it is [`Some(T)`].
     Some(T),
 }
 

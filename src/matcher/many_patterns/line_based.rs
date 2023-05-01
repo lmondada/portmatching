@@ -4,8 +4,9 @@ use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortOffset};
 
 use crate::{
     addressing::{
-        cache::{self, SpineID},
-        AddressCache, Skeleton, SkeletonAddressing, SpineAddress,
+        cache::{Cache, SpineID},
+        pg::AsPathOffset,
+        AsSpineID, Skeleton, SkeletonAddressing, SpineAddress,
     },
     matcher::Matcher,
     pattern::{Edge, Pattern},
@@ -76,6 +77,8 @@ impl<'a> LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
 impl<T> Matcher for LineGraphTrie<T>
 where
     T: GraphTrie,
+    for<'n> <<T as GraphTrie>::SpineID as SpineAddress>::AsRef<'n>:
+        Copy + AsSpineID + AsPathOffset + PartialEq,
 {
     type Match = PatternMatch;
 
@@ -83,7 +86,7 @@ where
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
         let addressing = T::Addressing::init(root, graph);
-        let mut cache = T::Cache::default();
+        let mut cache = Cache::default();
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
             for state in current_states {
@@ -173,10 +176,10 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::{
+        graph_tries::BaseGraphTrie,
         matcher::{
             many_patterns::{
-                graph_tries::BaseGraphTrie, line_based::LineGraphTrie, ManyPatternMatcher,
-                PatternID, PatternMatch,
+                line_based::LineGraphTrie, ManyPatternMatcher, PatternID, PatternMatch,
             },
             Matcher, SinglePatternMatcher,
         },
@@ -482,7 +485,7 @@ mod tests {
                 })
                 .collect_vec();
             // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
-            let matcher = LineGraphTrie::from_patterns(patterns.clone()).to_no_cached_trie();
+            let matcher = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
                 .map(|i| {

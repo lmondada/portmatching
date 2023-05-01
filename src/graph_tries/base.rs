@@ -3,10 +3,7 @@ use std::{
     cmp,
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::{self, Display},
-    iter::{Cloned, Empty},
-    mem,
-    slice::Iter,
-    vec,
+    mem, vec,
 };
 
 use portgraph::{
@@ -15,10 +12,10 @@ use portgraph::{
 
 use crate::{
     addressing::{
-        cache::SpineID, Address, AddressCache, AsPathOffset, AsSpineID, PortGraphAddressing, Rib,
-        Skeleton, SkeletonAddressing, Spine, SpineAddress,
+        cache::SpineID, pg::AsPathOffset, Address, AsSpineID, PortGraphAddressing, Rib, Skeleton,
+        SkeletonAddressing, Spine, SpineAddress,
     },
-    utils::{cover::cover_nodes, iter::AddAsRefIt},
+    utils::cover::cover_nodes,
 };
 
 use super::{GraphTrie, StateID, StateTransition};
@@ -101,10 +98,10 @@ impl PermPortIndex {
 /// transition, so we must make sure that if an input graph chooses one of these
 /// higher priority transition, it still discovers the pattern that is being added.
 #[derive(Clone, Debug)]
-pub struct BaseGraphTrie<T> {
+pub struct BaseGraphTrie<T = (Vec<PortOffset>, usize)> {
     pub(crate) graph: PortGraph,
     pub(crate) weights: Weights<NodeWeight<T>, StateTransition<(Address<usize>, Vec<Rib>)>>,
-    perm_indices: RefCell<BTreeMap<PermPortIndex, PortIndex>>,
+    pub(super) perm_indices: RefCell<BTreeMap<PermPortIndex, PortIndex>>,
 }
 
 impl Default for BaseGraphTrie<(Vec<PortOffset>, usize)> {
@@ -136,7 +133,7 @@ where
     for<'n> S::AsRef<'n>: Copy + Default + PartialEq + AsPathOffset + AsSpineID,
 {
     type Addressing<'g, 'n> = PortGraphAddressing<'g, 'n, S> where S: 'n;
-    type SpineAddress = S;
+    type SpineID = S;
 
     fn trie(&self) -> &PortGraph {
         &self.graph
@@ -150,10 +147,10 @@ where
         self.weights[state].out_port
     }
 
-    fn transition<'g, 'n>(
+    fn transition<'g, 'n, 'm: 'n>(
         &'n self,
         port: PortIndex,
-        addressing: &Self::Addressing<'g, 'n>,
+        addressing: &Self::Addressing<'g, 'm>,
     ) -> StateTransition<(Self::Addressing<'g, 'n>, Address<S::AsRef<'n>>)> {
         let node = self.graph.port_node(port).expect("invalid port");
         let spine = self.spine(node);
@@ -225,7 +222,6 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     ) -> Vec<StateTransition<(Address<usize>, Vec<Rib>)>> {
         let addressing =
             PortGraphAddressing::new(skeleton.root(), skeleton.graph(), self.spine(state), None);
-        let graph = skeleton.graph();
         let next_node = self.next_node(state, &addressing, &mut ());
         let next_port = self.next_port_offset(state, &addressing, &mut ());
         let next_addr = next_node.map(|n| {

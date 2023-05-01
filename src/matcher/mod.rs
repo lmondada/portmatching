@@ -9,7 +9,7 @@ use portgraph::{NodeIndex, PortGraph};
 pub mod many_patterns;
 pub mod single_pattern;
 
-pub use many_patterns::{LineGraphTrie, NaiveManyMatcher};
+pub use many_patterns::{LineGraphTrie, NaiveManyMatcher, PatternID};
 pub use single_pattern::SinglePatternMatcher;
 
 /// A trait for pattern matchers.
@@ -18,6 +18,7 @@ pub use single_pattern::SinglePatternMatcher;
 /// Implement [`Matcher::find_anchored_matches`] that finds matches of all
 /// patterns anchored at a given root node.
 pub trait Matcher {
+    /// A pattern match as returned by [`Matcher::find_anchored_matches`] and [`Matcher::find_matches`].
     type Match;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.

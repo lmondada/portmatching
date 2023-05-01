@@ -1,3 +1,7 @@
+//! A simple matcher for a single pattern.
+//!
+//! This matcher is used as a baseline in benchmarking by repeating
+//! the matching process for each pattern separately.
 use std::collections::BTreeMap;
 
 use bimap::BiBTreeMap;
@@ -7,6 +11,7 @@ use crate::pattern::{Edge, Pattern};
 
 use super::Matcher;
 
+/// A simple matcher for a single pattern.
 pub struct SinglePatternMatcher {
     pattern: Pattern,
     edges: Vec<Edge>,
@@ -23,6 +28,7 @@ impl Matcher for SinglePatternMatcher {
 }
 
 impl SinglePatternMatcher {
+    /// Create a new matcher for a single pattern.
     pub fn from_pattern(pattern: Pattern) -> Self {
         // This is our "matching recipe" -- we precompute it once and store it
         let edges = pattern.canonical_edge_ordering();

@@ -21,6 +21,7 @@ fn undirected_depths(graph: &PortGraph, start: NodeIndex) -> Vec<u32> {
     depths
 }
 
+/// Returns true if the graph is connected.
 pub fn is_connected(graph: &PortGraph) -> bool {
     let Some(root) = graph.nodes_iter().next() else {
         // An empty graph is connected

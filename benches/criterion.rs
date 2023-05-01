@@ -10,18 +10,18 @@ use criterion::Throughput;
 use itertools::Itertools;
 
 use portgraph::PortGraph;
-use portmatching::matcher::many_patterns::graph_tries::BaseGraphTrie;
+use portmatching::graph_tries::BaseGraphTrie;
 use portmatching::matcher::many_patterns::LineGraphTrie;
 use portmatching::matcher::many_patterns::ManyPatternMatcher;
 use portmatching::matcher::many_patterns::NaiveManyMatcher;
 use portmatching::matcher::Matcher;
 use portmatching::pattern::Pattern;
 
-fn bench<'graph, M: Matcher<'graph>, F: FnMut(Vec<Pattern>) -> M>(
+fn bench<M: Matcher, F: FnMut(Vec<Pattern>) -> M>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[Pattern],
-    graph: &'graph PortGraph,
+    graph: &PortGraph,
     mut get_matcher: F,
 ) {
     group.sample_size(10);
@@ -67,9 +67,6 @@ fn perform_benches(c: &mut Criterion) {
         &graph,
         LineGraphTrie::<BaseGraphTrie>::from_patterns,
     );
-    bench("No Cached Graph Trie", &mut group, &patterns, &graph, |p| {
-        LineGraphTrie::<BaseGraphTrie>::from_patterns(p).to_cached_trie()
-    });
     bench("Cached Graph Trie", &mut group, &patterns, &graph, |p| {
         LineGraphTrie::<BaseGraphTrie>::from_patterns(p).to_cached_trie()
     });

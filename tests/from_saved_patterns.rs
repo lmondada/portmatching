@@ -76,9 +76,9 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
     Err(io::Error::new(io::ErrorKind::Other, "no file found"))
 }
 
-fn test<'a, M: Matcher<'a, Match = PatternMatch>>(
+fn test<M: Matcher<Match = PatternMatch>>(
     matcher: M,
-    graph: &'a PortGraph,
+    graph: &PortGraph,
     exp: &[Vec<PatternMatch>],
     n_patterns: usize,
 ) {

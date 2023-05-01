@@ -23,7 +23,7 @@ pub mod addressing;
 pub mod graph_tries;
 pub mod matcher;
 pub mod pattern;
-mod utils;
+pub mod utils;
 
 pub use matcher::{LineGraphTrie, Matcher, NaiveManyMatcher, PatternID, SinglePatternMatcher};
 pub use pattern::Pattern;
