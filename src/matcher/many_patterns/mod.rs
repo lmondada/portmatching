@@ -72,7 +72,7 @@ pub trait ManyPatternMatcher: Default + Matcher {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID;
 
     /// Construct a pattern matcher from patterns.
-    fn from_patterns(patterns: Vec<Pattern>) -> Self {
+    fn from_patterns(patterns: impl IntoIterator<Item = Pattern>) -> Self {
         let mut obj = Self::default();
         for pattern in patterns {
             obj.add_pattern(pattern);
