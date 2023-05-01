@@ -168,28 +168,35 @@ where
         cache: &mut C,
     ) -> Option<NodeIndex> {
         let &(spine_id, ind) = addr;
+        // Let us first check if the value is in the cache
         let addr = spine_id.as_spine_id().map(|spine_id| (spine_id, ind));
         if let Some(cache) = addr.as_ref().map(|addr| cache.get_node(addr)) {
             if matches!(cache, CachedOption::None | CachedOption::Some(_)) {
                 return cache.cached().expect("value in cache").map(|node| node.0);
             }
         }
-        let (root, offset) = spine_id
-            .as_spine_id()
-            .and_then(|spine_id| cache.get_node(&(spine_id, 0)).cached()?)
-            .or_else(|| self.compute_vertebra(spine_id))?;
-        if ind == 0 && addr.is_some() {
-            cache.set_node(addr.as_ref().expect("is some"), (root, offset));
-            return Some(root);
+
+        // Compute the value
+        // 1. Obtain the node of the spine (if possible from the cache)
+        let root_addr = spine_id.as_spine_id().map(|spine| (spine, 0));
+        let mut rootoffset = None;
+        if let Some(cache) = root_addr.as_ref().map(|addr| cache.get_node(addr)) {
+            if matches!(cache, CachedOption::None | CachedOption::Some(_)) {
+                rootoffset = cache.cached().expect("value in cache");
+            }
         }
+        let (root, offset) = rootoffset.or_else(|| self.compute_vertebra(spine_id))?;
+        if let Some(root_addr) = root_addr {
+            cache.set_node(&root_addr, (root, offset));
+        }
+        // 2. Find the starting in/out port
         let mut port = match ind {
             ind if ind > 0 => self.graph().output(root, offset),
             ind if ind < 0 => self.graph().input(root, offset),
-            _ => self
-                .graph()
-                .output(root, offset)
-                .or(self.graph().input(root, offset)),
+            // must be 0, so the root is the node we are looking for
+            _ => return Some(root),
         };
+        // 3. Follow edges along `ind` links
         let mut node = self.graph().port_node(port?).expect("invalid port");
         let mut offset = self.graph().port_offset(port?).expect("invalid port");
         for _ in 0..ind.abs() {
@@ -224,6 +231,7 @@ where
             let [bef, aft] = rib.unwrap_or([isize::MIN, isize::MAX]);
             let mut ind = 0;
             let mut port = self.graph().output(root, offset);
+            let first_port = port;
             if root == node && ind >= bef && ind <= aft {
                 return Some((spine, ind));
             }
@@ -237,8 +245,13 @@ where
                     }
                     port = port_opposite(port_some, self.graph());
                 }
+                if port == first_port {
+                    // detected a cycle
+                    break;
+                }
             }
             port = self.graph().input(root, offset);
+            let first_port = port;
             ind = 0;
             while port.is_some() && ind > bef {
                 port = self.graph().port_link(port.unwrap());
@@ -249,6 +262,10 @@ where
                         return Some((spine, ind));
                     }
                     port = port_opposite(port_some, self.graph());
+                }
+                if port == first_port {
+                    // detected a cycle
+                    break;
                 }
             }
         }
