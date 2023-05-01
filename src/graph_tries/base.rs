@@ -509,7 +509,28 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                             .expect("Could not find path in spine");
                         (line_ind, ind)
                     })
+                    .or_else(|| {
+                        let NodeWeight {
+                            out_port,
+                            address,
+                            spine,
+                            ..
+                        } = &mut self.weights[state];
+                        let spine = spine.as_mut()?;
+                        let (line_ind, _) =
+                            skeleton.extend_spine(spine, address.as_ref()?, (*out_port)?);
+                        let ind = if out_port.unwrap().direction() == Direction::Outgoing {
+                            1
+                        } else {
+                            -1
+                        };
+                        Some((line_ind, ind))
+                    })
             };
+            let spine = self.spine(state).unwrap_or_else(|| {
+                fallback_spine = Some(skeleton.get_spine());
+                fallback_spine.as_ref().unwrap()
+            });
             let addr = self
                 .weight(state)
                 .address
