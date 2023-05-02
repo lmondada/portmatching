@@ -216,7 +216,7 @@ where
             match self.transition(out_p, addressing) {
                 StateTransition::Node(addrs, offset) => {
                     if in_offset != Some(offset) {
-                        return false
+                        return false;
                     }
                     addrs.iter().all(|(addressing, addr)| {
                         let Some(next_addr) = addressing.get_addr(

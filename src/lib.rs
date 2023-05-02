@@ -29,5 +29,7 @@ pub mod matcher;
 pub mod pattern;
 pub mod utils;
 
-pub use matcher::{LineGraphTrie, Matcher, NaiveManyMatcher, PatternID, SinglePatternMatcher, ManyPatternMatcher};
+pub use matcher::{
+    LineGraphTrie, ManyPatternMatcher, Matcher, NaiveManyMatcher, PatternID, SinglePatternMatcher,
+};
 pub use pattern::Pattern;

@@ -32,7 +32,7 @@ impl AsPathOffset for (&[PortOffset], usize) {
 /// ```
 /// use portgraph::{PortGraph, NodeIndex, PortOffset};
 /// use portmatching::addressing::*;
-/// 
+///
 /// let mut g = PortGraph::new();
 /// let n0 = g.add_node(0, 1);
 /// let n1 = g.add_node(1, 2);
