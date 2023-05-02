@@ -222,7 +222,10 @@ impl<'g> Skeleton<'g> {
             })
             .for_each(|(line, node)| {
                 let spine_dst = line.ind - spine_ind;
-                let port = if spine_dst < 0 {
+                // We check the sign of `ind` (instead of `spine_ind`) because
+                // the sign is always the same, except for the ambiguous
+                // `spine_ind == 0` case
+                let port = if ind < 0 {
                     self.graph.input(node, line.offset)
                 } else {
                     self.graph.output(node, line.offset)

@@ -144,7 +144,6 @@ fn from_saved_patterns() {
 
         let matcher = LineGraphTrie::from_patterns(patterns.clone());
         let matcher2 = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
-        let matcher3 = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
         // {
         //     let mut path = path.clone();
         //     path.push("trie.gv");
@@ -157,6 +156,5 @@ fn from_saved_patterns() {
         // }
         test(matcher, &graph, &exp, patterns.len());
         test(matcher2, &graph, &exp, patterns.len());
-        test(matcher3, &graph, &exp, patterns.len());
     }
 }
