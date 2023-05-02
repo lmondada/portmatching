@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    cmp,
+    cmp::{self, Ordering},
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::{self, Display},
     mem, vec,
@@ -202,6 +202,22 @@ impl<T: Clone> BaseGraphTrie<T> {
     pub(crate) fn _dotstring(&self) -> String {
         dot_string_weighted(&self.graph, &self.str_weights())
     }
+
+    /// Try to convert into a non-deterministic state.
+    ///
+    /// If the state is already non-deterministic, this is a no-op. If it is
+    /// deterministic and has more than one transition, then the conversion
+    /// fails.
+    ///
+    /// Returns whether the state is non-deterministic after the conversion.
+    #[allow(clippy::wrong_self_convention)]
+    fn into_non_deterministic(&mut self, state: NodeIndex) -> bool {
+        let det_flag = &mut self.weights[state].non_deterministic;
+        if self.graph.num_outputs(state) <= 1 {
+            *det_flag = true;
+        }
+        *det_flag
+    }
 }
 
 impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
@@ -214,7 +230,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         &self.weights[state]
     }
 
-    pub(crate) fn get_transitions_write(
+    pub(crate) fn gen_transitions(
         &mut self,
         state: StateID,
         skeleton: &Skeleton,
@@ -417,111 +433,112 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             })
     }
 
-    fn get_or_insert(
-        &mut self,
-        state: StateID,
-        transition: &StateTransition<(Address<usize>, Vec<Rib>)>,
-        new_state: &mut Option<StateID>,
-    ) -> PermPortIndex {
-        if matches!(transition, StateTransition::Node(_, _)) {
-            panic!("can only insert FAIL or NoLinkedNode")
-        };
-        let out_port = self
-            .graph
-            .outputs(state)
-            .find(|&p| &self.weights[p] == transition)
-            .unwrap_or_else(|| {
-                self.set_num_ports(
-                    state,
-                    self.graph.num_inputs(state),
-                    self.graph.num_outputs(state) + 1,
-                );
-                let mut offset = self.graph.outputs(state).len() - 1;
-                // shift transitions until out_port is in the right place
-                loop {
-                    if offset == 0 {
-                        break;
-                    }
-                    let prev_port = self
-                        .graph
-                        .output(state, offset - 1)
-                        .expect("0 <= offset < len");
-                    if self.weights[prev_port].transition_type() > transition.transition_type() {
-                        let new = self.graph.output(state, offset).expect("0 <= offset < len");
-                        self.move_out_port(prev_port, new);
-                    } else {
-                        break;
-                    }
-                    offset -= 1;
-                }
-                let out_port = self.graph.output(state, offset).expect("0 <= offset < len");
-                self.weights[out_port] = transition.clone();
-                out_port
-            });
-        let in_port = self.graph.port_link(out_port).unwrap_or_else(|| {
-            let offset = self
-                .graph
-                .port_offset(out_port)
-                .expect("invalid port")
-                .index();
-            let next_state = self
-                .graph
-                .output(state, offset + 1)
-                .and_then(|p| self.graph.port_link(p))
-                .map(|p| self.graph.port_node(p).expect("invalid port"))
-                .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.add_state(true)));
-            self.add_edge(out_port, next_state)
-                .expect("out_port is linked?")
-        });
+    /// Follow FAIL transition, creating a new state if necessary.
+    fn follow_fail(&mut self, state: StateID, new_state: &mut Option<StateID>) -> PermPortIndex {
+        let last_port = self.graph.outputs(state).last();
+        let in_port =
+            if last_port.is_none() || self.weights[last_port.unwrap()] != StateTransition::FAIL {
+                self.append_transition(state, new_state, StateTransition::FAIL)
+            } else {
+                #[allow(clippy::unnecessary_unwrap)]
+                self.graph
+                    .port_link(last_port.unwrap())
+                    .expect("Disconnected transition")
+            };
         self.create_perm_port(in_port)
     }
 
-    fn get_or_create_start_states(
+    /// Follow NoLinkedNode transition, creating a new state if necessary.
+    ///
+    /// This requires shifting FAIL transition if it exists
+    fn follow_no_linked_node(
         &mut self,
-        out_port: PortIndex,
         state: StateID,
+        new_state: &mut Option<StateID>,
+    ) -> PermPortIndex {
+        let in_port = if let Some(last_port) = self.graph.outputs(state).last() {
+            match self.weights[last_port] {
+                StateTransition::Node(_, _) => {
+                    self.append_transition(state, new_state, StateTransition::NoLinkedNode)
+                }
+                StateTransition::NoLinkedNode => self
+                    .graph
+                    .port_link(last_port)
+                    .expect("Found disconnected transition"),
+                StateTransition::FAIL => {
+                    self.set_num_ports(
+                        state,
+                        self.graph.num_inputs(state),
+                        self.graph.num_outputs(state) + 1,
+                    );
+                    // Move FAIL to make space for NoLinkedNode
+                    let fail_offset = self.graph.num_outputs(state) - 1;
+                    let dangling_offset = fail_offset - 1;
+                    let fail = self
+                        .graph
+                        .output(state, fail_offset)
+                        .expect("offset < num_outputs");
+                    let dangling = self
+                        .graph
+                        .output(state, dangling_offset)
+                        .expect("offset < num_outputs");
+                    self.move_out_port(dangling, fail);
+                    // Add NoLinkedNode weight
+                    self.weights[dangling] = StateTransition::NoLinkedNode;
+                    // Link falls back to FAIL transition
+                    let next_p = self.graph.port_link(fail).expect("Disconnected transition");
+                    let next = self.graph.port_node(next_p).expect("invalid port");
+                    self.add_edge(dangling, next)
+                        .expect("freed by move_out_port")
+                }
+            }
+        } else {
+            self.append_transition(state, new_state, StateTransition::NoLinkedNode)
+        };
+        self.create_perm_port(in_port)
+    }
+
+    /// Append transition at the end of `state`
+    ///
+    /// Careful! The order of transitions is very important and appending at the
+    /// end without checking the ordering is incorrect
+    fn append_transition(
+        &mut self,
+        state: StateID,
+        new_state: &mut Option<StateID>,
+        transition: EdgeWeight,
+    ) -> PortIndex {
+        self.set_num_ports(
+            state,
+            self.graph.num_inputs(state),
+            self.graph.num_outputs(state) + 1,
+        );
+        let last_port = self.graph.outputs(state).last().expect("just created");
+        self.weights[last_port] = transition;
+        let next = new_state.get_or_insert_with(|| self.add_state(false));
+        self.add_edge(last_port, *next).expect("just created")
+    }
+
+    fn valid_start_states(
+        &mut self,
+        graph_edge: PortIndex,
+        trie_state: StateID,
         skeleton: &Skeleton,
+        deterministic: bool,
         new_start_state: &mut Option<StateID>,
     ) -> Vec<StateID> {
-        let graph = skeleton.graph();
         let mut start_states = Vec::new();
-        let start_node = graph.port_node(out_port).expect("invalid port");
-        let start_offset = graph.port_offset(out_port).expect("invalid port");
-        let mut curr_states: VecDeque<_> = [state].into();
+        let mut curr_states: VecDeque<_> = [trie_state].into();
         while let Some(state) = curr_states.pop_front() {
-            let offset = self.weight(state).out_port.unwrap_or(start_offset);
-            let mut fallback_spine = None;
-            let spine = self.spine(state).unwrap_or_else(|| {
-                fallback_spine = Some(skeleton.get_spine());
-                fallback_spine.as_ref().unwrap()
-            });
-            let graph_addr = {
-                let addressing =
-                    PortGraphAddressing::new(skeleton.root(), skeleton.graph(), Some(spine), None);
-                addressing
-                    .get_addr(start_node, &mut ())
-                    .map(|((path, offset), ind)| {
-                        let line_ind = spine
-                            .iter()
-                            .position(|&(ref a, b)| a == path && b == offset)
-                            .expect("Could not find path in spine");
-                        (line_ind, ind)
-                    })
-            };
-            let spine = self.spine(state).unwrap_or_else(|| {
-                fallback_spine = Some(skeleton.get_spine());
-                fallback_spine.as_ref().unwrap()
-            });
-            let addr = self
-                .weight(state)
-                .address
-                .unwrap_or_else(|| graph_addr.expect("Could not get address of current node"));
-            if offset == start_offset && Some(&addr) == graph_addr.as_ref() {
-                self.weights[state].spine = Some(spine.to_vec());
-                self.weights[state].out_port = Some(offset);
-                self.weights[state].address = Some(addr);
+            if !deterministic {
+                // Try to convert to non-deterministic state
+                self.into_non_deterministic(state);
+            }
+            // Try to convert to start state
+            if self.into_start_state(state, graph_edge, skeleton) {
                 start_states.push(state);
             } else {
+                // Not a start state, so follow all possible edges and start over
                 if !self.weight(state).non_deterministic {
                     curr_states.extend(
                         self.graph
@@ -532,44 +549,103 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                             .map(|p| self.port_state(p).expect("invalid port")),
                     );
                 }
-                let in_port = self.get_or_insert(state, &StateTransition::FAIL, new_start_state);
+                let in_port = self.follow_fail(state, new_start_state);
                 curr_states.push_back(self.port_state(in_port).expect("invalid port"));
             }
         }
         start_states
     }
 
-    /// Add transition while preserving the trie invariants
+    /// Add graph edge to the trie.
     ///
-    /// We need to add edge leaving from out_port
+    /// The new trie states created can be either deterministic or not, as
+    /// controlled by the `non_deterministic` parameter. Non-deterministic
+    /// states have worse matching performance, but too many deterministic nodes
+    /// can lead to a large trie.
     ///
-    /// `new_state` and `new_start_state` are two optional states that are
-    /// free to be used when adding the transition -- these can be used to
-    /// avoids creating unnecessary states.
-    ///
-    /// Steps:
-    /// 1. Find state(s) in the future of `state` that ask about out_port
-    /// 2. Find which transition to insert
-    /// 3. Space out existing transitions to leave space for new ones
-    /// 4. Add transitions, return perm ports
-    pub(crate) fn add_transition(
+    /// Returns the trie states after the edge has been added.
+    pub fn add_graph_edge<F: FnMut(StateID, StateID)>(
         &mut self,
-        out_port: PortIndex,
-        state: StateID,
+        edge: PortIndex,
+        trie_states: impl IntoIterator<Item = StateID>,
+        deterministic: bool,
         skeleton: &Skeleton,
-        new_state: &mut Option<StateID>,
-        new_start_state: &mut Option<StateID>,
-    ) -> Vec<PermPortIndex> {
-        let start_states =
-            self.get_or_create_start_states(out_port, state, skeleton, new_start_state);
+        clone_state: F,
+    ) -> Vec<StateID> {
+        // 1. Find trie states that can be used as start states, i.e. states
+        // whose address matches the source node of the edge
+        let mut new_start_state = None;
+        let start_states = trie_states
+            .into_iter()
+            .flat_map(|state| {
+                self.valid_start_states(edge, state, skeleton, deterministic, &mut new_start_state)
+                    .into_iter()
+            })
+            .collect::<Vec<_>>();
+
+        // 2. For each start state, add the edge to the trie
+        let mut new_state = None;
         let mut in_ports = Vec::new();
         for state in start_states {
-            let transitions = self.get_transitions_write(state, skeleton);
-            let mut transitions_iter = transitions.iter().peekable();
-            match transitions_iter.peek() {
-                Some(StateTransition::FAIL) => panic!("invalid start state"),
-                Some(StateTransition::NoLinkedNode) => {
-                    debug_assert_eq!(transitions.len(), 1);
+            let transitions = self.gen_transitions(state, skeleton);
+            in_ports.extend(
+                self.insert_transitions(state, transitions, &mut new_state)
+                    .into_iter(),
+            )
+        }
+        self.create_owned_states(clone_state)
+    }
+
+    /// Add graph edge to the trie using deterministic strategy.
+    pub fn add_graph_edge_det<F: FnMut(StateID, StateID)>(
+        &mut self,
+        edge: PortIndex,
+        trie_states: impl IntoIterator<Item = StateID>,
+        skeleton: &Skeleton,
+        clone_state: F,
+    ) -> Vec<StateID> {
+        self.add_graph_edge(edge, trie_states, true, skeleton, clone_state)
+    }
+
+    /// Add graph edge to the trie using non-deterministic strategy.
+    pub fn add_graph_edge_nondet<F: FnMut(StateID, StateID)>(
+        &mut self,
+        edge: PortIndex,
+        trie_states: impl IntoIterator<Item = StateID>,
+        skeleton: &Skeleton,
+        clone_state: F,
+    ) -> Vec<StateID> {
+        self.add_graph_edge(edge, trie_states, false, skeleton, clone_state)
+    }
+
+    /// Insert transitions respecting the StateTransition ordering.
+    ///
+    /// Transitions at every state are ordered by the PartialOrd on
+    /// StateTransition. A transition is strictly greater when it is more
+    /// general: a transition condition that is satisfied will also satisfy
+    /// any strictly greater transition.
+    ///
+    /// Note that within [`StateTransition::Node`], not all transitions are
+    /// comparable and so the ordering is not unique. It is given by the order
+    /// in which transitions were inserted and will always be preserved by future
+    /// calls to [`Self::insert_transitions`].
+    ///
+    /// It is important that `transitions` is ordered in the same order as
+    /// the ports.
+    fn insert_transitions(
+        &mut self,
+        state: NodeIndex,
+        transitions: impl IntoIterator<Item = StateTransition<(Address<usize>, Vec<Rib>)>>,
+        new_state: &mut Option<NodeIndex>,
+    ) -> Vec<PermPortIndex> {
+        let mut in_ports = Vec::new();
+        // The transitions, along with the index where they should be inserted
+        let mut new_transitions = Vec::new();
+        let mut offset = 0;
+        'transition: for transition in transitions {
+            match transition {
+                StateTransition::FAIL => panic!("invalid start state"),
+                StateTransition::NoLinkedNode => {
                     if !self.weight(state).non_deterministic {
                         in_ports.extend(
                             self.graph
@@ -584,126 +660,138 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                                 .map(|in_p| self.create_perm_port(in_p)),
                         );
                     }
-                    in_ports.push(self.get_or_insert(
-                        state,
-                        &StateTransition::NoLinkedNode,
-                        new_state,
-                    ));
+                    in_ports.push(self.follow_no_linked_node(state, new_state));
+                    // We can return early because there can only be one transition
+                    return in_ports;
                 }
-                Some(StateTransition::Node(_, _)) => {
-                    // Scan the transitions to figure out where and how much we need to shift
-                    // it's important that get_transitions returns the transitions in the
-                    // port ordering
-
-                    // A vector of indices where new transitions should be inserted, along with
-                    // the transition to be inserted
-                    let mut new_transitions = Vec::new();
-                    for port in self.graph.outputs(state) {
-                        let curr_transition = &self.weights[port];
-                        let port_offset =
-                            self.graph.port_offset(port).expect("invalid port").index();
-                        if transitions_iter.peek().is_none() {
-                            break;
-                        }
-                        // Insert transitions until the type of transitions match
-                        while let Some(transition) = transitions_iter.peek() {
-                            if transition.transition_type() < curr_transition.transition_type() {
-                                // insert trans_id here
-                                new_transitions
-                                    .push((port_offset, transitions_iter.next().unwrap().clone()));
-                            } else {
-                                break;
-                            }
-                        }
-                        // Use existing transition if it's identical
-                        if Some(curr_transition) == transitions_iter.peek().copied() {
-                            if let Some(in_port) = self.graph.port_link(port) {
-                                in_ports.push(self.create_perm_port(in_port));
-                            }
-                            transitions_iter.next();
-                        }
-                        // Finally, insert new transition if it is strictly stronger
-                        // than the current one
-                        while let Some(transition) = transitions_iter.peek() {
-                            let (
-                                StateTransition::Node(curr_addrs, curr_port),
-                                StateTransition::Node(addrs, port),
-                            ) = (curr_transition, transition) else {
-                                break
-                            };
-                            if curr_port != port {
-                                break;
-                            }
-                            if curr_addrs.iter().all(|(c_addr, c_ribs)| {
-                                addrs
-                                    .iter()
-                                    .any(|(addr, ribs)| addr == c_addr && ribs_within(c_ribs, ribs))
-                            }) {
-                                new_transitions
-                                    .push((port_offset, transitions_iter.next().unwrap().clone()));
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    // Insert remaining transitions at the end
-                    let n_ports = self.graph.num_outputs(state);
-                    new_transitions.extend(transitions_iter.map(|t| (n_ports, t.clone())));
-                    // sort transitions
-                    new_transitions.sort_by_key(|&(p, _)| p);
-
-                    // Now shift ports to make space for new ones
-                    self.set_num_ports(
-                        state,
-                        self.graph.num_inputs(state),
-                        self.graph.num_outputs(state) + new_transitions.len(),
-                    );
-
-                    let mut new_offset = self.graph.num_outputs(state);
-                    for offset in (0..=n_ports).rev() {
-                        // move existing transition
-                        let fallback = if offset < n_ports {
-                            new_offset -= 1;
-                            let old = self
-                                .graph
-                                .port_index(state, PortOffset::new_outgoing(offset))
-                                .expect("invalid offset");
-                            let new = self
-                                .graph
-                                .port_index(state, PortOffset::new_outgoing(new_offset))
-                                .expect("invalid offset");
-                            self.move_out_port(old, new);
-                            self.graph
-                                .port_link(new)
-                                .map(|p| self.graph.port_node(p).expect("invalid port"))
-                        } else {
-                            None
-                        };
-                        // Insert new transitions
-                        while matches!(new_transitions.last(), Some(&(o, _)) if offset == o) {
-                            let (_, transition) = new_transitions.pop().expect("just checked");
-                            new_offset -= 1;
-                            let new = self
-                                .graph
-                                .port_index(state, PortOffset::new_outgoing(new_offset))
-                                .expect("invalid offset");
-                            self.weights[new] = transition;
-                            let next_state = fallback.unwrap_or_else(|| {
-                                *new_state.get_or_insert_with(|| self.add_state(false))
-                            });
-                            let in_port = self.add_edge(new, next_state).expect("new port index");
-                            in_ports.push(self.create_perm_port(in_port));
-                        }
-                        if offset == new_offset {
-                            // There are no more empty slots. We are done
-                            break;
-                        }
-                    }
+                StateTransition::Node(_, _) => {}
+            }
+            // Advance to the first transition that is strictly more general
+            // If such a transition never comes then add it at the end
+            let (curr_port, curr_transition) = loop {
+                let Some(curr_port) = self.graph.output(state, offset) else {
+                    // Add transition at the end
+                    new_transitions.push((offset, transition));
+                    continue 'transition
+                };
+                let curr_transition = &self.weights[curr_port];
+                if curr_transition.partial_cmp(&transition) != Some(Ordering::Greater) {
+                    offset += 1;
+                } else {
+                    break (curr_port, curr_transition);
                 }
-                None => {}
+            };
+            if curr_transition == &transition {
+                // Use existing transition if it's identical
+                let in_port = self
+                    .graph
+                    .port_link(curr_port)
+                    .expect("Disconnected transition");
+                in_ports.push(self.create_perm_port(in_port));
+            } else {
+                // Otherwise insert new transition here
+                new_transitions.push((offset, transition));
+            }
+        }
+
+        // Create new ports for the new transitions
+        let n_ports = self.graph.num_outputs(state);
+        self.set_num_ports(
+            state,
+            self.graph.num_inputs(state),
+            n_ports + new_transitions.len(),
+        );
+
+        // Now shift ports to make space for new ones
+
+        let mut new_offset = self.graph.num_outputs(state);
+        for offset in (0..=n_ports).rev() {
+            // move existing transition
+            let fallback = if offset < n_ports {
+                new_offset -= 1;
+                let old = self
+                    .graph
+                    .port_index(state, PortOffset::new_outgoing(offset))
+                    .expect("invalid offset");
+                let new = self
+                    .graph
+                    .port_index(state, PortOffset::new_outgoing(new_offset))
+                    .expect("invalid offset");
+                self.move_out_port(old, new);
+                self.graph
+                    .port_link(new)
+                    .map(|p| self.graph.port_node(p).expect("invalid port"))
+            } else {
+                None
+            };
+            // Insert new transitions
+            while matches!(new_transitions.last(), Some(&(o, _)) if offset == o) {
+                let (_, transition) = new_transitions.pop().expect("just checked");
+                new_offset -= 1;
+                let new = self
+                    .graph
+                    .port_index(state, PortOffset::new_outgoing(new_offset))
+                    .expect("invalid offset");
+                self.weights[new] = transition;
+                let next_state = fallback
+                    .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.add_state(false)));
+                let in_port = self.add_edge(new, next_state).expect("new port index");
+                in_ports.push(self.create_perm_port(in_port));
+            }
+            if offset == new_offset {
+                // There are no more empty slots. We are done
+                break;
             }
         }
         in_ports
+    }
+
+    /// Try to convert into a start state for `graph_edge`
+    #[allow(clippy::wrong_self_convention)]
+    fn into_start_state(
+        &mut self,
+        trie_state: StateID,
+        graph_edge: PortIndex,
+        skeleton: &Skeleton,
+    ) -> bool {
+        let graph = skeleton.graph();
+        let start_node = graph.port_node(graph_edge).expect("invalid port");
+        let start_offset = graph.port_offset(graph_edge).expect("invalid port");
+
+        let trie_offset = self.weight(trie_state).out_port.unwrap_or(start_offset);
+        let mut fallback_spine = None;
+        let spine = self.spine(trie_state).unwrap_or_else(|| {
+            fallback_spine = Some(skeleton.get_spine());
+            fallback_spine.as_ref().unwrap()
+        });
+        let graph_addr = {
+            let addressing = PortGraphAddressing::new(skeleton.root(), graph, Some(spine), None);
+            addressing
+                .get_addr(start_node, &mut ())
+                .map(|((path, offset), ind)| {
+                    let line_ind = spine
+                        .iter()
+                        .position(|&(ref a, b)| a == path && b == offset)
+                        .expect("Could not find path in spine");
+                    (line_ind, ind)
+                })
+        };
+        let spine = self.spine(trie_state).unwrap_or_else(|| {
+            fallback_spine = Some(skeleton.get_spine());
+            fallback_spine.as_ref().unwrap()
+        });
+        let trie_addr = self
+            .weight(trie_state)
+            .address
+            .unwrap_or_else(|| graph_addr.expect("Could not get address of current node"));
+        if trie_offset == start_offset && Some(&trie_addr) == graph_addr.as_ref() {
+            self.weights[trie_state].spine = Some(spine.to_vec());
+            self.weights[trie_state].out_port = Some(trie_offset);
+            self.weights[trie_state].address = Some(trie_addr);
+            true
+        } else {
+            false
+        }
     }
 
     fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
@@ -762,12 +850,6 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     pub(crate) fn to_cached_trie(&self) -> BaseGraphTrie<(SpineID, Vec<PortOffset>, usize)> {
         BaseGraphTrie::<(SpineID, Vec<PortOffset>, usize)>::new(self)
     }
-}
-
-fn ribs_within(a: &[[isize; 2]], b: &[[isize; 2]]) -> bool {
-    a.iter()
-        .zip(b.iter())
-        .all(|(a, b)| a[0] >= b[0] && a[1] <= b[1])
 }
 
 fn update_ribs(ribs: &mut [[isize; 2]], (line, ind): (usize, isize)) {
@@ -851,7 +933,7 @@ fn rekey<K: Clone, V: Clone + Default>(
 mod tests {
     use portgraph::{NodeIndex, PortGraph, PortOffset};
 
-    use crate::addressing::{PortGraphAddressing, Skeleton, SkeletonAddressing};
+    use crate::addressing::Skeleton;
 
     use super::BaseGraphTrie;
 
@@ -881,21 +963,10 @@ mod tests {
         link(&mut graph, (0, 1), (1, 1));
 
         let skel = Skeleton::new(&graph, root);
-        let addressing = PortGraphAddressing::from_skeleton(&skel);
-        let addr = addressing
-            .get_addr(root, &mut ())
-            .map(|((path, offset), ind)| {
-                let line_ind = skel
-                    .get_spine()
-                    .iter()
-                    .position(|&(ref a, b)| a == path && b == offset)
-                    .expect("Could not find path in spine");
-                (line_ind, ind)
-            });
-        trie.weights[state].address = addr;
+        trie.weights[state].address = Some((0, 0));
         trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
 
-        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
+        trie.add_graph_edge_det(out_port, [state], &skel, |_, _| {});
 
         // graph 2
         let mut graph = PortGraph::new();
@@ -905,10 +976,10 @@ mod tests {
         link(&mut graph, (0, 1), (1, 1));
         let skel = Skeleton::new(&graph, root);
 
-        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
+        trie.add_graph_edge_det(out_port, [state], &skel, |_, _| {});
 
         assert_eq!(trie.graph.num_outputs(state), 3);
-        assert_eq!(trie.graph.node_count(), 4);
+        assert_eq!(trie.graph.node_count(), 5);
 
         // graph 3
         let mut graph = PortGraph::new();
@@ -918,10 +989,10 @@ mod tests {
         link(&mut graph, (0, 0), (1, 1));
 
         let skel = Skeleton::new(&graph, root);
-        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
+        trie.add_graph_edge_det(out_port, [state], &skel, |_, _| {});
 
         assert_eq!(trie.graph.num_outputs(state), 4);
-        assert_eq!(trie.graph.node_count(), 6);
+        assert_eq!(trie.graph.node_count(), 7);
 
         // graph 4
         let mut graph = PortGraph::new();
@@ -929,9 +1000,9 @@ mod tests {
         let out_port = graph.port_index(root, PortOffset::new_outgoing(0)).unwrap();
         let skel = Skeleton::new(&graph, root);
 
-        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
+        trie.add_graph_edge_det(out_port, [state], &skel, |_, _| {});
 
-        assert_eq!(trie.graph.node_count(), 7);
+        assert_eq!(trie.graph.node_count(), 8);
     }
 
     #[test]
@@ -950,7 +1021,7 @@ mod tests {
         trie.weights[state].address = (0, 0).into();
         trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
 
-        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
+        trie.add_graph_edge_nondet(out_port, [state], &skel, |_, _| {});
 
         // graph 2
         let mut graph = PortGraph::new();
@@ -959,7 +1030,7 @@ mod tests {
         let out_port = graph.port_index(root, PortOffset::new_outgoing(1)).unwrap();
         link(&mut graph, (0, 1), (1, 1));
         let skel = Skeleton::new(&graph, root);
-        trie.add_transition(out_port, state, &skel, &mut None, &mut None);
+        trie.add_graph_edge_nondet(out_port, [state], &skel, |_, _| {});
 
         assert_eq!(trie.graph.num_outputs(state), 2);
         assert_eq!(trie.graph.node_count(), 4);
