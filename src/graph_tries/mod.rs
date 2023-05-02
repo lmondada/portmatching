@@ -65,17 +65,6 @@ impl<A> StateTransition<A> {
             StateTransition::FAIL => 2,
         }
     }
-
-    pub(crate) fn map<B, F: FnMut(A) -> B>(self, f: F) -> StateTransition<B> {
-        match self {
-            StateTransition::Node(addrs, port) => {
-                let addrs = addrs.into_iter().map(f).collect();
-                StateTransition::Node(addrs, port)
-            }
-            StateTransition::NoLinkedNode => StateTransition::NoLinkedNode,
-            StateTransition::FAIL => StateTransition::FAIL,
-        }
-    }
 }
 
 /// A state in a graph trie.
@@ -121,14 +110,18 @@ where
 
     /// The underlying graph structure of the trie.
     fn trie(&self) -> &PortGraph;
+
     /// The address of a trie state.
     fn address(&self, state: StateID) -> Option<GraphAddress<'_, Self>>;
+
     /// The spine of a trie state.
     ///
     /// Useful for the address encoding.
     fn spine(&self, state: StateID) -> Option<&Vec<Self::SpineID>>;
+
     /// The port offset for the transition from `state`.
     fn port_offset(&self, state: StateID) -> Option<PortOffset>;
+
     /// The transition condition for the child linked at `port`.
     ///
     /// `port` must be an outgoing port of the trie.
@@ -137,6 +130,7 @@ where
         port: PortIndex,
         addressing: &Self::Addressing<'g, 'm>,
     ) -> StateTransition<(Self::Addressing<'g, 'n>, GraphAddress<'n, Self>)>;
+
     /// Whether the current state is not deterministic.
     fn is_non_deterministic(&self, state: StateID) -> bool;
 
@@ -257,22 +251,5 @@ where
                 self.trie().port_node(in_p)
             })
             .collect()
-    }
-
-    /// State transition from `state` following `transition`
-    fn follow_transition<'g, 'n: 'm, 'm>(
-        &'m self,
-        state: StateID,
-        transition: &StateTransition<GraphAddress<'m, Self>>,
-        addressing: &Self::Addressing<'g, 'n>,
-    ) -> Option<StateID> {
-        self.trie()
-            .outputs(state)
-            .find(|&p| &self.transition(p, addressing).map(|(_, a)| a) == transition)
-            .and_then(|p| {
-                let in_p = self.trie().port_link(p)?;
-                let n = self.trie().port_node(in_p).expect("invalid port");
-                Some(n)
-            })
     }
 }
