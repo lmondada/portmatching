@@ -212,18 +212,17 @@ impl<'g> Skeleton<'g> {
         self.node2line
             .iter()
             .enumerate()
-            .map(|(n, lines)| {
+            .flat_map(|(n, lines)| {
                 let node = NodeIndex::new(n);
                 lines.iter().map(move |line| (line, node))
             })
-            .flatten()
             .filter(|(line, _)| {
                 let spine_dst = line.ind - spine_ind;
                 line.line_ind == l_ind && ind * spine_dst >= 0 && spine_dst.abs() < ind.abs()
             })
             .for_each(|(line, node)| {
                 let spine_dst = line.ind - spine_ind;
-                let port = if ind < 0 {
+                let port = if spine_dst < 0 {
                     self.graph.input(node, line.offset)
                 } else {
                     self.graph.output(node, line.offset)
