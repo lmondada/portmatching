@@ -122,35 +122,40 @@ impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)
         // Decompose a pattern into "lines", which are paths in the pattern
         let all_lines = pattern.all_lines();
 
-        for line in all_lines {
-            // A callback when a state is cloned in the trie
-            // necessary to keep track of the match states
-            let mut clone_state = |old_state: StateID, new_state: StateID| {
-                self.match_states.insert(
-                    new_state,
-                    self.match_states
-                        .get(&old_state)
-                        .cloned()
-                        .unwrap_or_default(),
-                );
-            };
+        // A callback when a state is cloned in the trie
+        // necessary to keep track of the match states
+        let mut clone_state = |old_state: StateID, new_state: StateID| {
+            self.match_states.insert(
+                new_state,
+                self.match_states
+                    .get(&old_state)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+        };
 
+        for line in all_lines {
             // Traverse the line
+            let mut first_edge = true;
             for Edge(out_port, _) in line {
-                let mut next_ports = Vec::new();
-                let mut new_state = None;
-                let mut new_start_state = None;
-                for state in current_states {
-                    next_ports.append(&mut self.trie.add_transition(
+                if first_edge {
+                    // The edge is added non-deterministically
+                    current_states = self.trie.add_graph_edge_nondet(
                         out_port,
-                        state,
+                        current_states,
                         &skeleton,
-                        &mut new_state,
-                        &mut new_start_state,
-                    ))
+                        &mut clone_state,
+                    );
+                } else {
+                    // All other edges are deterministic
+                    current_states = self.trie.add_graph_edge_det(
+                        out_port,
+                        current_states,
+                        &skeleton,
+                        &mut clone_state,
+                    );
                 }
-                // Turn states into owned states
-                current_states = self.trie.create_owned_states(&mut clone_state);
+                first_edge = false;
             }
         }
 

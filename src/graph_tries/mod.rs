@@ -10,12 +10,15 @@ mod cached;
 #[doc(inline)]
 pub use base::BaseGraphTrie;
 
-use std::fmt::{self, Debug, Display};
+use std::{
+    cmp::Ordering,
+    fmt::{self, Debug, Display},
+};
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
 use crate::addressing::{
-    pg::AsPathOffset, Address, AddressCache, AsSpineID, SkeletonAddressing, SpineAddress,
+    pg::AsPathOffset, Address, AddressCache, AsSpineID, Rib, SkeletonAddressing, SpineAddress,
 };
 
 /// A state transition in a graph trie.
@@ -65,6 +68,51 @@ impl<A> StateTransition<A> {
             StateTransition::FAIL => 2,
         }
     }
+}
+
+// The partial order on StateTransition is such that
+// FAIL > NoLinkedNode > Node. Furthermore, within Nodes a transition is greater
+// than another one if it is strictly more general, i.e.
+//             node1 < node2  =>  any node1 matches also satisfies node2
+impl<A: PartialEq> PartialOrd for StateTransition<(A, Vec<Rib>)> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self == other {
+            return Some(Ordering::Equal);
+        }
+        if self.transition_type() != other.transition_type() {
+            return self.transition_type().partial_cmp(&other.transition_type());
+        }
+        let StateTransition::Node(addrs, port) = self else {
+            return None
+        };
+        let StateTransition::Node(other_addrs, other_port) = other else {
+            return None
+        };
+        if port != other_port {
+            return None;
+        }
+        if addrs.iter().all(|(addr, ribs)| {
+            other_addrs
+                .iter()
+                .any(|(other_addr, other_ribs)| addr == other_addr && ribs_within(ribs, other_ribs))
+        }) {
+            Some(Ordering::Greater)
+        } else if other_addrs.iter().all(|(other_addr, other_ribs)| {
+            addrs
+                .iter()
+                .any(|(addr, ribs)| addr == other_addr && ribs_within(other_ribs, ribs))
+        }) {
+            Some(Ordering::Less)
+        } else {
+            None
+        }
+    }
+}
+
+fn ribs_within(a: &[[isize; 2]], b: &[[isize; 2]]) -> bool {
+    a.iter()
+        .zip(b.iter())
+        .all(|(a, b)| a[0] >= b[0] && a[1] <= b[1])
 }
 
 /// A state in a graph trie.
