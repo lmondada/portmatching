@@ -456,44 +456,57 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         state: StateID,
         new_state: &mut Option<StateID>,
     ) -> PermPortIndex {
-        let in_port = if let Some(last_port) = self.graph.outputs(state).last() {
-            match self.weights[last_port] {
-                StateTransition::Node(_, _) => {
-                    self.append_transition(state, new_state, StateTransition::NoLinkedNode)
-                }
-                StateTransition::NoLinkedNode => self
-                    .graph
-                    .port_link(last_port)
-                    .expect("Found disconnected transition"),
-                StateTransition::FAIL => {
-                    self.set_num_ports(
-                        state,
-                        self.graph.num_inputs(state),
-                        self.graph.num_outputs(state) + 1,
-                    );
-                    // Move FAIL to make space for NoLinkedNode
-                    let fail_offset = self.graph.num_outputs(state) - 1;
-                    let dangling_offset = fail_offset - 1;
-                    let fail = self
-                        .graph
-                        .output(state, fail_offset)
-                        .expect("offset < num_outputs");
-                    let dangling = self
-                        .graph
-                        .output(state, dangling_offset)
-                        .expect("offset < num_outputs");
-                    self.move_out_port(dangling, fail);
-                    // Add NoLinkedNode weight
-                    self.weights[dangling] = StateTransition::NoLinkedNode;
-                    // Link falls back to FAIL transition
-                    let next_p = self.graph.port_link(fail).expect("Disconnected transition");
-                    let next = self.graph.port_node(next_p).expect("invalid port");
-                    self.add_edge(dangling, next)
-                        .expect("freed by move_out_port")
-                }
+        let num_outputs = self.graph.num_outputs(state);
+        let last_port = num_outputs
+            .checked_sub(1)
+            .map(|o| self.graph.output(state, o).expect("valid offset"));
+        let prev_port = num_outputs
+            .checked_sub(2)
+            .map(|o| self.graph.output(state, o).expect("valid offset"));
+        let last_weight = last_port.map(|p| &self.weights[p]);
+        let prev_weight = prev_port.map(|p| &self.weights[p]);
+        let in_port = match (last_weight, prev_weight) {
+            (Some(StateTransition::NoLinkedNode), _) => {
+                // Follow existing NoLinkedNode transition
+                let out_port = last_port.expect("last_weight is Some");
+                self.graph.port_link(out_port).expect("Disconnected transition")
+            },
+            (_, Some(StateTransition::NoLinkedNode)) =>  {
+                // Follow existing NoLinkedNode transition
+                let out_port = prev_port.expect("prev_weight is Some");
+                self.graph.port_link(out_port).expect("Disconnected transition")
             }
-        } else {
-            self.append_transition(state, new_state, StateTransition::NoLinkedNode)
+            (Some(StateTransition::Node(_, _)), _) | (None, _) => {
+                // Add a NoLinkedNode transition at the end
+                self.append_transition(state, new_state, StateTransition::NoLinkedNode)
+            }
+            (Some(StateTransition::FAIL), _) => {
+                // The trickiest case: add port, then move FAIL to the end
+                self.set_num_ports(
+                    state,
+                    self.graph.num_inputs(state),
+                    self.graph.num_outputs(state) + 1,
+                );
+                // Move FAIL to make space for NoLinkedNode
+                let fail_offset = self.graph.num_outputs(state) - 1;
+                let dangling_offset = fail_offset - 1;
+                let fail = self
+                    .graph
+                    .output(state, fail_offset)
+                    .expect("offset < num_outputs");
+                let dangling = self
+                    .graph
+                    .output(state, dangling_offset)
+                    .expect("offset < num_outputs");
+                self.move_out_port(dangling, fail);
+                // Add NoLinkedNode weight
+                self.weights[dangling] = StateTransition::NoLinkedNode;
+                // Link falls back to FAIL transition
+                let next_p = self.graph.port_link(fail).expect("Disconnected transition");
+                let next = self.graph.port_node(next_p).expect("invalid port");
+                self.add_edge(dangling, next)
+                    .expect("freed by move_out_port")
+            }
         };
         self.create_perm_port(in_port)
     }
@@ -675,7 +688,10 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     continue 'transition
                 };
                 let curr_transition = &self.weights[curr_port];
-                if curr_transition.partial_cmp(&transition) != Some(Ordering::Greater) {
+                if !matches!(
+                    curr_transition.partial_cmp(&transition), 
+                    Some(Ordering::Greater) | Some(Ordering::Equal)
+                 ) {
                     offset += 1;
                 } else {
                     break (curr_port, curr_transition);
