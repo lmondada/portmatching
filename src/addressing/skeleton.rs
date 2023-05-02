@@ -15,6 +15,7 @@ use crate::utils::{follow_path, port_opposite, pre_order::shortest_path};
 use super::{Address, PortGraphAddressing, Rib};
 
 type Spine = super::Spine<(Vec<PortOffset>, usize)>;
+type SpineRef<'a> = &'a [(Vec<PortOffset>, usize)];
 
 use bitvec::prelude::*;
 
@@ -41,7 +42,7 @@ pub struct Skeleton<'g> {
 impl<'g> Skeleton<'g> {
     /// A reference to the skeleton's graph
     pub fn graph(&self) -> &PortGraph {
-        &self.graph
+        self.graph
     }
 
     /// The root node of the graph of the skeleton
@@ -143,7 +144,7 @@ impl<'g> Skeleton<'g> {
     ///
     /// The spine can be any set of nodes of the graph, even if it does not form
     /// a complete spine of the entire graph
-    pub(crate) fn get_ribs(&self, spine: &Spine) -> Vec<Rib> {
+    pub(crate) fn get_ribs(&self, spine: SpineRef<'_>) -> Vec<Rib> {
         // Compute intervals
         // All indices that we must represent must be in the interval
         let spine_len = cmp::max(spine.len(), 1);
@@ -161,7 +162,7 @@ impl<'g> Skeleton<'g> {
     }
 
     /// All the addresses of `node`, relative to the spine
-    fn get_all_addresses(&self, node: NodeIndex, spine: &Spine) -> Vec<Address<usize>> {
+    fn get_all_addresses(&self, node: NodeIndex, spine: SpineRef<'_>) -> Vec<Address<usize>> {
         if node == self.root {
             return vec![(0, 0)];
         }
@@ -244,7 +245,7 @@ impl<'g> Skeleton<'g> {
     }
 
     /// Return the spine as a list of nodes of [`self.graph`]
-    fn instantiate_spine(&self, spine: &Spine) -> Vec<Option<&LinePoint>> {
+    fn instantiate_spine(&self, spine: SpineRef<'_>) -> Vec<Option<&LinePoint>> {
         spine
             .iter()
             .map(|(path, out_port)| {
@@ -342,10 +343,10 @@ mod tests {
 
             // Every port appears exactly once
             let mut port_cnt = BTreeMap::new();
-            for (n, v) in addressing.iter().enumerate().map(|(n, p)| {
+            for (n, v) in addressing.iter().enumerate().flat_map(|(n, p)| {
                 let n = NodeIndex::new(n);
                 p.iter().map(move |l| (n, l))
-            }).flatten() {
+            }) {
                 if let Some(in_port) = g.input(n, v.offset) {
                     *port_cnt.entry(in_port).or_insert(0) += 1;
                 }

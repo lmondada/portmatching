@@ -61,7 +61,7 @@ impl<S: Clone> LineGraphTrie<BaseGraphTrie<S>> {
     }
 }
 
-impl<'a> LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
+impl LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
     /// Convert the trie to using [`SpineID`]s for caching.
     pub fn to_cached_trie(
         &self,

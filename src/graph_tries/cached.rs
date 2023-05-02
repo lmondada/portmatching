@@ -12,7 +12,7 @@ type SRef<'n> = (SpineID, &'n [PortOffset], usize);
 impl SpineAddress for S {
     type AsRef<'n> = SRef<'n>;
 
-    fn as_ref<'n>(&'n self) -> Self::AsRef<'n> {
+    fn as_ref(&self) -> Self::AsRef<'_> {
         (self.0, self.1.as_slice(), self.2)
     }
 }
@@ -50,7 +50,7 @@ impl BaseGraphTrie<S> {
                 }
                 weights[node].spine = Some(new_spine);
             }
-            weights[node].address = base.weights[node].address.clone();
+            weights[node].address = base.weights[node].address;
             weights[node].non_deterministic = base.weights[node].non_deterministic;
             for port in base.graph.outputs(node) {
                 weights[port] = base.weights[port].clone();

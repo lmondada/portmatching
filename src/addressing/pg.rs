@@ -55,8 +55,8 @@ impl AsPathOffset for (&[PortOffset], usize) {
 pub struct PortGraphAddressing<'g, 'n, S> {
     root: NodeIndex,
     graph: &'g PortGraph,
-    spine: Option<&'n Vec<S>>,
-    ribs: Option<&'n Vec<Rib>>,
+    spine: Option<&'n [S]>,
+    ribs: Option<&'n [Rib]>,
 }
 
 impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
@@ -66,8 +66,8 @@ impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
     pub fn new(
         root: NodeIndex,
         graph: &'g PortGraph,
-        spine: Option<&'n Vec<S>>,
-        ribs: Option<&'n Vec<Rib>>,
+        spine: Option<&'n [S]>,
+        ribs: Option<&'n [Rib]>,
     ) -> Self {
         Self {
             root,
@@ -92,7 +92,7 @@ impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
     /// Return a copy of self with a new spine.
     ///
     /// Also resets the ribs, as they are defined relative to the spine.
-    pub fn with_spine(&self, spine: &'n Vec<S>) -> Self {
+    pub fn with_spine(&self, spine: &'n [S]) -> Self {
         PortGraphAddressing {
             root: self.root,
             graph: self.graph,
@@ -104,7 +104,7 @@ impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
     /// Return a copy of self with new ribs.
     ///
     /// Mostly useful to specify ribs when the addressing scheme has none.
-    pub fn with_ribs(&self, ribs: &'n Vec<Rib>) -> Self {
+    pub fn with_ribs(&self, ribs: &'n [Rib]) -> Self {
         PortGraphAddressing {
             root: self.root,
             graph: self.graph,
@@ -120,7 +120,7 @@ impl<'g, 'n, S> PortGraphAddressing<'g, 'n, S> {
 
     /// The port graph of the addressing scheme.
     pub fn graph(&self) -> &PortGraph {
-        &self.graph
+        self.graph
     }
 }
 
@@ -149,7 +149,7 @@ impl<IS, IR> SkeletonItEnum<IS, IR> {
     }
 }
 
-impl<'s, IS, IR> Iterator for SkeletonIt<IS, IR>
+impl<IS, IR> Iterator for SkeletonIt<IS, IR>
 where
     IS: Iterator + Clone,
     IR: Iterator + Clone,
@@ -189,7 +189,7 @@ where
     }
 
     fn graph(&self) -> &'g PortGraph {
-        &self.graph
+        self.graph
     }
 
     fn skeleton_iter(&self) -> Self::SkeletonIt {
@@ -201,11 +201,11 @@ where
         follow_path(path, self.root, self.graph()).map(|s| (s, offset))
     }
 
-    fn with_spine(&self, spine: &'n Vec<S>) -> Self {
+    fn with_spine(&self, spine: &'n [S]) -> Self {
         self.with_spine(spine)
     }
 
-    fn with_ribs(&self, ribs: &'n Vec<Rib>) -> Self {
+    fn with_ribs(&self, ribs: &'n [Rib]) -> Self {
         PortGraphAddressing {
             spine: self.spine,
             graph: self.graph,
