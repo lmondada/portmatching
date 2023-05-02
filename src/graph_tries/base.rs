@@ -255,10 +255,9 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                         address.as_ref().expect("next_node exists"),
                         out_port.expect("next_node exists"),
                     );
-                    let ind = if out_port.unwrap().direction() == Direction::Outgoing {
-                        1
-                    } else {
-                        -1
+                    let ind = match out_port.unwrap().direction() {
+                        Direction::Incoming => -1,
+                        Direction::Outgoing => 1,
                     };
                     (line_ind, ind)
                 })
