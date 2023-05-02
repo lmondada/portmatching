@@ -58,6 +58,8 @@ impl<'n, T: SpineAddress> NodeWeight<T> {
     }
 }
 
+type EdgeWeight = StateTransition<(Address<usize>, Vec<Rib>)>;
+
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct PermPortIndex(usize);
 
@@ -100,7 +102,7 @@ impl PermPortIndex {
 #[derive(Clone, Debug)]
 pub struct BaseGraphTrie<T = (Vec<PortOffset>, usize)> {
     pub(crate) graph: PortGraph,
-    pub(crate) weights: Weights<NodeWeight<T>, StateTransition<(Address<usize>, Vec<Rib>)>>,
+    pub(crate) weights: Weights<NodeWeight<T>, EdgeWeight>,
     pub(super) perm_indices: RefCell<BTreeMap<PermPortIndex, PortIndex>>,
 }
 
@@ -122,7 +124,7 @@ impl Default for BaseGraphTrie<(Vec<PortOffset>, usize)> {
 impl SpineAddress for (Vec<PortOffset>, usize) {
     type AsRef<'n> = (&'n [PortOffset], usize);
 
-    fn as_ref<'n>(&'n self) -> Self::AsRef<'n> {
+    fn as_ref(&self) -> Self::AsRef<'_> {
         (self.0.as_slice(), self.1)
     }
 }
@@ -139,7 +141,7 @@ where
         &self.graph
     }
 
-    fn address<'n>(&'n self, state: StateID) -> Option<Address<S::AsRef<'n>>> {
+    fn address(&self, state: StateID) -> Option<Address<S::AsRef<'_>>> {
         self.weights[state].address()
     }
 
@@ -163,10 +165,7 @@ where
                         let &(spine_ind, ind) = addr;
                         let vert = &spine.expect("address with no spine")[spine_ind];
                         let addr = (vert.as_ref(), ind);
-                        (
-                            addressing.with_spine(&spine.unwrap()).with_ribs(&ribs),
-                            addr,
-                        )
+                        (addressing.with_spine(spine.unwrap()).with_ribs(ribs), addr)
                     })
                     .collect(),
                 *port,
@@ -180,7 +179,7 @@ where
         self.weights[state].non_deterministic
     }
 
-    fn spine<'n>(&'n self, state: StateID) -> Option<&'n Vec<S>> {
+    fn spine(&self, state: StateID) -> Option<&Vec<S>> {
         self.weights[state].spine.as_ref()
     }
 }
@@ -211,7 +210,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         Self::default()
     }
 
-    pub(crate) fn weight<'a>(&'a self, state: StateID) -> &'a NodeWeight<(Vec<PortOffset>, usize)> {
+    pub(crate) fn weight(&self, state: StateID) -> &NodeWeight<(Vec<PortOffset>, usize)> {
         &self.weights[state]
     }
 
@@ -267,7 +266,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         let spine = self.spine(state);
         let next_ribs = spine.and_then(|spine| {
             let mut ribs = skeleton.get_ribs(spine);
-            update_ribs(&mut ribs, next_addr.as_ref()?.clone());
+            update_ribs(&mut ribs, *next_addr.as_ref()?);
             Some(ribs)
         });
         let mut transitions = Vec::new();
@@ -282,7 +281,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     {
                         let merged_addrs = merge_addrs(
                             addrs.as_slice(),
-                            &[(new_addr.clone(), next_ribs.clone().unwrap())],
+                            &[(*new_addr, next_ribs.clone().unwrap())],
                         )?;
                         if !is_satisfied(next_node?, &merged_addrs, &addressing, spine?) {
                             return None;
@@ -422,7 +421,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     fn get_or_insert(
         &mut self,
         state: StateID,
-        transition: &StateTransition<((usize, isize), Vec<[isize; 2]>)>,
+        transition: &StateTransition<(Address<usize>, Vec<Rib>)>,
         new_state: &mut Option<StateID>,
     ) -> PermPortIndex {
         if matches!(transition, StateTransition::Node(_, _)) {
@@ -519,7 +518,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                 .address
                 .unwrap_or_else(|| graph_addr.expect("Could not get address of current node"));
             if offset == start_offset && Some(&addr) == graph_addr.as_ref() {
-                self.weights[state].spine = Some(spine.clone());
+                self.weights[state].spine = Some(spine.to_vec());
                 self.weights[state].out_port = Some(offset);
                 self.weights[state].address = Some(addr);
                 start_states.push(state);
@@ -566,7 +565,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             self.get_or_create_start_states(out_port, state, skeleton, new_start_state);
         let mut in_ports = Vec::new();
         for state in start_states {
-            let transitions = self.get_transitions_write(state, &skeleton);
+            let transitions = self.get_transitions_write(state, skeleton);
             let mut transitions_iter = transitions.iter().peekable();
             match transitions_iter.peek() {
                 Some(StateTransition::FAIL) => panic!("invalid start state"),
@@ -757,8 +756,8 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         self.perm_indices.borrow_mut().remove(&port)
     }
 
-    fn spine(&self, state: StateID) -> Option<&Vec<(Vec<PortOffset>, usize)>> {
-        self.weight(state).spine.as_ref()
+    fn spine(&self, state: StateID) -> Option<&[(Vec<PortOffset>, usize)]> {
+        self.weight(state).spine.as_deref()
     }
 
     pub(crate) fn to_cached_trie(&self) -> BaseGraphTrie<(SpineID, Vec<PortOffset>, usize)> {
@@ -778,11 +777,11 @@ fn update_ribs(ribs: &mut [[isize; 2]], (line, ind): (usize, isize)) {
     *max = cmp::max(*max, ind);
 }
 
-fn is_satisfied<'g, 'n>(
+fn is_satisfied(
     node: NodeIndex,
     addrs: &[(Address<usize>, Vec<Rib>)],
-    addressing: &'n PortGraphAddressing<'g, 'n, (Vec<PortOffset>, usize)>,
-    spine: &'n Spine<(Vec<PortOffset>, usize)>,
+    addressing: &PortGraphAddressing<'_, '_, (Vec<PortOffset>, usize)>,
+    spine: &[(Vec<PortOffset>, usize)],
 ) -> bool {
     addrs.iter().all(|&((line_ind, ind), _)| {
         let spine = spine[line_ind].as_ref();
@@ -795,7 +794,7 @@ fn is_satisfied<'g, 'n>(
     })
 }
 
-fn merge_addrs<'a>(
+fn merge_addrs(
     addrs1: &[(Address<usize>, Vec<Rib>)],
     addrs2: &[(Address<usize>, Vec<Rib>)],
 ) -> Option<Vec<(Address<usize>, Vec<Rib>)>> {
@@ -825,7 +824,7 @@ fn merge_addrs<'a>(
             }
         }
         if !already_inserted {
-            addrs.push((a.clone(), rib_a.clone()));
+            addrs.push((*a, rib_a.clone()));
         }
     }
     Some(addrs)

@@ -51,7 +51,7 @@ pub trait SpineAddress {
         Self: 'n;
 
     /// Get the address as a reference.
-    fn as_ref<'n>(&'n self) -> Self::AsRef<'n>;
+    fn as_ref(&self) -> Self::AsRef<'_>;
 }
 
 /// Spine: a list of vertebrae and their offsets
@@ -154,12 +154,12 @@ where
     /// Return a copy of self with new ribs.
     ///
     /// Mostly useful to specify ribs when the addressing scheme has none.
-    fn with_ribs(&self, ribs: &'n Vec<Rib>) -> Self;
+    fn with_ribs(&self, ribs: &'n [Rib]) -> Self;
 
     /// Return a copy of self with a new spine.
     ///
     /// Also resets the ribs, as they are defined relative to the spine.
-    fn with_spine(&self, spine: &'n Vec<T>) -> Self;
+    fn with_spine(&self, spine: &'n [T]) -> Self;
 
     /// Get the node index corresponding to an address.
     fn get_node<A: AsSpineID + AsPathOffset + Copy, C: AddressCache>(

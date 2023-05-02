@@ -57,7 +57,7 @@ impl AddressCache for () {}
 #[derive(Default)]
 pub(crate) struct Cache(Vec<CachedOption<NodeOffset>>);
 
-impl<'a> AddressCache for Cache {
+impl AddressCache for Cache {
     fn get_node(&self, addr: &Address<SpineID>) -> CachedOption<NodeOffset> {
         if addr.1 != 0 {
             // We do not cache non-spine addresses atm
