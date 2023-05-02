@@ -5,10 +5,11 @@
 //!
 //! The [`LineGraphTrie`] is a more sophisticated matcher that uses a graph trie
 //! data structure to match all patterns at once.
-mod line_based;
+mod balanced;
+mod det;
 mod naive;
 #[doc(inline)]
-pub use line_based::LineGraphTrie;
+pub use balanced::BalancedTrieMatcher;
 #[doc(inline)]
 pub use naive::NaiveManyMatcher;
 

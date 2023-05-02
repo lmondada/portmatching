@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 use portgraph::PortGraph;
 use portmatching::{
     matcher::{
-        many_patterns::{LineGraphTrie, ManyPatternMatcher},
+        many_patterns::{BalancedTrieMatcher, ManyPatternMatcher},
         Matcher,
     },
     pattern::Pattern,
@@ -21,7 +21,7 @@ fn main() {
     let graph: PortGraph = rmp_serde::from_read(fs::File::open(&path).unwrap()).unwrap();
 
     println!("Loaded graph and patterns");
-    let matcher = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
+    let matcher = BalancedTrieMatcher::from_patterns(patterns.clone()).to_cached_trie();
     println!("Built matcher");
     matcher.find_matches(&graph);
 }
