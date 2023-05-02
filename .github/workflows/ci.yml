@@ -55,4 +55,14 @@ jobs:
         run: cargo build --all-features
 
       - name: Test all features
+        id: test
         run: cargo test --all-features -- --include-ignored
+
+      - name: Commit failed proptest
+        if: failure() && steps.id.conclusion == 'failure'
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "<>""
+          git add proptest-regressions
+          git commit -m "Add failed proptest"
+          git push
