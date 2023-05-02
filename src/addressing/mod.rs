@@ -82,12 +82,20 @@ type NodeOffset = (NodeIndex, usize);
 /// # Introduction
 ///
 /// Consider paths[^trail] such that any two successive edges `e1` and `e2` incident
-/// on a common vertex `v` have the same port offset. In pseudo-porgraph:
-/// ```ignore
-/// graph.port_offset(e1).index() == graph.port_offset(e2).index()
+/// on a common vertex `v` have the same port offset. In portgraph terms:
+/// ```
+/// # fn main() { foo(); }
+/// # fn foo() -> Option<()> {
+/// # use portgraph::PortGraph;
+/// # let mut graph: PortGraph = PortGraph::new();
+/// # let v = graph.add_node(1, 1);
+/// # let (e1, e2) = (graph.input(v, 0)?, graph.output(v, 0)?);
+/// assert_eq!(graph.port_offset(e1)?.index(), graph.port_offset(e2)?.index());
+/// # Some(())
+/// # }
 /// ```
 /// Given that the edges must be distinct, this implies that one edge is incoming
-/// and the other outgoing.
+/// and the other outgoing in `v`.
 ///
 /// ## Skeleton paths
 ///
