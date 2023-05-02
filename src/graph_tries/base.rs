@@ -517,7 +517,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             let addr = self
                 .weight(state)
                 .address
-                .unwrap_or(graph_addr.expect("Could not get address of current node"));
+                .unwrap_or_else(|| graph_addr.expect("Could not get address of current node"));
             if offset == start_offset && Some(&addr) == graph_addr.as_ref() {
                 self.weights[state].spine = Some(spine.clone());
                 self.weights[state].out_port = Some(offset);
