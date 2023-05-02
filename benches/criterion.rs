@@ -11,7 +11,7 @@ use itertools::Itertools;
 
 use portgraph::PortGraph;
 use portmatching::graph_tries::BaseGraphTrie;
-use portmatching::matcher::many_patterns::LineGraphTrie;
+use portmatching::matcher::many_patterns::BalancedTrieMatcher;
 use portmatching::matcher::many_patterns::ManyPatternMatcher;
 use portmatching::matcher::many_patterns::NaiveManyMatcher;
 use portmatching::matcher::Matcher;
@@ -65,10 +65,10 @@ fn perform_benches(c: &mut Criterion) {
         &mut group,
         &patterns,
         &graph,
-        LineGraphTrie::<BaseGraphTrie>::from_patterns,
+        BalancedTrieMatcher::<BaseGraphTrie>::from_patterns,
     );
     bench("Cached Graph Trie", &mut group, &patterns, &graph, |p| {
-        LineGraphTrie::<BaseGraphTrie>::from_patterns(p).to_cached_trie()
+        BalancedTrieMatcher::<BaseGraphTrie>::from_patterns(p).to_cached_trie()
     });
     bench("Naive", &mut group, &patterns, &graph, |p| {
         NaiveManyMatcher::from_patterns(p)

@@ -8,7 +8,7 @@ use itertools::Itertools;
 use portgraph::PortGraph;
 use portmatching::{
     matcher::{
-        many_patterns::{LineGraphTrie, ManyPatternMatcher, PatternID, PatternMatch},
+        many_patterns::{BalancedTrieMatcher, ManyPatternMatcher, PatternID, PatternMatch},
         Matcher,
     },
     pattern::Pattern,
@@ -149,8 +149,8 @@ fn from_saved_patterns() {
         let graph = load_graph(&path).unwrap();
         let exp = load_results(&path).unwrap();
 
-        let matcher = LineGraphTrie::from_patterns(patterns.clone());
-        let matcher2 = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
+        let matcher = BalancedTrieMatcher::from_patterns(patterns.clone());
+        let matcher2 = BalancedTrieMatcher::from_patterns(patterns.clone()).to_cached_trie();
         // {
         //     let mut path = path.clone();
         //     path.push("trie.gv");

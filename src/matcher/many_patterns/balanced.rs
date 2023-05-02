@@ -23,13 +23,13 @@ use crate::graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID};
 ///
 /// This spreads out the occurence of non-deterministic (expensive) states in the trie
 /// in-between deterministic (cheap) ones.
-pub struct LineGraphTrie<T> {
+pub struct BalancedTrieMatcher<T> {
     trie: T,
     match_states: BTreeMap<StateID, Vec<PatternID>>,
     patterns: Vec<Pattern>,
 }
 
-impl<T: Default> Default for LineGraphTrie<T> {
+impl<T: Default> Default for BalancedTrieMatcher<T> {
     fn default() -> Self {
         Self {
             trie: T::default(),
@@ -39,14 +39,14 @@ impl<T: Default> Default for LineGraphTrie<T> {
     }
 }
 
-impl<T: Default> LineGraphTrie<T> {
+impl<T: Default> BalancedTrieMatcher<T> {
     /// Create a new empty matcher.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl<S: Clone> LineGraphTrie<BaseGraphTrie<S>> {
+impl<S: Clone> BalancedTrieMatcher<BaseGraphTrie<S>> {
     /// A dotstring representation of the trie.
     pub fn dotstring(&self) -> String {
         let mut weights = self.trie.str_weights();
@@ -61,12 +61,12 @@ impl<S: Clone> LineGraphTrie<BaseGraphTrie<S>> {
     }
 }
 
-impl LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
+impl BalancedTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
     /// Convert the trie to using [`SpineID`]s for caching.
     pub fn to_cached_trie(
         &self,
-    ) -> LineGraphTrie<BaseGraphTrie<(SpineID, Vec<PortOffset>, usize)>> {
-        LineGraphTrie {
+    ) -> BalancedTrieMatcher<BaseGraphTrie<(SpineID, Vec<PortOffset>, usize)>> {
+        BalancedTrieMatcher {
             trie: self.trie.to_cached_trie(),
             match_states: self.match_states.clone(),
             patterns: self.patterns.clone(),
@@ -74,7 +74,7 @@ impl LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
     }
 }
 
-impl<T> Matcher for LineGraphTrie<T>
+impl<T> Matcher for BalancedTrieMatcher<T>
 where
     T: GraphTrie,
     for<'n> <<T as GraphTrie>::SpineID as SpineAddress>::AsRef<'n>:
@@ -106,7 +106,7 @@ where
     }
 }
 
-impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
+impl ManyPatternMatcher for BalancedTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());
@@ -186,7 +186,7 @@ mod tests {
         graph_tries::BaseGraphTrie,
         matcher::{
             many_patterns::{
-                line_based::LineGraphTrie, ManyPatternMatcher, PatternID, PatternMatch,
+                balanced::BalancedTrieMatcher, ManyPatternMatcher, PatternID, PatternMatch,
             },
             Matcher, SinglePatternMatcher,
         },
@@ -199,7 +199,7 @@ mod tests {
         let mut g = PortGraph::new();
         g.add_node(0, 1);
         let p = Pattern::from_graph(g.clone()).unwrap();
-        let mut matcher = LineGraphTrie::<BaseGraphTrie>::new();
+        let mut matcher = BalancedTrieMatcher::<BaseGraphTrie>::new();
         matcher.add_pattern(p);
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
@@ -228,7 +228,7 @@ mod tests {
         )
         .unwrap();
         let p = Pattern::from_graph(g.clone()).unwrap();
-        let mut matcher = LineGraphTrie::new();
+        let mut matcher = BalancedTrieMatcher::new();
         matcher.add_pattern(p);
 
         assert_eq!(
@@ -245,7 +245,7 @@ mod tests {
         let mut g = PortGraph::new();
         g.add_node(0, 2);
         let p = Pattern::from_graph(g).unwrap();
-        let mut matcher = LineGraphTrie::new();
+        let mut matcher = BalancedTrieMatcher::new();
         matcher.add_pattern(p);
 
         let mut g = PortGraph::new();
@@ -270,7 +270,7 @@ mod tests {
         link(&mut g, (n0, 1), (n1, 1));
         link(&mut g, (n2, 0), (n0, 1));
         let p = Pattern::from_graph(g).unwrap();
-        let mut matcher = LineGraphTrie::new();
+        let mut matcher = BalancedTrieMatcher::new();
         matcher.add_pattern(p);
     }
 
@@ -309,7 +309,7 @@ mod tests {
         link(&mut g, (n3, 0), (n1, 1));
         link(&mut g, (n3, 1), (n0, 0));
 
-        let mut matcher = LineGraphTrie::new();
+        let mut matcher = BalancedTrieMatcher::new();
         matcher.add_pattern(Pattern::from_graph(p1).unwrap());
         matcher.add_pattern(Pattern::from_graph(p2).unwrap());
         assert_eq!(matcher.find_matches(&g).len(), 3);
@@ -326,7 +326,7 @@ mod tests {
         let n1 = p2.add_node(0, 2);
         link(&mut p2, (n1, 0), (n0, 1));
         link(&mut p2, (n1, 1), (n0, 0));
-        LineGraphTrie::from_patterns([p1, p2].map(|p| Pattern::from_graph(p).unwrap()));
+        BalancedTrieMatcher::from_patterns([p1, p2].map(|p| Pattern::from_graph(p).unwrap()));
     }
 
     #[test]
@@ -351,7 +351,7 @@ mod tests {
         link(&mut g, (n2, 0), (n3, 1));
         link(&mut g, (n3, 0), (n2, 0));
 
-        let mut matcher = LineGraphTrie::new();
+        let mut matcher = BalancedTrieMatcher::new();
         matcher.add_pattern(Pattern::from_graph(p1).unwrap());
         matcher.add_pattern(Pattern::from_graph(p2).unwrap());
         assert_eq!(matcher.find_matches(&g).len(), 1);
@@ -370,7 +370,7 @@ mod tests {
         link(&mut p2, (n0, 0), (n1, 1));
         link(&mut p2, (n0, 1), (n1, 0));
 
-        let mut matcher = LineGraphTrie::new();
+        let mut matcher = BalancedTrieMatcher::new();
         matcher.add_pattern(Pattern::from_graph(p1).unwrap());
         matcher.add_pattern(Pattern::from_graph(p2).unwrap());
     }
@@ -379,7 +379,7 @@ mod tests {
         #[test]
         fn single_graph_proptest(pattern in gen_portgraph_connected(10, 4, 20), g in gen_portgraph(100, 4, 200)) {
             let pattern = Pattern::from_graph(pattern).unwrap();
-            let mut matcher = LineGraphTrie::new();
+            let mut matcher = BalancedTrieMatcher::new();
             let pattern_id = matcher.add_pattern(pattern.clone());
             let single_matcher = SinglePatternMatcher::from_pattern(pattern.clone());
             let many_matches = matcher.find_matches(&g);
@@ -436,7 +436,7 @@ mod tests {
                 })
                 .collect_vec();
             // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
-            let matcher = LineGraphTrie::from_patterns(patterns.clone());
+            let matcher = BalancedTrieMatcher::from_patterns(patterns.clone());
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
                 .map(|i| {
@@ -455,10 +455,11 @@ mod tests {
         #[ignore = "a bit slow"]
         #[cfg(feature = "serde")]
         #[test]
-        fn many_graphs_proptest_no_cached(
+        fn many_graphs_proptest_cached(
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
+            println!("test");
             // for entry in glob("pattern_*.bin").expect("glob pattern failed") {
             //     match entry {
             //         Ok(path) => fs::remove_file(path).expect("Removing file failed"),
@@ -492,7 +493,7 @@ mod tests {
                 })
                 .collect_vec();
             // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
-            let matcher = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
+            let matcher = BalancedTrieMatcher::from_patterns(patterns.clone()).to_cached_trie();
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
                 .map(|i| {
