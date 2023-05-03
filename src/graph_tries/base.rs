@@ -547,12 +547,8 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         let mut start_states = Vec::new();
         let mut curr_states: VecDeque<_> = [trie_state].into();
         while let Some(state) = curr_states.pop_front() {
-            if !deterministic {
-                // Try to convert to non-deterministic state
-                self.into_non_deterministic(state);
-            }
             // Try to convert to start state
-            if self.into_start_state(state, graph_edge, skeleton) {
+            if self.into_start_state(state, graph_edge, skeleton, deterministic) {
                 start_states.push(state);
             } else {
                 // Not a start state, so follow all possible edges and start over
@@ -771,6 +767,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         trie_state: StateID,
         graph_edge: PortIndex,
         skeleton: &Skeleton,
+        deterministic: bool,
     ) -> bool {
         let graph = skeleton.graph();
         let start_node = graph.port_node(graph_edge).expect("invalid port");
@@ -806,6 +803,10 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             self.weights[trie_state].spine = Some(spine.to_vec());
             self.weights[trie_state].out_port = Some(trie_offset);
             self.weights[trie_state].address = Some(trie_addr);
+            if !deterministic {
+                // Try to convert state into a non-deterministic one
+                self.into_non_deterministic(trie_state);
+            }
             true
         } else {
             false

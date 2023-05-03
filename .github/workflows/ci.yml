@@ -66,6 +66,7 @@ jobs:
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "<>"
+          git pull
           git add proptest-regressions
           git commit -m "Add failed proptest"
           git push
