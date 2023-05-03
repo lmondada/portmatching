@@ -7,16 +7,16 @@
 //! data structure to match all patterns at once.
 mod balanced;
 mod det;
-mod nondet;
 mod naive;
+mod nondet;
 #[doc(inline)]
 pub use balanced::BalancedTrieMatcher;
 #[doc(inline)]
 pub use det::DetTrieMatcher;
 #[doc(inline)]
-pub use nondet::NonDetTrieMatcher;
-#[doc(inline)]
 pub use naive::NaiveManyMatcher;
+#[doc(inline)]
+pub use nondet::NonDetTrieMatcher;
 
 use portgraph::NodeIndex;
 use std::fmt;

@@ -92,9 +92,12 @@ impl ManyPatternMatcher for NonDetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, us
 
         for Edge(out_port, _) in pattern.canonical_edge_ordering() {
             // All other edges are deterministic
-            current_states =
-                self.trie
-                    .add_graph_edge_nondet(out_port, current_states, &skeleton, &mut clone_state);
+            current_states = self.trie.add_graph_edge_nondet(
+                out_port,
+                current_states,
+                &skeleton,
+                &mut clone_state,
+            );
         }
 
         // Record matching pattern in final states
