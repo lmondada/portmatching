@@ -38,6 +38,9 @@ pub(crate) struct NodeWeight<T> {
 
 impl<T> Display for NodeWeight<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.non_deterministic {
+            write!(f, "<font color=\"red\">")?;
+        }
         if let Some(addr) = &self.address {
             write!(f, "{:?}", addr)?;
         } else {
@@ -45,6 +48,9 @@ impl<T> Display for NodeWeight<T> {
         }
         if let Some(port) = &self.out_port {
             write!(f, "[{port:?}]")?;
+        }
+        if self.non_deterministic {
+            write!(f, "</font>")?;
         }
         Ok(())
     }
@@ -747,8 +753,12 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     .port_index(state, PortOffset::new_outgoing(new_offset))
                     .expect("invalid offset");
                 self.weights[new] = transition;
-                let next_state = fallback
-                    .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.add_state(false)));
+                let next_state = if !self.weights[state].non_deterministic {
+                    fallback
+                } else {
+                    None
+                }
+                .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.add_state(false)));
                 let in_port = self.add_edge(new, next_state).expect("new port index");
                 in_ports.push(self.create_perm_port(in_port));
             }
