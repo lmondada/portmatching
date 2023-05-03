@@ -13,17 +13,17 @@ use crate::{
 
 use super::PatternMatch;
 
-/// A graph trie matcher using only deterministic states
+/// A graph trie matcher using only non-deterministic states.
 ///
-/// In theory, this should perform best, but trie sizes grow exponentially,
-/// so not recommended in practice.
-pub struct DetTrieMatcher<T> {
+/// This should perform very similarly to pattern matching each
+/// pattern independently, as there is no "smartness" in the trie.
+pub struct NonDetTrieMatcher<T> {
     trie: T,
     match_states: BTreeMap<StateID, Vec<PatternID>>,
     patterns: Vec<Pattern>,
 }
 
-impl<T> Matcher for DetTrieMatcher<T>
+impl<T> Matcher for NonDetTrieMatcher<T>
 where
     T: GraphTrie,
     for<'n> <<T as GraphTrie>::SpineID as SpineAddress>::AsRef<'n>:
@@ -55,7 +55,7 @@ where
     }
 }
 
-impl Default for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
+impl Default for NonDetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
     fn default() -> Self {
         Self {
             trie: Default::default(),
@@ -65,7 +65,7 @@ impl Default for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
     }
 }
 
-impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
+impl ManyPatternMatcher for NonDetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());
@@ -94,7 +94,7 @@ impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize
             // All other edges are deterministic
             current_states =
                 self.trie
-                    .add_graph_edge_det(out_port, current_states, &skeleton, &mut clone_state);
+                    .add_graph_edge_nondet(out_port, current_states, &skeleton, &mut clone_state);
         }
 
         // Record matching pattern in final states
@@ -108,7 +108,7 @@ impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize
 
 #[cfg(test)]
 mod tests {
-    use super::DetTrieMatcher;
+    use super::NonDetTrieMatcher;
     use crate::{
         matcher::{
             many_patterns::{ManyPatternMatcher, PatternID, PatternMatch},
@@ -127,7 +127,7 @@ mod tests {
         #[ignore = "a bit slow"]
         #[cfg(feature = "serde")]
         #[test]
-        fn many_graphs_proptest_det_trie(
+        fn many_graphs_proptest_nondet_trie(
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
@@ -164,7 +164,7 @@ mod tests {
                 })
                 .collect_vec();
             // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
-            let matcher = DetTrieMatcher::from_patterns(patterns.clone());
+            let matcher = NonDetTrieMatcher::from_patterns(patterns.clone());
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
                 .map(|i| {

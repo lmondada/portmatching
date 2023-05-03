@@ -459,7 +459,6 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
-            println!("test");
             // for entry in glob("pattern_*.bin").expect("glob pattern failed") {
             //     match entry {
             //         Ok(path) => fs::remove_file(path).expect("Removing file failed"),
