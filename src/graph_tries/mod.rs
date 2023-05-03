@@ -77,7 +77,12 @@ impl StateTransition<(Address<usize>, Vec<Rib>)> {
             StateTransition::Node(mut addrs, offset) => {
                 for (addr, ribs) in addrs.iter_mut() {
                     ribs.truncate(addr.0 + 1);
-                    ribs[addr.0] = [cmp::min(addr.1, 0), cmp::max(addr.1, 0)];
+                    if addr.1 >= 0 {
+                        ribs[addr.0] = [0, addr.1];
+                    } else {
+                        // Do not change max positive value
+                        ribs[addr.0][0] = addr.1;
+                    }
                 }
                 StateTransition::Node(addrs, offset)
             }
