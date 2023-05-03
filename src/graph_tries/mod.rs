@@ -11,7 +11,7 @@ mod cached;
 pub use base::BaseGraphTrie;
 
 use std::{
-    cmp::{self, Ordering},
+    cmp::Ordering,
     fmt::{self, Debug, Display},
 };
 
@@ -328,7 +328,10 @@ where
 mod tests {
     use portgraph::PortOffset;
 
-    use crate::{graph_tries::StateTransition, addressing::{Address, Rib}};
+    use crate::{
+        addressing::{Address, Rib},
+        graph_tries::StateTransition,
+    };
 
     #[test]
     fn test_partial_cmp() {
@@ -340,8 +343,7 @@ mod tests {
         assert!(St::Node(vec![], o) < St::FAIL);
         // more interesting
         assert!(
-            St::Node(vec![((0, 2), vec![[0, 3]])], o)
-                < St::Node(vec![((0, 2), vec![[0, 2]])], o)
+            St::Node(vec![((0, 2), vec![[0, 3]])], o) < St::Node(vec![((0, 2), vec![[0, 2]])], o)
         );
         assert!(
             St::Node(vec![((1, 2), vec![[0, 3], [-1, 2]])], o)

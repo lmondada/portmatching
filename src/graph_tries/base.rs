@@ -693,7 +693,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     continue 'transition
                 };
                 let curr_transition = &self.weights[curr_port];
-                if !(curr_transition >= &transition) {
+                if !curr_transition.ge(&transition) {
                     offset += 1;
                 } else {
                     break (curr_port, curr_transition);
