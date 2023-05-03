@@ -8,6 +8,9 @@ env:
   CARGO_TERM_COLOR: always
   PROPTEST_CASES: 1024
 
+permissions:
+  contents: write
+
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -59,10 +62,10 @@ jobs:
         run: cargo test --all-features -- --include-ignored
 
       - name: Commit failed proptest
-        if: failure() && steps.id.conclusion == 'failure'
+        if: failure() && steps.test.conclusion == 'failure'
         run: |
           git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "<>""
+          git config --global user.email "<>"
           git add proptest-regressions
           git commit -m "Add failed proptest"
           git push
