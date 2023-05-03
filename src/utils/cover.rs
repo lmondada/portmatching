@@ -29,10 +29,10 @@ where
         .iter()
         .copied()
         .filter(|&n| {
-            !graph
+            graph
                 .output_links(n)
                 .flatten()
-                .any(|p| all_ports.contains(&p))
+                .all(|p| !all_ports.contains(&p))
         })
         .collect();
 
@@ -80,12 +80,13 @@ where
                 },
             );
         }
-        let next_in_ports = graph.output_links(node).flatten().filter(|&p| {
-            let n = graph.port_node(p).expect("Invalid port");
-            nodes.contains(&n)
-        });
-        all_ports.extend(next_in_ports.clone());
-        curr_nodes.extend(next_in_ports.map(|p| graph.port_node(p).expect("Invalid port")));
+        curr_nodes.extend(
+            graph
+                .output_links(node)
+                .flatten()
+                .map(|p| graph.port_node(p).expect("Invalid port"))
+                .filter(|&n| nodes.contains(&n)),
+        );
     }
     bottom
 }
