@@ -11,7 +11,7 @@ mod cached;
 pub use base::BaseGraphTrie;
 
 use std::{
-    cmp::Ordering,
+    cmp::{self, Ordering},
     fmt::{self, Debug, Display},
 };
 
@@ -70,6 +70,23 @@ impl<A> StateTransition<A> {
     }
 }
 
+impl StateTransition<(Address<usize>, Vec<Rib>)> {
+    /// Remove unnecessary information (ribs)
+    fn into_simplified(self) -> Self {
+        match self {
+            StateTransition::Node(mut addrs, offset) => {
+                for (addr, ribs) in addrs.iter_mut() {
+                    ribs.truncate(addr.0 + 1);
+                    ribs[addr.0] = [cmp::min(addr.1, 0), cmp::max(addr.1, 0)];
+                }
+                StateTransition::Node(addrs, offset)
+            }
+            StateTransition::NoLinkedNode => self,
+            StateTransition::FAIL => self,
+        }
+    }
+}
+
 // The partial order on StateTransition is such that
 // FAIL > NoLinkedNode > Node. Furthermore, within Nodes a transition is greater
 // than another one if it is strictly more general, i.e.
@@ -83,10 +100,10 @@ impl<A: PartialEq> PartialOrd for StateTransition<(A, Vec<Rib>)> {
             return self.transition_type().partial_cmp(&other.transition_type());
         }
         let StateTransition::Node(addrs, port) = self else {
-            return None
+            unreachable!("FAIL and NoLinkedNode are always equal if same type")
         };
         let StateTransition::Node(other_addrs, other_port) = other else {
-            return None
+            unreachable!("FAIL and NoLinkedNode are always equal if same type")
         };
         if port != other_port {
             return None;
@@ -299,5 +316,39 @@ where
                 self.trie().port_node(in_p)
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use portgraph::PortOffset;
+
+    use crate::{graph_tries::StateTransition, addressing::{Address, Rib}};
+
+    #[test]
+    fn test_partial_cmp() {
+        type St = StateTransition<(Address<usize>, Vec<Rib>)>;
+        let o = PortOffset::new_outgoing(0);
+        // the basics
+        assert!(St::NoLinkedNode < St::FAIL);
+        assert!(St::Node(vec![], o) < St::NoLinkedNode);
+        assert!(St::Node(vec![], o) < St::FAIL);
+        // more interesting
+        assert!(
+            St::Node(vec![((0, 2), vec![[0, 3]])], o)
+                < St::Node(vec![((0, 2), vec![[0, 2]])], o)
+        );
+        assert!(
+            St::Node(vec![((1, 2), vec![[0, 3], [-1, 2]])], o)
+                < St::Node(vec![((1, 2), vec![[0, 2], [0, 2]])], o)
+        );
+        assert!(
+            St::Node(vec![((1, 2), vec![[-1, 3], [-1, 2]])], o)
+                < St::Node(vec![((1, 2), vec![[0, -1], [0, 2]])], o)
+        );
+        assert!(
+            St::Node(vec![((1, 2), vec![[-1, 3], [-1, 2]])], o)
+                == St::Node(vec![((1, 2), vec![[-1, 3], [-1, 2]])], o)
+        );
     }
 }
