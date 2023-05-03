@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    cmp::{self, Ordering},
+    cmp,
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::{self, Display},
     mem, vec,
@@ -469,12 +469,16 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             (Some(StateTransition::NoLinkedNode), _) => {
                 // Follow existing NoLinkedNode transition
                 let out_port = last_port.expect("last_weight is Some");
-                self.graph.port_link(out_port).expect("Disconnected transition")
-            },
-            (_, Some(StateTransition::NoLinkedNode)) =>  {
+                self.graph
+                    .port_link(out_port)
+                    .expect("Disconnected transition")
+            }
+            (_, Some(StateTransition::NoLinkedNode)) => {
                 // Follow existing NoLinkedNode transition
                 let out_port = prev_port.expect("prev_weight is Some");
-                self.graph.port_link(out_port).expect("Disconnected transition")
+                self.graph
+                    .port_link(out_port)
+                    .expect("Disconnected transition")
             }
             (Some(StateTransition::Node(_, _)), _) | (None, _) => {
                 // Add a NoLinkedNode transition at the end
@@ -656,6 +660,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         let mut new_transitions = Vec::new();
         let mut offset = 0;
         'transition: for transition in transitions {
+            let transition = transition.into_simplified();
             match transition {
                 StateTransition::FAIL => panic!("invalid start state"),
                 StateTransition::NoLinkedNode => {
@@ -688,10 +693,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     continue 'transition
                 };
                 let curr_transition = &self.weights[curr_port];
-                if !matches!(
-                    curr_transition.partial_cmp(&transition), 
-                    Some(Ordering::Greater) | Some(Ordering::Equal)
-                 ) {
+                if !(curr_transition >= &transition) {
                     offset += 1;
                 } else {
                     break (curr_port, curr_transition);
