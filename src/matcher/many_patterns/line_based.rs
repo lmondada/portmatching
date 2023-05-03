@@ -117,22 +117,10 @@ impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)
 
         // Stores the current positions in the graph trie, along with the
         // match that corresponds to that position
-        let mut current_states = vec![root_state()];
+        let mut current_states = [root_state()].into();
 
         // Decompose a pattern into "lines", which are paths in the pattern
         let all_lines = pattern.all_lines();
-
-        // A callback when a state is cloned in the trie
-        // necessary to keep track of the match states
-        let mut clone_state = |old_state: StateID, new_state: StateID| {
-            self.match_states.insert(
-                new_state,
-                self.match_states
-                    .get(&old_state)
-                    .cloned()
-                    .unwrap_or_default(),
-            );
-        };
 
         for line in all_lines {
             // Traverse the line
@@ -144,7 +132,7 @@ impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)
                         out_port,
                         current_states,
                         &skeleton,
-                        &mut clone_state,
+                        // &mut clone_state,
                     );
                 } else {
                     // All other edges are deterministic
@@ -152,12 +140,26 @@ impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)
                         out_port,
                         current_states,
                         &skeleton,
-                        &mut clone_state,
+                        // &mut clone_state,
                     );
                 }
                 first_edge = false;
             }
         }
+
+        // A callback when a state is cloned in the trie
+        // necessary to keep track of the match states
+        let clone_state = |old_state: StateID, new_state: StateID| {
+            self.match_states.insert(
+                new_state,
+                self.match_states
+                    .get(&old_state)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+        };
+
+        self.trie.finalize(clone_state);
 
         // Record matching pattern in final states
         for state in current_states {

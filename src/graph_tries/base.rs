@@ -331,11 +331,16 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         transitions
     }
 
-    /// Split states so that all incoming links are within ports
+    /// Reorganise trie after having added transitions.
     ///
-    /// Ports are all incoming ports -- split states so that a state
-    /// is incident to one of the port iff all ports are within `ports`
-    pub(crate) fn create_owned_states<F>(&mut self, mut clone_state: F) -> Vec<StateID>
+    /// This step is essential after each pattern that has been added to the trie.
+    /// It splits states where necessary so that there is no "cross-talk", i.e.
+    /// none of the transitions added will form a shortcut in the trie.
+    ///
+    /// In the process, it might clone states. To keep track of the identity
+    /// of the states, the caller should pass a callback function that will be
+    /// called for each state that is cloned.
+    pub fn finalize<F>(&mut self, mut clone_state: F) -> Vec<StateID>
     where
         F: FnMut(StateID, StateID),
     {
@@ -582,15 +587,17 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     /// states have worse matching performance, but too many deterministic nodes
     /// can lead to a large trie.
     ///
+    /// Important: you must call [`Self::finalize`] every time after having added
+    /// all the edges of a pattern. Otherwise the trie will not be valid.
+    ///
     /// Returns the trie states after the edge has been added.
-    pub fn add_graph_edge<F: FnMut(StateID, StateID)>(
+    pub fn add_graph_edge(
         &mut self,
         edge: PortIndex,
         trie_states: impl IntoIterator<Item = StateID>,
         deterministic: bool,
         skeleton: &Skeleton,
-        clone_state: F,
-    ) -> Vec<StateID> {
+    ) -> BTreeSet<StateID> {
         // 1. Find trie states that can be used as start states, i.e. states
         // whose address matches the source node of the edge
         let mut new_start_state = None;
@@ -604,33 +611,36 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
 
         // 2. For each start state, add the edge to the trie
         let mut new_state = None;
+        let mut in_ports = Vec::new();
         for state in start_states {
             let transitions = self.gen_transitions(state, skeleton);
-            self.insert_transitions(state, transitions, &mut new_state);
+            in_ports.append(&mut self.insert_transitions(state, transitions, &mut new_state));
         }
-        self.create_owned_states(clone_state)
+
+        in_ports
+            .into_iter()
+            .map(|p| self.port_state(p).expect("invalid port"))
+            .collect()
     }
 
     /// Add graph edge to the trie using deterministic strategy.
-    pub fn add_graph_edge_det<F: FnMut(StateID, StateID)>(
+    pub fn add_graph_edge_det(
         &mut self,
         edge: PortIndex,
         trie_states: impl IntoIterator<Item = StateID>,
         skeleton: &Skeleton,
-        clone_state: F,
-    ) -> Vec<StateID> {
-        self.add_graph_edge(edge, trie_states, true, skeleton, clone_state)
+    ) -> BTreeSet<StateID> {
+        self.add_graph_edge(edge, trie_states, true, skeleton)
     }
 
     /// Add graph edge to the trie using non-deterministic strategy.
-    pub fn add_graph_edge_nondet<F: FnMut(StateID, StateID)>(
+    pub fn add_graph_edge_nondet(
         &mut self,
         edge: PortIndex,
         trie_states: impl IntoIterator<Item = StateID>,
         skeleton: &Skeleton,
-        clone_state: F,
-    ) -> Vec<StateID> {
-        self.add_graph_edge(edge, trie_states, false, skeleton, clone_state)
+    ) -> BTreeSet<StateID> {
+        self.add_graph_edge(edge, trie_states, false, skeleton)
     }
 
     /// Insert transitions respecting the StateTransition ordering.
@@ -991,7 +1001,7 @@ mod tests {
         trie.weights[state].address = Some((0, 0));
         trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
 
-        trie.add_graph_edge_det(out_port, [state], &skel, |_, _| {});
+        trie.add_graph_edge_det(out_port, [state], &skel);
 
         // graph 2
         let mut graph = PortGraph::new();
@@ -1001,7 +1011,7 @@ mod tests {
         link(&mut graph, (0, 1), (1, 1));
         let skel = Skeleton::new(&graph, root);
 
-        trie.add_graph_edge_det(out_port, [state], &skel, |_, _| {});
+        trie.add_graph_edge_det(out_port, [state], &skel);
 
         assert_eq!(trie.graph.num_outputs(state), 3);
         assert_eq!(trie.graph.node_count(), 5);
@@ -1014,7 +1024,7 @@ mod tests {
         link(&mut graph, (0, 0), (1, 1));
 
         let skel = Skeleton::new(&graph, root);
-        trie.add_graph_edge_det(out_port, [state], &skel, |_, _| {});
+        trie.add_graph_edge_det(out_port, [state], &skel);
 
         assert_eq!(trie.graph.num_outputs(state), 4);
         assert_eq!(trie.graph.node_count(), 7);
@@ -1025,7 +1035,7 @@ mod tests {
         let out_port = graph.port_index(root, PortOffset::new_outgoing(0)).unwrap();
         let skel = Skeleton::new(&graph, root);
 
-        trie.add_graph_edge_det(out_port, [state], &skel, |_, _| {});
+        trie.add_graph_edge_det(out_port, [state], &skel);
 
         assert_eq!(trie.graph.node_count(), 8);
     }
@@ -1046,7 +1056,7 @@ mod tests {
         trie.weights[state].address = (0, 0).into();
         trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
 
-        trie.add_graph_edge_nondet(out_port, [state], &skel, |_, _| {});
+        trie.add_graph_edge_nondet(out_port, [state], &skel);
 
         // graph 2
         let mut graph = PortGraph::new();
@@ -1055,7 +1065,7 @@ mod tests {
         let out_port = graph.port_index(root, PortOffset::new_outgoing(1)).unwrap();
         link(&mut graph, (0, 1), (1, 1));
         let skel = Skeleton::new(&graph, root);
-        trie.add_graph_edge_nondet(out_port, [state], &skel, |_, _| {});
+        trie.add_graph_edge_nondet(out_port, [state], &skel);
 
         assert_eq!(trie.graph.num_outputs(state), 2);
         assert_eq!(trie.graph.node_count(), 4);
