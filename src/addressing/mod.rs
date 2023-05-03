@@ -243,6 +243,7 @@ where
             if root == node && ind >= bef && ind <= aft {
                 return Some((spine, ind));
             }
+            // Always prefer a positive ind over negative one
             while port.is_some() && ind < aft {
                 port = self.graph().port_link(port.unwrap());
                 ind += 1;
