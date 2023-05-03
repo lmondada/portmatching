@@ -604,13 +604,9 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
 
         // 2. For each start state, add the edge to the trie
         let mut new_state = None;
-        let mut in_ports = Vec::new();
         for state in start_states {
             let transitions = self.gen_transitions(state, skeleton);
-            in_ports.extend(
-                self.insert_transitions(state, transitions, &mut new_state)
-                    .into_iter(),
-            )
+            self.insert_transitions(state, transitions, &mut new_state);
         }
         self.create_owned_states(clone_state)
     }
