@@ -30,6 +30,7 @@ pub mod pattern;
 pub mod utils;
 
 pub use matcher::{
-    BalancedTrieMatcher, ManyPatternMatcher, Matcher, NaiveManyMatcher, PatternID, SinglePatternMatcher,
+    BalancedTrieMatcher, ManyPatternMatcher, Matcher, NaiveManyMatcher, PatternID,
+    SinglePatternMatcher,
 };
 pub use pattern::Pattern;
