@@ -60,6 +60,9 @@ impl BaseGraphTrie<S> {
             graph: base.graph.clone(),
             weights,
             perm_indices: Default::default(),
+            edge_cnt: Default::default(),
+            new_in_ports: Default::default(),
+            start_states: Default::default(),
         }
     }
 }

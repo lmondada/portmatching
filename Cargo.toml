@@ -4,14 +4,14 @@ description = "Fast Graph Matching for Port Graphs"
 authors = ["Luca Mondada"]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.68"
+rust-version = "1.69"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-portgraph = { git = "https://github.com/cqcl/portgraph", rev = "f4777df" }
+portgraph = "0.2.0"
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 
 # these are for datagen only
@@ -32,8 +32,7 @@ glob = "0.3.1"
 criterion = { version = "0.4.0", features = ["html_reports"] }
 
 [dev-dependencies.portgraph]
-git = "https://github.com/cqcl/portgraph"
-rev = "f4777df"
+version = "0.2.0"
 features = ["proptest", "serde"]
 
 [[example]]
