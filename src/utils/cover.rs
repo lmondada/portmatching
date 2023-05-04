@@ -10,34 +10,27 @@ use crate::graph_tries::root_state;
 pub fn untangle_threads<F, G>(
     graph: &mut PortGraph,
     all_threads: BTreeSet<(PortIndex, usize)>,
-    new_in_ports: &BTreeSet<PortIndex>,
+    mut new_in_ports: BTreeSet<PortIndex>,
     start_states: &BTreeMap<NodeIndex, Vec<usize>>,
     mut clone_state: G,
     mut rekey: F,
-)
+) -> BTreeSet<NodeIndex>
 where
     F: FnMut(PortIndex, Option<PortIndex>),
-    G: FnMut(NodeIndex, NodeIndex, &PortGraph),
+    G: FnMut(NodeIndex, NodeIndex, &Vec<PortIndex>, &PortGraph),
 {
     // Map from all in-ports along one thread to its layers
     let mut all_ports = BTreeMap::new();
     for (k, v) in all_threads {
         all_ports.entry(k).or_insert_with(Vec::new).push(v);
     }
-    let all_nodes = all_ports
+    let mut all_nodes = all_ports
         .keys()
         .map(|&p| graph.port_node(p).expect("Invalid port"))
         .collect::<BTreeSet<_>>();
-    let bottom: BTreeSet<_> = all_nodes
-        .iter()
-        .copied()
-        .filter(|&n| {
-            graph
-                .output_links(n)
-                .flatten()
-                .all(|p| !all_ports.contains_key(&p))
-        })
-        .collect();
+    if all_nodes.is_empty() {
+        return [root_state()].into();
+    }
 
     let mut curr_nodes: VecDeque<_> = graph
         .output_links(root_state())
@@ -47,7 +40,7 @@ where
     let mut visited: BTreeSet<_> = [root_state()].into();
 
     while let Some(node) = curr_nodes.pop_front() {
-        if visited.contains(&node) || bottom.contains(&node) {
+        if visited.contains(&node) {
             continue;
         } else if graph
             .input_links(node)
@@ -89,35 +82,77 @@ where
                         if !new_in_ports.contains(&in_port) {
                             return true;
                         }
-                        let Some(v) = all_ports.get(&p) else { return true };
-                        v.iter().copied().min() <= l
+                        let Some(v) = all_ports.get(&in_port) else { return true };
+                        let Some(l) = l else { return false };
+                        v.contains(&l)
                     })
                     .collect::<Vec<_>>()
             })
             .collect();
         let mut next_nodes = if ins.len() > 1 {
+            // backup which ports in `outs` are in all_ports
+            let outs_in_all_ports = outs
+                .iter()
+                .map(|ps| {
+                    ps.iter()
+                        .map(|&p| {
+                            let in_port = graph.port_link(p).expect("Disconnected port");
+                            all_ports.contains_key(&in_port)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            // Remove old ports from `all_ports`
+            for old_p in outs.iter().flatten() {
+                let old_in_port = graph.port_link(*old_p).expect("Disconnected port");
+                all_ports.remove(&old_in_port);
+            }
+            // Split node according to ins/outs partition
             let new_outs = split_node(graph, node, &ins, &outs, &mut clone_state, |old, new| {
-                let val = all_ports.remove(&old);
-                if let Some(val) = val {
+                if let Some(val) = all_ports.remove(&old) {
                     all_ports.insert(new.expect("Removed port"), val);
+                }
+                if new_in_ports.remove(&old) {
+                    new_in_ports.insert(new.expect("Removed port"));
                 }
                 rekey(old, new)
             });
-            for (ps, l) in new_outs.iter().zip(keys) {
-                for &p in ps {
-                    let in_port = graph.port_link(p).expect("Disconnected port");
-                    if let Some(l) = l {
-                        all_ports.insert(in_port, vec![l]);
-                    }
-                }
-            }
-            new_outs
-                .into_iter()
+            // Update `all_ports` with the new ports
+            all_ports.extend(
+                new_outs
+                    .iter()
+                    .zip(keys.iter())
+                    .zip(outs_in_all_ports)
+                    .flat_map(|((new_ps, l), pred)| new_ps.iter().map(move |p| (p, l)).zip(pred))
+                    .filter_map(|(fst, pred)| pred.then_some(fst))
+                    .filter_map(|(&new, &l)| {
+                        let in_port = graph.port_link(new).expect("Disconnected port");
+                        l.map(|l| (in_port, vec![l]))
+                    }),
+            );
+            // splitting nodes creates new nodes, so we must update `visited`
+            // and `all_nodes`
+            let new_outs = if keys.first() == Some(&None) {
+                &new_outs[1..]
+            } else {
+                &new_outs[..]
+            };
+            let new_nodes = new_outs
+                .iter()
                 .flatten()
-                .map(|p| {
+                .map(|&p| graph.port_node(p).expect("Invalid port"));
+            visited.extend(new_nodes.clone());
+            all_nodes.remove(&node);
+            all_nodes.extend(new_nodes);
+            // compute the next nodes
+            new_outs
+                .iter()
+                .flatten()
+                .map(|&p| {
                     let in_port = graph.port_link(p).expect("Disconnected port");
                     graph.port_node(in_port).expect("Invalid port")
                 })
+                .filter(|&n| all_nodes.contains(&n))
                 .collect()
         } else {
             graph
@@ -129,9 +164,19 @@ where
         };
         curr_nodes.append(&mut next_nodes);
     }
+    all_nodes
+        .iter()
+        .copied()
+        .filter(|&n| {
+            graph
+                .output_links(n)
+                .flatten()
+                .all(|p| !all_ports.contains_key(&p))
+        })
+        .collect()
 }
 
-/// Splits node1 into (node1, node2) according to partition
+/// Splits node1 into multiple nodes according to ins/outs partition
 fn split_node<F, G>(
     graph: &mut PortGraph,
     old_node: NodeIndex,
@@ -142,7 +187,7 @@ fn split_node<F, G>(
 ) -> Vec<Vec<PortIndex>>
 where
     F: FnMut(PortIndex, Option<PortIndex>),
-    G: FnMut(NodeIndex, NodeIndex, &PortGraph),
+    G: FnMut(NodeIndex, NodeIndex, &Vec<PortIndex>, &PortGraph),
 {
     let mut nodes = Vec::with_capacity(ins.len());
     for (in_ports, out_ports) in ins.iter().zip(outs) {
@@ -172,7 +217,7 @@ where
         let next_port = graph.port_link(out_port).expect("Disconnected port");
         *cnts.entry(graph.port_node(next_port).unwrap()).or_default() += 1;
     }
-    // Allocate the additional input ports once and for all
+    // Allocate the additional input ports once
     let mut new_port_offset: BTreeMap<_, _> = cnts
         .keys()
         .map(|&node| (node, graph.num_inputs(node)))
@@ -204,14 +249,12 @@ where
                 *offset += 1;
                 graph.link_ports(new_out_port, new_in_port).unwrap();
             }
-            rekey(out_port, new_out_port.into());
         }
+        clone_state(old_node, node, out_ports, graph);
     }
 
-    for &node in nodes.iter() {
-        clone_state(old_node, node, graph);
-    }
     graph.remove_node(old_node);
+
     nodes
         .into_iter()
         .map(|n| graph.outputs(n).collect())
@@ -268,14 +311,14 @@ mod tests {
         untangle_threads(
             &mut g,
             all_ports,
-            &[].into(),
+            [].into(),
             &[
                 (nodes[1], [0, 1].into()),
                 (nodes[2], [0].into()),
                 (nodes[3], [1, 2].into()),
             ]
             .into(),
-            |old_n, new_n, _| {
+            |old_n, new_n, _, _| {
                 new_nodes.insert(old_n, new_n);
             },
             |old_p, new_p| {
@@ -290,6 +333,6 @@ mod tests {
             },
         );
 
-        assert_eq!(g.node_count(), 9);
+        assert_eq!(g.node_count(), 11);
     }
 }

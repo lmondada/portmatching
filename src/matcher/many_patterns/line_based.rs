@@ -159,7 +159,7 @@ impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)
             );
         };
 
-        self.trie.finalize(clone_state);
+        let current_states = self.trie.finalize(clone_state);
 
         // Record matching pattern in final states
         for state in current_states {
