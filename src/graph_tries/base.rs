@@ -350,7 +350,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     /// In the process, it might clone states. To keep track of the identity
     /// of the states, the caller should pass a callback function that will be
     /// called for each state that is cloned.
-    pub fn finalize<F>(&mut self, mut clone_state: F)
+    pub fn finalize<F>(&mut self, mut clone_state: F) -> BTreeSet<NodeIndex>
     where
         F: FnMut(StateID, StateID),
     {
@@ -370,17 +370,16 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             .collect();
         let weights = RefCell::new(&mut self.weights);
 
-
         untangle_threads(
             &mut self.graph,
             all_threads,
-            &new_in_ports,
+            new_in_ports,
             &start_states,
-            |state, new_state, graph| {
+            |state, new_state, outs, graph| {
                 let mut weights = weights.borrow_mut();
                 weights[new_state] = weights[state].clone();
                 // update transition pointers
-                for (out_port, new_out_port) in graph.outputs(state).zip(graph.outputs(new_state)) {
+                for (&out_port, new_out_port) in outs.iter().zip(graph.outputs(new_state)) {
                     weights[new_out_port] = weights[out_port].clone();
                 }
                 // callback
@@ -399,7 +398,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     }
                 }
             },
-        );
+        )
     }
 
     fn add_state(&mut self, non_deterministic: bool) -> StateID {
@@ -638,7 +637,10 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
 
         // Record states as start states
         for &state in &start_states {
-            self.start_states.entry(state).or_default().push(self.edge_cnt);
+            self.start_states
+                .entry(state)
+                .or_default()
+                .push(self.edge_cnt);
         }
         // Increase edge count when we've found the new start state
         self.edge_cnt += 1;
