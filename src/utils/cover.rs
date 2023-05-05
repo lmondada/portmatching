@@ -272,13 +272,14 @@ mod tests {
     #[test]
     fn test_cover() {
         let mut g = PortGraph::new();
-        let mut nodes = Vec::with_capacity(6);
-        nodes.push(g.add_node(0, 2));
-        nodes.push(g.add_node(2, 1));
-        nodes.push(g.add_node(1, 2));
-        nodes.push(g.add_node(2, 1));
-        nodes.push(g.add_node(1, 1));
-        nodes.push(g.add_node(1, 0));
+        let nodes = vec![
+            g.add_node(0, 2),
+            g.add_node(2, 1),
+            g.add_node(1, 2),
+            g.add_node(2, 1),
+            g.add_node(1, 1),
+            g.add_node(1, 0),
+        ];
 
         let edge = |g: &PortGraph, (n1, p1), (n2, p2)| {
             (
