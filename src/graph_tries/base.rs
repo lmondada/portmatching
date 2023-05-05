@@ -375,11 +375,13 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             all_threads,
             new_in_ports,
             &start_states,
-            |state, new_state, outs, graph| {
+            |state, new_state, graph| {
                 let mut weights = weights.borrow_mut();
                 weights[new_state] = weights[state].clone();
                 // update transition pointers
-                for (&out_port, new_out_port) in outs.iter().zip(graph.outputs(new_state)) {
+                for out_port in graph.outputs(state) {
+                    let offset = graph.port_offset(out_port).expect("invalid port");
+                    let new_out_port = graph.port_index(new_state, offset).expect("invalid port");
                     weights[new_out_port] = weights[out_port].clone();
                 }
                 // callback
@@ -412,6 +414,10 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         out_port: PortIndex,
         in_node: StateID,
     ) -> Result<PermPortIndex, portgraph::LinkError> {
+        let out_node = self.graph.port_node(out_port).expect("invalid port");
+        if out_node == in_node {
+            panic!("adding cyclic edge");
+        }
         self.set_num_ports(
             in_node,
             self.graph.num_inputs(in_node) + 1,
