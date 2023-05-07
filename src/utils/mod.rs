@@ -6,9 +6,11 @@ pub(crate) mod cover;
 mod depth;
 pub(crate) mod iter;
 pub(crate) mod pre_order;
+pub(crate) mod perm_port;
 
 pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
+pub(crate) use perm_port::{PermPortIndex, PermPortPool};
 
 #[cfg(test)]
 pub(crate) mod test_utils;
