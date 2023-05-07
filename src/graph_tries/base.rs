@@ -1,13 +1,14 @@
 use std::{
     cell::RefCell,
     cmp,
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeSet, VecDeque},
     fmt::{self, Display},
-    mem, vec,
+    mem, vec, fs,
 };
 
 use portgraph::{
-    dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex, PortOffset, Weights,
+    dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap,
+    Weights,
 };
 
 use crate::{
@@ -15,7 +16,7 @@ use crate::{
         cache::SpineID, pg::AsPathOffset, Address, AsSpineID, PortGraphAddressing, Rib, Skeleton,
         SkeletonAddressing, Spine, SpineAddress,
     },
-    utils::cover::untangle_threads,
+    utils::{cover::untangle_threads, PermPortIndex, PermPortPool},
 };
 
 use super::{GraphTrie, StateID, StateTransition};
@@ -66,16 +67,6 @@ impl<'n, T: SpineAddress> NodeWeight<T> {
 
 type EdgeWeight = StateTransition<(Address<usize>, Vec<Rib>)>;
 
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct PermPortIndex(usize);
-
-impl PermPortIndex {
-    fn next(&self) -> Self {
-        let PermPortIndex(ind) = self;
-        PermPortIndex(ind + 1)
-    }
-}
-
 /// A graph trie implementation using portgraph.
 ///
 /// The parameter T is the type of the spine. Any type that implements
@@ -111,26 +102,23 @@ pub struct BaseGraphTrie<T = (Vec<PortOffset>, usize)> {
     pub(crate) weights: Weights<NodeWeight<T>, EdgeWeight>,
 
     // The following are only useful during construction
-    pub(super) perm_indices: RefCell<BTreeMap<PermPortIndex, (PortIndex, usize)>>,
+    pub(super) perm_indices: RefCell<PermPortPool>,
+    pub(super) trace: SecondaryMap<PermPortIndex, (Vec<usize>, bool)>,
     pub(super) edge_cnt: usize,
-    pub(super) new_in_ports: BTreeSet<PermPortIndex>,
-    pub(super) start_states: BTreeMap<StateID, Vec<usize>>,
 }
 
 impl Default for BaseGraphTrie<(Vec<PortOffset>, usize)> {
     fn default() -> Self {
         let graph = Default::default();
         let weights = Default::default();
-        let perm_indices = Default::default();
-        let new_in_ports = Default::default();
-        let start_states = Default::default();
+        let perm_indices = RefCell::new(Default::default());
+        let trace = Default::default();
         let mut ret = Self {
             graph,
             weights,
             perm_indices,
+            trace,
             edge_cnt: 0,
-            new_in_ports,
-            start_states,
         };
         ret.add_state(true);
         ret
@@ -207,6 +195,9 @@ impl<T: Clone> BaseGraphTrie<T> {
             str_weights[p] = match self.graph.port_direction(p).unwrap() {
                 Direction::Incoming => "".to_string(),
                 Direction::Outgoing => self.weights[p].to_string(),
+            };
+            if let Some(perm_p) = self.perm_indices.borrow()[p] {
+                str_weights[p] += &format!(" ({:?})", self.trace[perm_p]);
             }
         }
         for n in self.graph.nodes_iter() {
@@ -354,27 +345,18 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     where
         F: FnMut(StateID, StateID),
     {
+        fs::write("pre_trie.gv", self._dotstring());
         // Reset all trackers
         self.edge_cnt = 0;
-        let start_states = mem::take(&mut self.start_states);
-        let new_in_ports: BTreeSet<_> = mem::take(&mut self.new_in_ports)
-            .into_iter()
-            .map(|p| self.to_port(p).expect("invalid port"))
-            .collect();
+        let trace = mem::take(&mut self.trace);
 
-        // All the threads that have been created during this pattern
-        let all_threads: BTreeSet<_> = self
-            .all_perm_ports()
-            .into_iter()
-            .map(|p| self.free(p).expect("Invalid port"))
-            .collect();
+        let pool = self.perm_indices.take();
         let weights = RefCell::new(&mut self.weights);
 
         untangle_threads(
             &mut self.graph,
-            all_threads,
-            new_in_ports,
-            &start_states,
+            trace,
+            pool,
             |state, new_state, graph| {
                 let mut weights = weights.borrow_mut();
                 weights[new_state] = weights[state].clone();
@@ -389,16 +371,11 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             },
             |old, new| {
                 let mut weights = weights.borrow_mut();
+                let val = mem::take(&mut weights[old]);
                 if let Some(new) = new {
-                    weights[new] = mem::take(&mut weights[old]);
-                } else {
-                    weights[old] = Default::default();
+                    weights[new] = val;
                 }
-                for (val, _) in self.perm_indices.borrow_mut().values_mut() {
-                    if &old == val {
-                        *val = new.expect("A linked port was deleted!");
-                    }
-                }
+                self.perm_indices.borrow_mut().rekey(old, new);
             },
         )
     }
@@ -425,9 +402,11 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         );
         let in_port = self.graph.inputs(in_node).last().expect("just created");
         self.graph.link_ports(out_port, in_port)?;
-        let ret = self.create_perm_port(in_port);
-        self.new_in_ports.insert(ret);
-        Ok(ret)
+        let in_perm = self.perm_indices.borrow_mut().get_or_create_perm(in_port);
+        let out_perm = self.perm_indices.borrow_mut().get_or_create_perm(out_port);
+        self.trace[out_perm].1 = true;
+        self.trace[in_perm].1 = true;
+        Ok(in_perm)
     }
 
     /// All transitions in `state` that are allowed for `graph`
@@ -476,16 +455,24 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     /// Follow FAIL transition, creating a new state if necessary.
     fn follow_fail(&mut self, state: StateID, new_state: &mut Option<StateID>) -> PermPortIndex {
         let last_port = self.graph.outputs(state).last();
-        if let Some(last_port) = last_port {
-            if self.weights[last_port] == StateTransition::FAIL {
+        let (out_perm, in_perm) = if let Some(out_port) = last_port {
+            if self.weights[out_port] == StateTransition::FAIL {
+                let out_perm = self.perm_indices.borrow_mut().get_or_create_perm(out_port);
                 let in_port = self
                     .graph
-                    .port_link(last_port)
+                    .port_link(out_port)
                     .expect("Disconnected transition");
-                return self.create_perm_port(in_port);
+                let in_perm = self.perm_indices.borrow_mut().get_or_create_perm(in_port);
+                (out_perm, in_perm)
+            } else {
+                self.append_transition(state, new_state, StateTransition::FAIL)
             }
-        }
-        self.append_transition(state, new_state, StateTransition::FAIL)
+        } else {
+            self.append_transition(state, new_state, StateTransition::FAIL)
+        };
+        self.trace[out_perm].0.push(self.edge_cnt);
+        self.trace[in_perm].0.push(self.edge_cnt);
+        in_perm
     }
 
     /// Follow NoLinkedNode transition, creating a new state if necessary.
@@ -505,7 +492,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             .map(|o| self.graph.output(state, o).expect("valid offset"));
         let last_weight = last_port.map(|p| &self.weights[p]);
         let prev_weight = prev_port.map(|p| &self.weights[p]);
-        match (last_weight, prev_weight) {
+        let (out_perm, in_perm) = match (last_weight, prev_weight) {
             (Some(StateTransition::NoLinkedNode), _) => {
                 // Follow existing NoLinkedNode transition
                 let out_port = last_port.expect("last_weight is Some");
@@ -513,7 +500,9 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     .graph
                     .port_link(out_port)
                     .expect("Disconnected transition");
-                self.create_perm_port(in_port)
+                let out_perm = self.perm_indices.borrow_mut().get_or_create_perm(out_port);
+                let in_perm = self.perm_indices.borrow_mut().get_or_create_perm(in_port);
+                (out_perm, in_perm)
             }
             (_, Some(StateTransition::NoLinkedNode)) => {
                 // Follow existing NoLinkedNode transition
@@ -522,7 +511,9 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     .graph
                     .port_link(out_port)
                     .expect("Disconnected transition");
-                self.create_perm_port(in_port)
+                let out_perm = self.perm_indices.borrow_mut().get_or_create_perm(out_port);
+                let in_perm = self.perm_indices.borrow_mut().get_or_create_perm(in_port);
+                (out_perm, in_perm)
             }
             (Some(StateTransition::Node(_, _)), _) | (None, _) => {
                 // Add a NoLinkedNode transition at the end
@@ -552,10 +543,16 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                 // Link falls back to FAIL transition
                 let next_p = self.graph.port_link(fail).expect("Disconnected transition");
                 let next = self.graph.port_node(next_p).expect("invalid port");
-                self.add_edge(dangling, next)
-                    .expect("freed by move_out_port")
+                let in_perm = self
+                    .add_edge(dangling, next)
+                    .expect("freed by move_out_port");
+                let out_perm = self.perm_indices.borrow_mut().get_or_create_perm(dangling);
+                (out_perm, in_perm)
             }
-        }
+        };
+        self.trace[out_perm].0.push(self.edge_cnt);
+        self.trace[in_perm].0.push(self.edge_cnt + 1);
+        in_perm
     }
 
     /// Append transition at the end of `state`
@@ -567,7 +564,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         state: StateID,
         new_state: &mut Option<StateID>,
         transition: EdgeWeight,
-    ) -> PermPortIndex {
+    ) -> (PermPortIndex, PermPortIndex) {
         self.set_num_ports(
             state,
             self.graph.num_inputs(state),
@@ -576,7 +573,9 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         let last_port = self.graph.outputs(state).last().expect("just created");
         self.weights[last_port] = transition;
         let next = new_state.get_or_insert_with(|| self.add_state(false));
-        self.add_edge(last_port, *next).expect("just created")
+        let in_perm = self.add_edge(last_port, *next).expect("just created");
+        let out_perm = self.perm_indices.borrow_mut().get_or_create_perm(last_port);
+        (out_perm, in_perm)
     }
 
     fn valid_start_states(
@@ -601,12 +600,21 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                             .outputs(state)
                             // Filter out FAIL as we add it below anyway
                             .filter(|&p| self.weights[p] != StateTransition::FAIL)
-                            .filter_map(|p| Some(self.create_perm_port(self.graph.port_link(p)?)))
-                            .map(|p| self.port_state(p).expect("invalid port")),
+                            .filter_map(|out_p| Some((out_p, self.graph.port_link(out_p)?)))
+                            .map(|(out_p, in_p)| {
+                                let out_perm =
+                                    self.perm_indices.borrow_mut().get_or_create_perm(out_p);
+                                let in_perm =
+                                    self.perm_indices.borrow_mut().get_or_create_perm(in_p);
+                                self.trace[out_perm].0.push(self.edge_cnt);
+                                self.trace[in_perm].0.push(self.edge_cnt);
+                                self.graph.port_node(in_p).expect("invalid port")
+                            }),
                     );
                 }
-                let in_port = self.follow_fail(state, new_start_state);
-                curr_states.push_back(self.port_state(in_port).expect("invalid port"));
+                let in_perm = self.follow_fail(state, new_start_state);
+                let in_port = self.perm_indices.borrow()[in_perm];
+                curr_states.push_back(self.graph.port_node(in_port).expect("invalid port"));
             }
         }
         start_states
@@ -641,16 +649,6 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             })
             .collect::<BTreeSet<_>>();
 
-        // Record states as start states
-        for &state in &start_states {
-            self.start_states
-                .entry(state)
-                .or_default()
-                .push(self.edge_cnt);
-        }
-        // Increase edge count when we've found the new start state
-        self.edge_cnt += 1;
-
         // 2. For each start state, add the edge to the trie
         let mut new_state = None;
         let mut in_ports = Vec::new();
@@ -659,9 +657,15 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             in_ports.append(&mut self.insert_transitions(state, transitions, &mut new_state));
         }
 
+        // Increase edge count for next state
+        self.edge_cnt += 1;
+
         in_ports
             .into_iter()
-            .map(|p| self.port_state(p).expect("invalid port"))
+            .map(|p| {
+                let p = self.perm_indices.borrow()[p];
+                self.graph.port_node(p).expect("invalid port")
+            })
             .collect()
     }
 
@@ -724,8 +728,16 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                                         StateTransition::FAIL | StateTransition::NoLinkedNode
                                     )
                                 })
-                                .filter_map(|out_p| self.graph.port_link(out_p))
-                                .map(|in_p| self.create_perm_port(in_p)),
+                                .filter_map(|out_p| Some((out_p, self.graph.port_link(out_p)?)))
+                                .map(|(out_p, in_p)| {
+                                    let in_perm =
+                                        self.perm_indices.borrow_mut().get_or_create_perm(in_p);
+                                    let out_perm =
+                                        self.perm_indices.borrow_mut().get_or_create_perm(out_p);
+                                    self.trace[out_perm].0.push(self.edge_cnt);
+                                    self.trace[in_perm].0.push(self.edge_cnt + 1);
+                                    in_perm
+                                })
                         );
                     }
                     in_ports.push(self.follow_no_linked_node(state, new_state));
@@ -755,7 +767,11 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     .graph
                     .port_link(curr_port)
                     .expect("Disconnected transition");
-                in_ports.push(self.create_perm_port(in_port));
+                let out_perm = self.perm_indices.borrow_mut().get_or_create_perm(curr_port);
+                let in_perm = self.perm_indices.borrow_mut().get_or_create_perm(in_port);
+                self.trace[out_perm].0.push(self.edge_cnt);
+                self.trace[in_perm].0.push(self.edge_cnt + 1);
+                in_ports.push(in_perm);
             } else {
                 // Otherwise insert new transition here
                 new_transitions.push((offset, transition));
@@ -807,8 +823,11 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     None
                 }
                 .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.add_state(false)));
-                let in_port = self.add_edge(new, next_state).expect("new port index");
-                in_ports.push(in_port);
+                let in_perm = self.add_edge(new, next_state).expect("new port index");
+                let out_perm = self.perm_indices.borrow_mut().get_or_create_perm(new);
+                self.trace[out_perm].0.push(self.edge_cnt);
+                self.trace[in_perm].0.push(self.edge_cnt + 1);
+                in_ports.push(in_perm);
             }
             if offset == new_offset {
                 // There are no more empty slots. We are done
@@ -874,12 +893,11 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
         self.graph
             .set_num_ports(state, incoming, outgoing, |old, new| {
-                rekey(
-                    &mut self.weights,
-                    &mut self.perm_indices.borrow_mut(),
-                    old,
-                    new,
-                )
+                self.perm_indices.borrow_mut().rekey(old, new);
+                let val = mem::take(&mut self.weights[old]);
+                if let Some(new) = new {
+                    self.weights[new] = val;
+                }
             });
     }
 
@@ -887,45 +905,24 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         if let Some(in_port) = self.graph.unlink_port(old) {
             self.graph.link_ports(new, in_port).unwrap();
         }
-        rekey(
-            &mut self.weights,
-            &mut self.perm_indices.borrow_mut(),
-            old,
-            Some(new),
-        )
+        self.perm_indices.borrow_mut().rekey(old, Some(new));
+        let val = mem::take(&mut self.weights[old]);
+        self.weights[new] = val;
     }
 
-    fn create_perm_port(&self, port: PortIndex) -> PermPortIndex {
-        let next_ind = self
-            .perm_indices
-            .borrow()
-            .keys()
-            .max()
-            .map(|p| p.next())
-            .unwrap_or_default();
-        self.perm_indices
-            .borrow_mut()
-            .insert(next_ind, (port, self.edge_cnt));
-        next_ind
-    }
+    // fn port_state(&self, port: PermPortIndex) -> Option<StateID> {
+    //     let port = self.to_port(port)?;
+    //     self.graph.port_node(port)
+    // }
 
-    fn all_perm_ports(&self) -> Vec<PermPortIndex> {
-        self.perm_indices.borrow().keys().copied().collect()
-    }
+    // fn to_port(&self, port: PermPortIndex) -> Option<PortIndex> {
+    //     let &(port, _) = self.perm_indices.borrow().get(&port)?;
+    //     Some(port)
+    // }
 
-    fn port_state(&self, port: PermPortIndex) -> Option<StateID> {
-        let port = self.to_port(port)?;
-        self.graph.port_node(port)
-    }
-
-    fn to_port(&self, port: PermPortIndex) -> Option<PortIndex> {
-        let &(port, _) = self.perm_indices.borrow().get(&port)?;
-        Some(port)
-    }
-
-    pub(crate) fn free(&self, port: PermPortIndex) -> Option<(PortIndex, usize)> {
-        self.perm_indices.borrow_mut().remove(&port)
-    }
+    // pub(crate) fn free(&self, port: PermPortIndex) -> Option<(PortIndex, usize)> {
+    //     self.perm_indices.borrow_mut().remove(&port)
+    // }
 
     fn spine(&self, state: StateID) -> Option<&[(Vec<PortOffset>, usize)]> {
         self.weight(state).spine.as_deref()
@@ -993,24 +990,6 @@ fn merge_addrs(
         }
     }
     Some(addrs)
-}
-
-fn rekey<K: Clone, V: Clone + Default>(
-    weights: &mut Weights<K, V>,
-    perm_indices: &mut BTreeMap<PermPortIndex, (PortIndex, usize)>,
-    old: PortIndex,
-    new: Option<PortIndex>,
-) {
-    if let Some(new) = new {
-        weights[new] = mem::take(&mut weights[old]);
-    } else {
-        weights[old] = Default::default();
-    }
-    for (val, _) in perm_indices.values_mut() {
-        if &old == val {
-            *val = new.expect("A linked port was deleted!");
-        }
-    }
 }
 
 #[cfg(test)]
