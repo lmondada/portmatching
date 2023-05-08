@@ -96,6 +96,11 @@ type EdgeWeight = StateTransition<(Address<usize>, Vec<Rib>)>;
 /// Similarly, transitions to the left of a new transition can shadow the new
 /// transition, so we must make sure that if an input graph chooses one of these
 /// higher priority transition, it still discovers the pattern that is being added.
+///
+/// As transitions are added we also keep track of how the trie is traversed,
+/// forming the "trace" of the trie. This is used in [`Self::finalize`] to
+/// split states where necessary to keep avoid cross-talk, i.e. creating new
+/// disallowed state transitions as a by-product of the new transitions.
 #[derive(Clone, Debug)]
 pub struct BaseGraphTrie<T = (Vec<PortOffset>, usize)> {
     pub(crate) graph: PortGraph,

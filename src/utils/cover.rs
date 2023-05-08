@@ -12,7 +12,14 @@ use super::rekey_secmap;
 
 /// Extract new threads into separate nodes.
 ///
-/// TODO
+/// Threads are paths from the root to leaves of the trie.
+/// A trie can be seen as a set of allowed threads. When adding new threads
+/// (corresponding to new patterns), however, adding the new transitions required
+/// for the new threads might create other threads by mixing parts of old
+/// threads with new transitions.
+///
+/// This function extracts the new threads into separate nodes, so that such
+/// crossovers are removed.
 pub fn untangle_threads<F, G>(
     graph: &mut PortGraph,
     mut trace: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
