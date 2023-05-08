@@ -60,6 +60,7 @@ fn main() {
         fs::create_dir_all(format!("{dir}/large_graphs")).expect("could not create directory");
         let (n_graphs, n, m, d) = (args.n_large, args.v_large, args.e_large, args.d_large);
         for i in 0..n_graphs {
+            println!("{}/{n_graphs} large graphs...", i + 1);
             let g = gen_graph(n, m, d).expect("could not generate graph");
             let f = format!("{dir}/large_graphs/graph_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
@@ -70,6 +71,7 @@ fn main() {
         fs::create_dir_all(format!("{dir}/small_graphs")).expect("could not create directory");
         let (n_graphs, n, m, d) = (args.n_small, args.v_small, args.e_small, args.d_small);
         for i in 0..n_graphs {
+            println!("{}/{n_graphs} small graphs...", i + 1);
             let mut g = None;
             let mut n_fails = 0;
             while g.is_none() || !is_connected(g.as_ref().unwrap()) {
