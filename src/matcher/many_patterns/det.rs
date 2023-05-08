@@ -76,11 +76,11 @@ impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize
 
         // Stores the current positions in the graph trie, along with the
         // match that corresponds to that position
-        let mut current_states = vec![root_state()];
+        let mut current_states: BTreeSet<_> = [root_state()].into();
 
         // A callback when a state is cloned in the trie
         // necessary to keep track of the match states
-        let mut clone_state = |old_state: StateID, new_state: StateID| {
+        let clone_state = |old_state: StateID, new_state: StateID| {
             self.match_states.insert(
                 new_state,
                 self.match_states
@@ -92,10 +92,12 @@ impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize
 
         for Edge(out_port, _) in pattern.canonical_edge_ordering() {
             // All other edges are deterministic
-            current_states =
-                self.trie
-                    .add_graph_edge_det(out_port, current_states, &skeleton, &mut clone_state);
+            current_states = self
+                .trie
+                .add_graph_edge_det(out_port, current_states, &skeleton);
         }
+
+        let current_states = self.trie.finalize(clone_state);
 
         // Record matching pattern in final states
         for state in current_states {
