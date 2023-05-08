@@ -198,7 +198,6 @@ impl<T: Clone> BaseGraphTrie<T> {
                 Direction::Incoming => "".to_string(),
                 Direction::Outgoing => self.weights[p].to_string(),
             };
-            str_weights[p] += &format!(" ({:?})", self.trace[p]);
         }
         for n in self.graph.nodes_iter() {
             str_weights[n] = self.weights[n].to_string();
@@ -244,6 +243,9 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     ) -> Vec<StateTransition<(Address<usize>, Vec<Rib>)>> {
         let addressing =
             PortGraphAddressing::new(skeleton.root(), skeleton.graph(), self.spine(state), None);
+        let curr_node = self
+            .node(state, &addressing, &mut ())
+            .expect("curr node exists");
         let next_node = self.next_node(state, &addressing, &mut ());
         let next_port = self.next_port_offset(state, &addressing, &mut ());
         let next_addr = next_node.map(|n| {
@@ -278,9 +280,23 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                         address.as_ref().expect("next_node exists"),
                         out_port.expect("next_node exists"),
                     );
-                    let ind = match out_port.unwrap().direction() {
-                        Direction::Incoming => -1,
-                        Direction::Outgoing => 1,
+                    let ind = {
+                        let offset = out_port.unwrap().index();
+                        let g = skeleton.graph();
+                        let out_node = g.output(curr_node, offset).and_then(|op| {
+                            let ip = g.port_link(op)?;
+                            g.port_node(ip)
+                        });
+                        let in_node = g.input(curr_node, offset).and_then(|op| {
+                            let ip = g.port_link(op)?;
+                            g.port_node(ip)
+                        });
+                        if out_node == Some(n) {
+                            1
+                        } else {
+                            assert_eq!(in_node, Some(n));
+                            -1
+                        }
                     };
                     (line_ind, ind)
                 })
