@@ -54,6 +54,8 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
+    let mut rng = StdRng::seed_from_u64(1234);
+
     // large graphs
     let dir = args.directory;
     {
@@ -61,7 +63,7 @@ fn main() {
         let (n_graphs, n, m, d) = (args.n_large, args.v_large, args.e_large, args.d_large);
         for i in 0..n_graphs {
             println!("{}/{n_graphs} large graphs...", i + 1);
-            let g = gen_graph(n, m, d).expect("could not generate graph");
+            let g = gen_graph(n, m, d, &mut rng).expect("could not generate graph");
             let f = format!("{dir}/large_graphs/graph_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
         }
@@ -75,7 +77,7 @@ fn main() {
             let mut g = None;
             let mut n_fails = 0;
             while g.is_none() || !is_connected(g.as_ref().unwrap()) {
-                g = gen_graph(n, m, d);
+                g = gen_graph(n, m, d, &mut rng);
                 n_fails += 1;
                 if n_fails >= 10000 {
                     panic!("could not create connected graph with n={n}, m={m}, d={d}")
@@ -94,10 +96,9 @@ fn main() {
 ///  * n: number of vertices
 ///  * m: number of edges
 ///  * d: max in- and out-degree
-fn gen_graph(n: usize, m: usize, d: usize) -> Option<PortGraph> {
-    let mut rng = StdRng::seed_from_u64(1234);
-    let in_degrees = gen_degrees(n, m, d, &mut rng)?;
-    let out_degrees = gen_degrees(n, m, d, &mut rng)?;
+fn gen_graph<R: Rng>(n: usize, m: usize, d: usize, rng: &mut R) -> Option<PortGraph> {
+    let in_degrees = gen_degrees(n, m, d, rng)?;
+    let out_degrees = gen_degrees(n, m, d, rng)?;
 
     let mut g = PortGraph::new();
     for (i, o) in in_degrees.into_iter().zip(out_degrees) {
@@ -105,8 +106,8 @@ fn gen_graph(n: usize, m: usize, d: usize) -> Option<PortGraph> {
     }
     let max_port = g.port_count();
     for _ in 0..m {
-        let in_p = gen_port(max_port, &g, Direction::Incoming, &mut rng)?;
-        let out_p = gen_port(max_port, &g, Direction::Outgoing, &mut rng)?;
+        let in_p = gen_port(max_port, &g, Direction::Incoming, rng)?;
+        let out_p = gen_port(max_port, &g, Direction::Outgoing, rng)?;
         g.link_ports(out_p, in_p).expect("could not link");
     }
     Some(g)
