@@ -135,18 +135,12 @@ where
                 }
                 for out_port in graph.outputs(n) {
                     let in_port = graph.port_link(out_port).expect("Disconnected port");
-                    if let &Some(k) = k {
-                        let (vec, _) = &mut trace[out_port];
-                        let Some(pos) = vec.iter().position(|&x| x == k) else { continue };
-                        *vec = vec![vec[pos]];
-                        let (vec, _) = &mut trace[in_port];
-                        *vec = vec![vec[pos]];
-                    } else {
-                        let (vec, _) = &mut trace[out_port];
-                        vec.clear();
-                        let (vec, _) = &mut trace[in_port];
-                        vec.clear();
-                    }
+                    let [(out_trace, _), (in_trace, _)] = trace
+                        .get_disjoint_mut([out_port, in_port])
+                        .expect("linked ports must be disjoint");
+                    let pos = k.and_then(|k| out_trace.iter().position(|&x| x == k));
+                    *out_trace = pos.map(|pos| vec![out_trace[pos]]).unwrap_or_default();
+                    *in_trace = pos.map(|pos| vec![in_trace[pos]]).unwrap_or_default();
                 }
             }
         }
