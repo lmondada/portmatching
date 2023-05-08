@@ -29,7 +29,7 @@ fn bench_matching<M: Matcher, F: FnMut(Vec<Pattern>) -> M>(
     mut get_matcher: F,
 ) {
     group.sample_size(10);
-    for n in (0..patterns.len()).step_by(1000) {
+    for n in (0..patterns.len()).step_by(100) {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
@@ -46,7 +46,7 @@ fn bench_trie_construction<M: Matcher, F: FnMut(Vec<Pattern>) -> M>(
     mut get_matcher: F,
 ) {
     group.sample_size(10);
-    for n in (0..patterns.len()).step_by(1000) {
+    for n in (0..patterns.len()).step_by(100) {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
