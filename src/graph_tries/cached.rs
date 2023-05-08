@@ -59,7 +59,6 @@ impl BaseGraphTrie<S> {
         Self {
             graph: base.graph.clone(),
             weights,
-            perm_indices: Default::default(),
             trace: Default::default(),
             edge_cnt: Default::default(),
         }

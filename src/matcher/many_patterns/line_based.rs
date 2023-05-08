@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs};
+use std::collections::{BTreeMap, BTreeSet};
 
 use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortOffset};
 
@@ -146,8 +146,6 @@ impl ManyPatternMatcher for LineGraphTrie<BaseGraphTrie<(Vec<PortOffset>, usize)
                 first_edge = false;
             }
         }
-
-        fs::write("pre_trie.gv", self.dotstring());
 
         // A callback when a state is cloned in the trie
         // necessary to keep track of the match states
