@@ -122,12 +122,10 @@ mod tests {
     use portgraph::proptest::gen_portgraph;
     use proptest::prelude::*;
 
-    #[cfg(feature = "serde")]
     use itertools::Itertools;
 
     proptest! {
         #[ignore = "a bit slow"]
-        #[cfg(feature = "serde")]
         #[test]
         fn many_graphs_proptest_det_trie(
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
