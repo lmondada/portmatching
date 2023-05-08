@@ -9,7 +9,10 @@ use portgraph::{NodeIndex, PortGraph};
 pub mod many_patterns;
 pub mod single_pattern;
 
-pub use many_patterns::{BalancedTrieMatcher, ManyPatternMatcher, NaiveManyMatcher, PatternID};
+pub use many_patterns::{
+    BalancedTrieMatcher, DetTrieMatcher, ManyPatternMatcher, NaiveManyMatcher, NonDetTrieMatcher,
+    PatternID,
+};
 pub use single_pattern::SinglePatternMatcher;
 
 /// A trait for pattern matchers.
