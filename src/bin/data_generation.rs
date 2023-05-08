@@ -70,12 +70,12 @@ fn main() {
         fs::create_dir_all(format!("{dir}/small_graphs")).expect("could not create directory");
         let (n_graphs, n, m, d) = (args.n_small, args.v_small, args.e_small, args.d_small);
         for i in 0..n_graphs {
-            let mut g = gen_graph(n, m, d).expect("could not generate graph");
+            let mut g = None;
             let mut n_fails = 0;
-            while !is_connected(&g) {
-                g = gen_graph(n, m, d).expect("could not generate graph");
+            while g.is_none() || !is_connected(g.as_ref().unwrap()) {
+                g = gen_graph(n, m, d);
                 n_fails += 1;
-                if n_fails >= 1000 {
+                if n_fails >= 10000 {
                     panic!("could not create connected graph with n={n}, m={m}, d={d}")
                 }
             }
@@ -121,7 +121,7 @@ fn gen_port<R: Rng>(
     while g.port_direction(p).expect("invalid port") != dir || g.port_link(p).is_some() {
         p = port.sample(rng);
         n_fails += 1;
-        if n_fails >= 1000 {
+        if n_fails >= 10000 {
             return None;
         }
     }
@@ -139,7 +139,7 @@ fn gen_degrees<R: Rng>(n: usize, m: usize, d: usize, rng: &mut R) -> Option<Vec<
             vec.push(degree.sample(rng));
         }
         n_fails += 1;
-        if n_fails >= 1000 {
+        if n_fails >= 10000 {
             return None;
         }
     }
