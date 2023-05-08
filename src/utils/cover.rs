@@ -8,15 +8,14 @@ use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap};
 
 use crate::graph_tries::root_state;
 
-use super::{PermPortIndex, PermPortPool};
+use super::rekey_secmap;
 
 /// Extract new threads into separate nodes.
 ///
 /// TODO
 pub fn untangle_threads<F, G>(
     graph: &mut PortGraph,
-    mut trace: SecondaryMap<PermPortIndex, (Vec<usize>, bool)>,
-    mut pool: PermPortPool,
+    mut trace: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
     mut clone_state: G,
     mut rekey: F,
 ) -> BTreeSet<NodeIndex>
@@ -29,8 +28,7 @@ where
         .nodes_iter()
         .filter(|&n| {
             graph.all_ports(n).any(|p| {
-                let Some(perm) = pool[p] else { return false };
-                let (vec, _) = &trace[perm];
+                let (vec, _) = &trace[p];
                 !vec.is_empty()
             })
         })
@@ -64,10 +62,7 @@ where
         // Organise inports by their layer ind
         let mut ins = BTreeMap::new();
         for p in graph.inputs(node) {
-            let perm = pool[p];
-            let vec = perm
-                .map(|perm| trace[perm].0.as_slice())
-                .unwrap_or_default();
+            let vec = trace[p].0.as_slice();
             assert!(vec.len() <= 1);
             let k = vec.first().copied();
             ins.entry(k).or_insert_with(Vec::new).push(p);
@@ -80,11 +75,8 @@ where
                 graph
                     .outputs(node)
                     .filter(|&p| {
-                        let perm = pool[p];
-                        let vec = perm
-                            .map(|perm| trace[perm].0.as_slice())
-                            .unwrap_or_default();
-                        let is_new = perm.map(|perm| trace[perm].1).unwrap_or_default();
+                        let vec = trace[p].0.as_slice();
+                        let is_new = trace[p].1;
                         if !is_new {
                             return true;
                         }
@@ -102,69 +94,58 @@ where
             .collect();
         if ins.len() > 1 {
             all_nodes.remove(&node);
-            let mut out2next: BTreeMap<_, _> = graph
-                .outputs(node)
-                .map(|outp| {
-                    let inp = graph.port_link(outp).expect("Disconnected port");
-                    let in_perm = pool.get_or_create_perm(inp);
-                    let out_perm = pool.get_or_create_perm(outp);
-                    (out_perm, mem::take(&mut trace[in_perm]))
-                })
-                .collect();
-            let pool_mut = RefCell::new(&mut pool);
+            let mut trace_next_in = SecondaryMap::new();
+            for out_port in graph.outputs(node) {
+                let in_port = graph.port_link(out_port).expect("Disconnected port");
+                trace_next_in[out_port] = mem::take(&mut trace[in_port]);
+            }
+            let trace_mut = RefCell::new(&mut trace);
+            let trace_curr_mut = RefCell::new(&mut trace_next_in);
             let clone_state = |old, new, graph: &PortGraph| {
-                let mut pool = pool_mut.borrow_mut();
+                let mut trace = trace_mut.borrow_mut();
+                let mut trace_curr = trace_curr_mut.borrow_mut();
                 if visited.contains(&old) {
                     visited.insert(new);
                 }
-                for old_p in graph.all_ports(old) {
-                    let offset = graph.port_offset(old_p).expect("invalid port");
-                    let new_p = graph.port_index(new, offset).expect("invalid offset");
-                    let perm = pool.get_or_create_perm(new_p);
-                    if let Some(old_perm) = pool[old_p] {
-                        trace[perm] = trace[old_perm].clone();
-                    }
-                    let old_perm = pool.get_or_create_perm(old_p);
-                    let new_perm = pool.get_or_create_perm(new_p);
-                    if let Some(vec) = out2next.get(&old_perm) {
-                        out2next.insert(new_perm, vec.clone());
-                    }
+                for old_port in graph.all_ports(old) {
+                    let offset = graph.port_offset(old_port).expect("invalid port");
+                    let new_port = graph.port_index(new, offset).expect("invalid offset");
+                    trace[new_port] = trace[old_port].clone();
+                    trace_curr[new_port] = trace_curr[old_port].clone();
                 }
                 clone_state(old, new, graph)
             };
             // Split node according to ins/outs partition
             let new_nodes = split_node(graph, node, &ins, &outs, clone_state, |old, new| {
-                let mut pool = pool_mut.borrow_mut();
-                pool.rekey(old, new);
+                let mut trace = trace_mut.borrow_mut();
+                let mut trace_curr = trace_curr_mut.borrow_mut();
+                rekey_secmap(&mut trace, old, new);
+                rekey_secmap(&mut trace_curr, old, new);
                 rekey(old, new)
             });
+            // Restore trace for next inputs
+            for out_port in new_nodes.iter().flat_map(|&n| graph.outputs(n)) {
+                let in_port = graph.port_link(out_port).expect("Disconnected port");
+                trace[in_port] = mem::take(&mut trace_next_in[out_port]);
+            }
             // Reduce the inds of the new nodes
             for (k, n) in keys.iter().zip(new_nodes) {
                 if k.is_some() {
                     all_nodes.insert(n);
                 }
-                for out_p in graph.outputs(n) {
-                    let out_perm = pool[out_p];
-                    let in_p = graph.port_link(out_p).expect("Disconnected port");
+                for out_port in graph.outputs(n) {
+                    let in_port = graph.port_link(out_port).expect("Disconnected port");
                     if let &Some(k) = k {
-                        let out_perm = out_perm.expect("k exists");
-                        let (vec, _) = &mut trace[out_perm];
+                        let (vec, _) = &mut trace[out_port];
                         let Some(pos) = vec.iter().position(|&x| x == k) else { continue };
                         *vec = vec![vec[pos]];
-                        let in_perm = pool.get_or_create_perm(in_p);
-                        let out_perm = pool[out_p].expect("k exists");
-                        trace[in_perm] = out2next.remove(&out_perm).expect("k exists");
-                        let (vec, _) = &mut trace[in_perm];
+                        let (vec, _) = &mut trace[in_port];
                         *vec = vec![vec[pos]];
                     } else {
-                        if let Some(out_perm) = out_perm {
-                            let (vec, _) = &mut trace[out_perm];
-                            vec.clear();
-                        }
-                        if let Some(in_perm) = pool[in_p] {
-                            let (vec, _) = &mut trace[in_perm];
-                            vec.clear();
-                        }
+                        let (vec, _) = &mut trace[out_port];
+                        vec.clear();
+                        let (vec, _) = &mut trace[in_port];
+                        vec.clear();
                     }
                 }
             }
@@ -175,10 +156,10 @@ where
         .iter()
         .copied()
         .filter(|&n| {
-            graph.output_links(n).flatten().all(|p| {
-                let Some(perm) = pool[p] else { return true };
-                trace[perm].0.is_empty()
-            })
+            graph
+                .output_links(n)
+                .flatten()
+                .all(|p| trace[p].0.is_empty())
         })
         .collect()
 }
@@ -336,8 +317,6 @@ mod tests {
 
     use portgraph::{PortGraph, PortOffset, SecondaryMap};
 
-    use crate::utils::PermPortPool;
-
     use super::untangle_threads;
 
     #[test]
@@ -361,7 +340,7 @@ mod tests {
             )
         };
 
-        let mut threads = [
+        let threads = [
             edge(&g, (0, 0), (1, 0)),
             edge(&g, (0, 1), (2, 0)),
             edge(&g, (1, 0), (3, 0)),
@@ -374,7 +353,6 @@ mod tests {
         }
 
         let mut new_nodes = BTreeMap::new();
-        let mut pool = PermPortPool::new();
         let mut trace: SecondaryMap<_, _> = Default::default();
         let thread_inds = [
             (vec![0], vec![1]),
@@ -383,16 +361,13 @@ mod tests {
             (vec![1], vec![2]),
             (vec![2, 3], vec![3, 4]),
         ];
-        for (&(outp, inp), (out_ind, in_ind)) in threads.iter().zip(thread_inds) {
-            let in_perm = pool.get_or_create_perm(inp);
-            let out_perm = pool.get_or_create_perm(outp);
-            trace[in_perm] = (in_ind, false);
-            trace[out_perm] = (out_ind, false);
+        for (&(out_port, in_port), (out_ind, in_ind)) in threads.iter().zip(thread_inds) {
+            trace[in_port] = (in_ind, false);
+            trace[out_port] = (out_ind, false);
         }
         untangle_threads(
             &mut g,
             trace,
-            pool,
             |old_n, new_n, _| {
                 new_nodes.insert(old_n, new_n);
             },

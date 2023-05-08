@@ -4,7 +4,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use portgraph::dot::dot_string;
+// use portgraph::dot::dot_string;
 use portgraph::PortGraph;
 use portmatching::{
     matcher::{
@@ -31,11 +31,11 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<Pattern>> {
     all_patterns.sort_unstable();
     for path in all_patterns {
         let p: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
-        {
-            let mut path = path;
-            path.set_extension("gv");
-            fs::write(path, dot_string(&p)).unwrap();
-        }
+        // {
+        //     let mut path = path;
+        //     path.set_extension("gv");
+        //     fs::write(path, dot_string(&p)).unwrap();
+        // }
         patterns.push(Pattern::from_graph(p).unwrap());
     }
 
@@ -49,11 +49,11 @@ fn load_graph(dir: &Path) -> io::Result<PortGraph> {
         let path = entry.path();
         if valid_binary_file(&file_name, "graph") {
             let graph: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
-            {
-                let mut path = path;
-                path.set_extension("gv");
-                fs::write(path, dot_string(&graph)).unwrap();
-            }
+            // {
+            //     let mut path = path;
+            //     path.set_extension("gv");
+            //     fs::write(path, dot_string(&graph)).unwrap();
+            // }
             return Ok(graph);
         }
     }
@@ -149,18 +149,18 @@ fn from_saved_patterns() {
         let exp = load_results(&path).unwrap();
 
         let matcher = LineGraphTrie::from_patterns(patterns.clone());
-        // let matcher2 = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
-        {
-            let mut path = path.clone();
-            path.push("trie.gv");
-            fs::write(path, matcher.dotstring()).unwrap();
-        }
+        let matcher2 = LineGraphTrie::from_patterns(patterns.clone()).to_cached_trie();
+        // {
+        //     let mut path = path.clone();
+        //     path.push("trie.gv");
+        //     fs::write(path, matcher.dotstring()).unwrap();
+        // }
         // {
         //     let mut path = path;
         //     path.push("trie2.gv");
         //     fs::write(path, matcher2.dotstring()).unwrap();
         // }
         test(matcher, &graph, &exp, patterns.len());
-        // test(matcher2, &graph, &exp, patterns.len());
+        test(matcher2, &graph, &exp, patterns.len());
     }
 }
