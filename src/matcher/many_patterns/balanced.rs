@@ -175,7 +175,6 @@ mod tests {
     // use std::fs;
     // use glob::glob;
 
-    #[cfg(feature = "serde")]
     use itertools::Itertools;
 
     use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
@@ -397,7 +396,6 @@ mod tests {
 
     proptest! {
         #[ignore = "a bit slow"]
-        #[cfg(feature = "serde")]
         #[test]
         fn many_graphs_proptest(
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),

@@ -18,7 +18,7 @@
 //! g1.add_node(0, 0);
 //! g2.add_node(1, 1);
 //! let (p1, p2) = (Pattern::from_graph(g1.clone())?, Pattern::from_graph(g2)?);
-//! let trie = LineGraphTrie::from_patterns([p1, p2]);
+//! let trie = BalancedTrieMatcher::from_patterns([p1, p2]);
 //! trie.find_matches(&g1);
 //! # Ok::<(), InvalidPattern>(())
 //! ```
