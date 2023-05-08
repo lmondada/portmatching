@@ -25,7 +25,7 @@ jobs:
       
       - name: Generate datasets
         run: |
-          cargo run --bin=data_generation --all-features -- -k10000 -N1000 -E4000 -D10 -n30 -e120
+          cargo run --bin=data_generation --all-features -- -k10000 -N1000 -E4000 -D10 -n30 -d10 -e300
           cargo run --bin=data_generation --all-features -- -K1 -k100 -N500 -E1000 -D10 -o examples/data
 
       - name: Push to repo

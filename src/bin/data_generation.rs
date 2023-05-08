@@ -81,6 +81,7 @@ fn main() {
                     panic!("could not create connected graph with n={n}, m={m}, d={d}")
                 }
             }
+            let g = g.unwrap();
             let f = format!("{dir}/small_graphs/pattern_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
         }
