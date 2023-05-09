@@ -1,6 +1,8 @@
 on:
   push:
-    branches: [main]
+    # branches: [main]
+    # TODO: revert to main when serialization in stable portgraph
+    branches: [serialize]
 
 name: "Update origin/bench"
 
@@ -23,8 +25,8 @@ jobs:
           git config user.name "GitHub Actions Bot"
           git config user.email "<>"
       
-      - name: Merge main into bench
+      - name: Merge serialize into bench
         run: |
           git switch bench
-          git merge -Xtheirs -m "Merge branch main into bench" origin/main
+          git merge -Xtheirs -m "Merge branch serialize into bench" origin/serialize
           git push
