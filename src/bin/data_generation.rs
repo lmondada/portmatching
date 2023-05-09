@@ -144,7 +144,7 @@ fn construct_trie<F: Fn(Vec<Pattern>) -> T, T: Serialize>(
         let patterns = patterns[0..i].to_vec();
         println!("Constructing {} for {} patterns", name, i);
         let matcher = builder(patterns);
-        let f = format!("{dir}/tries/{name}_{i}.bin");
+        let f = format!("{dir}/{name}_{i}.bin");
         fs::write(f, rmp_serde::to_vec(&matcher).unwrap()).expect("could not write to file");
     }
 }
