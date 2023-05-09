@@ -11,7 +11,7 @@ rust-version = "1.69"
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-portgraph = { rev = "3ca1e5f", git = "https://github.com/CQCL/portgraph.git"}
+portgraph = { rev = "071fcbf", git = "https://github.com/CQCL/portgraph.git"}
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 
 # these are for datagen only
@@ -33,7 +33,7 @@ criterion = { version = "0.4.0", features = ["html_reports"] }
 
 [dev-dependencies.portgraph]
 # version = "0.2.0"
-rev = "3ca1e5f"
+rev = "071fcbf"
 git = "https://github.com/CQCL/portgraph.git"
 features = ["proptest", "serde"]
 
