@@ -39,11 +39,9 @@ trie.find_matches(&g1);
 
 ## Features
 
-Note: none of these features currently offer useful features to the end user of
-the crate. They are useful for testing and benchmarking.
 
--   `serde`: Enable serialization and deserialization via serde. Currently WIP.
--   `datagen`: Necessary for the [`data_generation`](src/bin/data_generation.rs) binary.
+-   `serde`: Enable serialization and deserialization via serde.
+-   `datagen`: Necessary for the [`data_generation`](src/bin/data_generation.rs) binary. This feature is only useful for testing and benchmarking.
 
 ## License
 

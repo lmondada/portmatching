@@ -17,6 +17,9 @@ use std::{
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::addressing::{
     pg::AsPathOffset, Address, AddressCache, AsSpineID, Rib, SkeletonAddressing, SpineAddress,
 };
@@ -29,6 +32,7 @@ use crate::addressing::{
 /// but is unlinked (it is "dangling"), or the port does not exist.
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum StateTransition<Address> {
     /// The port exists and is linked to another port.
     ///

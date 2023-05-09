@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortOffset};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::{
     addressing::{
         cache::{Cache, SpineID},
@@ -23,6 +26,7 @@ use crate::graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID};
 ///
 /// This spreads out the occurence of non-deterministic (expensive) states in the trie
 /// in-between deterministic (cheap) ones.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BalancedTrieMatcher<T> {
     trie: T,
     match_states: BTreeMap<StateID, Vec<PatternID>>,

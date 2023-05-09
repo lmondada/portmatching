@@ -9,10 +9,14 @@
 //! parts of the trie).
 use portgraph::PortOffset;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::{Address, NodeOffset};
 
 /// A unique identifier for a vertebra.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SpineID(pub(crate) usize);
 
 /// Obtain spine IDs from addresses, for caching.

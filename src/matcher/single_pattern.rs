@@ -7,11 +7,15 @@ use std::collections::BTreeMap;
 use bimap::BiBTreeMap;
 use portgraph::{NodeIndex, PortGraph};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::pattern::{Edge, Pattern};
 
 use super::Matcher;
 
 /// A simple matcher for a single pattern.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SinglePatternMatcher {
     pattern: Pattern,
     edges: Vec<Edge>,

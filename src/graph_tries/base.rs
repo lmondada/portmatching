@@ -11,6 +11,9 @@ use portgraph::{
     Weights,
 };
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::{
     addressing::{
         cache::SpineID, pg::AsPathOffset, Address, AsSpineID, PortGraphAddressing, Rib, Skeleton,
@@ -30,6 +33,7 @@ use super::{GraphTrie, StateID, StateTransition};
 /// transition Fail is the only one that should be followed. At write time,
 /// an unset field is seen as a license to assign whatever is most convenient.
 #[derive(Clone, Default, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct NodeWeight<T> {
     pub(crate) out_port: Option<PortOffset>,
     pub(crate) address: Option<Address<usize>>,
@@ -102,6 +106,7 @@ type EdgeWeight = StateTransition<(Address<usize>, Vec<Rib>)>;
 /// split states where necessary to keep avoid cross-talk, i.e. creating new
 /// disallowed state transitions as a by-product of the new transitions.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BaseGraphTrie<T = (Vec<PortOffset>, usize)> {
     pub(crate) graph: PortGraph,
     pub(crate) weights: Weights<NodeWeight<T>, EdgeWeight>,

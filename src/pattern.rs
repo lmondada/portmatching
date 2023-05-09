@@ -6,12 +6,16 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use crate::utils::{centre, NoCentreError};
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// A pattern graph.
 ///
 /// Patterns must be connected and have a fixed `root` node,
 /// which by default is chosen to be the centre of the graph, for fast
 /// matching and short relative paths to the root.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Pattern {
     /// The pattern graph.
     pub(crate) graph: PortGraph,
@@ -20,6 +24,7 @@ pub struct Pattern {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct Edge(pub(crate) PortIndex, pub(crate) Option<PortIndex>);
 
 impl Pattern {

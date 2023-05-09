@@ -1,3 +1,6 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::{
     matcher::{Matcher, SinglePatternMatcher},
     pattern::Pattern,
@@ -10,6 +13,7 @@ use super::{ManyPatternMatcher, PatternID, PatternMatch};
 /// This matcher uses [`SinglePatternMatcher`]s to match each pattern separately.
 /// Useful as a baseline in benchmarking.
 #[derive(Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NaiveManyMatcher {
     matchers: Vec<SinglePatternMatcher>,
 }

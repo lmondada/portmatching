@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use portgraph::{NodeIndex, PortGraph, PortOffset};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::{
     addressing::{
         cache::Cache, pg::AsPathOffset, AsSpineID, Skeleton, SkeletonAddressing, SpineAddress,
@@ -17,6 +20,7 @@ use super::PatternMatch;
 ///
 /// This should perform very similarly to pattern matching each
 /// pattern independently, as there is no "smartness" in the trie.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NonDetTrieMatcher<T> {
     trie: T,
     match_states: BTreeMap<StateID, Vec<PatternID>>,

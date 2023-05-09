@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use portgraph::{NodeIndex, PortGraph, PortOffset};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::{
     addressing::{
         cache::Cache, pg::AsPathOffset, AsSpineID, Skeleton, SkeletonAddressing, SpineAddress,
@@ -17,6 +20,7 @@ use super::PatternMatch;
 ///
 /// In theory, this should perform best, but trie sizes grow exponentially,
 /// so not recommended in practice.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DetTrieMatcher<T> {
     trie: T,
     match_states: BTreeMap<StateID, Vec<PatternID>>,
