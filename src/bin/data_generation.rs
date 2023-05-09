@@ -1,51 +1,51 @@
 use clap::Parser;
 use portmatching::utils::is_connected;
 use rmp_serde;
-use std::fs;
+use std::{cmp, fs};
 
-use portgraph::{Direction, PortGraph, PortIndex};
+use portgraph::PortGraph;
 use rand::{distributions::Uniform, prelude::Distribution, rngs::StdRng, Rng, SeedableRng};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    // Number of large graphs
+    // Number of large circuits
     #[arg(short = 'K')]
     #[arg(default_value_t = 100)]
     n_large: usize,
-    // Number of small graphs,
+    // Number of small circuits,
     #[arg(short = 'k')]
     #[arg(default_value_t = 100)]
     n_small: usize,
 
-    // Max vertices in large graph
+    // Max gates in large circuits
     #[arg(short = 'N')]
     #[arg(default_value_t = 200)]
     v_large: usize,
-    // Max vertices in small graph
+    // Max gates in small circuits
     #[arg(short = 'n')]
     #[arg(default_value_t = 10)]
     v_small: usize,
 
-    // Max edges in large graph
-    #[arg(short = 'E')]
+    // Max qubits in large circuits
+    #[arg(short = 'Q')]
     #[arg(default_value_t = 400)]
-    e_large: usize,
-    // Max edges in small graph
-    #[arg(short = 'e')]
-    #[arg(default_value_t = 40)]
-    e_small: usize,
+    q_large: usize,
+    // Max qubits in small circuits
+    #[arg(short = 'q')]
+    #[arg(default_value_t = 5)]
+    q_small: usize,
 
-    // Max in/out-degree in large graph
+    // Max in/out-degree in large circuits
     #[arg(short = 'D')]
     #[arg(default_value_t = 5)]
     d_large: usize,
-    // Max in/out-degree in small graph
+    // Max in/out-degree in small circuits
     #[arg(short = 'd')]
     #[arg(default_value_t = 5)]
     d_small: usize,
 
-    // Graph location
+    // Circuits location
     #[arg(short = 'o')]
     #[arg(default_value = "datasets")]
     directory: String,
@@ -56,96 +56,76 @@ fn main() {
 
     let mut rng = StdRng::seed_from_u64(1234);
 
-    // large graphs
+    // large circuits
     let dir = args.directory;
     {
-        fs::create_dir_all(format!("{dir}/large_graphs")).expect("could not create directory");
-        let (n_graphs, n, m, d) = (args.n_large, args.v_large, args.e_large, args.d_large);
-        for i in 0..n_graphs {
-            println!("{}/{n_graphs} large graphs...", i + 1);
-            let g = gen_graph(n, m, d, &mut rng).expect("could not generate graph");
-            let f = format!("{dir}/large_graphs/graph_{i}.bin");
+        fs::create_dir_all(format!("{dir}/large_circuits")).expect("could not create directory");
+        let (n_circuits, n, q, d) = (args.n_large, args.v_large, args.q_large, args.d_large);
+        for i in 0..n_circuits {
+            println!("{}/{n_circuits} large circuits...", i + 1);
+            let g = gen_circ(n, q, d, &mut rng);
+            let f = format!("{dir}/large_circuits/circuit_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
         }
     }
-    // small graphs
+    // small circuits
     {
-        fs::create_dir_all(format!("{dir}/small_graphs")).expect("could not create directory");
-        let (n_graphs, n, m, d) = (args.n_small, args.v_small, args.e_small, args.d_small);
-        for i in 0..n_graphs {
-            println!("{}/{n_graphs} small graphs...", i + 1);
+        fs::create_dir_all(format!("{dir}/small_circuits")).expect("could not create directory");
+        let (n_circuits, n, q, d) = (args.n_small, args.v_small, args.q_small, args.d_small);
+        for i in 0..n_circuits {
+            println!("{}/{n_circuits} small circuits...", i + 1);
             let mut g = None;
             let mut n_fails = 0;
             while g.is_none() || !is_connected(g.as_ref().unwrap()) {
-                g = gen_graph(n, m, d, &mut rng);
+                g = Some(gen_circ(n, q, d, &mut rng));
                 n_fails += 1;
-                if n_fails >= 10000 {
-                    panic!("could not create connected graph with n={n}, m={m}, d={d}")
+                if n_fails >= 1000 {
+                    panic!("could not create connected circuit with n={n}, q={q}, d={d}")
                 }
             }
             let g = g.unwrap();
-            let f = format!("{dir}/small_graphs/pattern_{i}.bin");
+            let f = format!("{dir}/small_circuits/pattern_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
         }
     }
 }
 
-/// Generate a random graph
+fn gen_qubits<R: Rng>(q: usize, k: usize, rng: &mut R) -> Vec<usize> {
+    let qubits = Uniform::from(0..q);
+    let mut ret = Vec::with_capacity(k);
+    assert!(k <= q);
+    for _ in 0..k {
+        let mut q = None;
+        while q.is_none() || ret.contains(q.as_ref().unwrap()) {
+            q = Some(qubits.sample(rng));
+        }
+        ret.push(q.unwrap());
+    }
+    ret
+}
+
+/// Generate a random circuit
 ///
 /// # Arguments:
-///  * n: number of vertices
-///  * m: number of edges
+///  * n: number of gates
+///  * q: number of qubits
 ///  * d: max in- and out-degree
-fn gen_graph<R: Rng>(n: usize, m: usize, d: usize, rng: &mut R) -> Option<PortGraph> {
-    let in_degrees = gen_degrees(n, m, d, rng)?;
-    let out_degrees = gen_degrees(n, m, d, rng)?;
-
-    let mut g = PortGraph::new();
-    for (i, o) in in_degrees.into_iter().zip(out_degrees) {
-        g.add_node(i, o);
-    }
-    let max_port = g.port_count();
-    for _ in 0..m {
-        let in_p = gen_port(max_port, &g, Direction::Incoming, rng)?;
-        let out_p = gen_port(max_port, &g, Direction::Outgoing, rng)?;
-        g.link_ports(out_p, in_p).expect("could not link");
-    }
-    Some(g)
-}
-
-fn gen_port<R: Rng>(
-    max_port: usize,
-    g: &PortGraph,
-    dir: Direction,
-    rng: &mut R,
-) -> Option<PortIndex> {
-    let port = Uniform::from(0..max_port).map(|p| PortIndex::new(p));
-    let mut p = port.sample(rng);
-    let mut n_fails = 0;
-    while g.port_direction(p).expect("invalid port") != dir || g.port_link(p).is_some() {
-        p = port.sample(rng);
-        n_fails += 1;
-        if n_fails >= 10000 {
-            return None;
+fn gen_circ<R: Rng>(n: usize, q: usize, d: usize, rng: &mut R) -> PortGraph {
+    let mut prev_gates = vec![None; q];
+    let d = cmp::min(d, q);
+    let arity = Uniform::from(1..=d);
+    let mut circ = PortGraph::new();
+    for _ in 0..n {
+        let k = arity.sample(rng);
+        let v = circ.add_node(k, k);
+        for (i, q) in gen_qubits(q, k, rng).into_iter().enumerate() {
+            let in_p = circ.input(v, i).unwrap();
+            let out_p = circ.output(v, i).unwrap();
+            if let Some(prev_out) = prev_gates[q] {
+                circ.link_ports(prev_out, in_p).expect("could not link");
+            }
+            prev_gates[q] = Some(out_p);
         }
     }
-    Some(p)
-}
-
-/// Generate a vec of size n, with values in 0..=d and sum >= m
-fn gen_degrees<R: Rng>(n: usize, m: usize, d: usize, rng: &mut R) -> Option<Vec<usize>> {
-    let mut vec = Vec::new();
-    let mut n_fails = 0;
-    let degree = Uniform::from(0..=d);
-    while vec.iter().copied().sum::<usize>() < m {
-        vec = Vec::with_capacity(n);
-        for _ in 0..n {
-            vec.push(degree.sample(rng));
-        }
-        n_fails += 1;
-        if n_fails >= 10000 {
-            return None;
-        }
-    }
-    Some(vec)
+    circ
 }

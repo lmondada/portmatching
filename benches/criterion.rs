@@ -29,7 +29,7 @@ fn bench_matching<M: Matcher, F: FnMut(Vec<Pattern>) -> M>(
     mut get_matcher: F,
 ) {
     group.sample_size(10);
-    for n in (0..patterns.len()).step_by(100) {
+    for n in (0..patterns.len()).step_by(30) {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
@@ -46,7 +46,7 @@ fn bench_trie_construction<M: Matcher, F: FnMut(Vec<Pattern>) -> M>(
     mut get_matcher: F,
 ) {
     group.sample_size(10);
-    for n in (0..patterns.len()).step_by(100) {
+    for n in (0..patterns.len()).step_by(30) {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
@@ -58,28 +58,29 @@ fn bench_trie_construction<M: Matcher, F: FnMut(Vec<Pattern>) -> M>(
 }
 
 fn perform_benches(c: &mut Criterion) {
-    let patterns = glob::glob("datasets/small_graphs/*.bin")
-        .expect("cannot read small graphs directory")
+    let patterns = glob::glob("datasets/small_circuits/*.bin")
+        .expect("cannot read small circuits directory")
         .map(|p| {
             let g = rmp_serde::from_read(
                 File::open(p.as_ref().expect("path does not exist?"))
-                    .expect("Could not open small graph"),
+                    .expect("Could not open small circuit"),
             )
             .expect("could not serialize");
             Pattern::from_graph(g).expect("pattern not connected")
         })
         .collect_vec();
-    let graph = glob::glob("datasets/large_graphs/*.bin")
-        .expect("cannot read large graphs directory")
+    // TODO: use more than one graph in benchmark
+    let graph = glob::glob("datasets/large_circuits/*.bin")
+        .expect("cannot read large circuits directory")
         .map(|p| {
             rmp_serde::from_read(
                 File::open(p.as_ref().expect("path does not exist?"))
-                    .expect("Could not open small graph"),
+                    .expect("Could not open small circuit"),
             )
             .expect("could not serialize")
         })
         .next()
-        .expect("Did not find any large graph");
+        .expect("Did not find any large circuit");
 
     let mut group = c.benchmark_group("Many Patterns Matching");
     bench_matching(
