@@ -25,6 +25,10 @@ jobs:
       
       - name: Merge main into bench
         run: |
+          git checkout -b deleteme main
+          git reset --soft origin/bench
+          git commit -m "Merge main into bench"
           git switch bench
-          git reset --hard origin/main
+          git cherry-pick deleteme
+          git branch -D deleteme
           git push
