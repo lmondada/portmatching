@@ -12,24 +12,21 @@ use itertools::Itertools;
 use portgraph::PortGraph;
 use portmatching::graph_tries::BaseGraphTrie;
 use portmatching::matcher::many_patterns::{
-    BalancedTrieMatcher,
-    DetTrieMatcher,
-    ManyPatternMatcher,
-    NonDetTrieMatcher,
-    // NaiveManyMatcher,
+    BalancedTrieMatcher, DetTrieMatcher, ManyPatternMatcher, NaiveManyMatcher, NonDetTrieMatcher,
 };
 use portmatching::matcher::Matcher;
 use portmatching::pattern::Pattern;
 
-fn bench_matching<M: Matcher, F: FnMut(Vec<Pattern>) -> M>(
+fn bench_matching<M: Matcher>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[Pattern],
+    sizes: impl Iterator<Item = usize>,
     graph: &PortGraph,
-    mut get_matcher: F,
+    mut get_matcher: impl FnMut(Vec<Pattern>) -> M,
 ) {
     group.sample_size(10);
-    for n in (0..patterns.len()).step_by(30) {
+    for n in sizes {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
@@ -39,14 +36,15 @@ fn bench_matching<M: Matcher, F: FnMut(Vec<Pattern>) -> M>(
     }
 }
 
-fn bench_trie_construction<M: Matcher, F: FnMut(Vec<Pattern>) -> M>(
+fn bench_trie_construction<M: Matcher>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[Pattern],
-    mut get_matcher: F,
+    sizes: impl Iterator<Item = usize>,
+    mut get_matcher: impl FnMut(Vec<Pattern>) -> M,
 ) {
     group.sample_size(10);
-    for n in (0..patterns.len()).step_by(30) {
+    for n in sizes {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
@@ -84,23 +82,33 @@ fn perform_benches(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("Many Patterns Matching");
     bench_matching(
+        "Naive matching",
+        &mut group,
+        &patterns,
+        (0..=300).step_by(100),
+        &graph,
+        NaiveManyMatcher::from_patterns,
+    );
+    bench_matching(
         "Balanced Graph Trie",
         &mut group,
         &patterns,
+        (0..=1000).step_by(100),
         &graph,
         BalancedTrieMatcher::<BaseGraphTrie>::from_patterns,
     );
-    bench_matching(
-        "Balanced Graph Trie (cached)",
-        &mut group,
-        &patterns,
-        &graph,
-        |p| BalancedTrieMatcher::<BaseGraphTrie>::from_patterns(p).to_cached_trie(),
-    );
+    // bench_matching(
+    //     "Balanced Graph Trie (cached)",
+    //     &mut group,
+    //     &patterns,
+    //     &graph,
+    //     |p| BalancedTrieMatcher::<BaseGraphTrie>::from_patterns(p).to_cached_trie(),
+    // );
     bench_matching(
         "Non-deterministic Graph Trie",
         &mut group,
         &patterns,
+        (0..=1000).step_by(100),
         &graph,
         NonDetTrieMatcher::<BaseGraphTrie>::from_patterns,
     );
@@ -108,6 +116,7 @@ fn perform_benches(c: &mut Criterion) {
         "Deterministic Graph Trie",
         &mut group,
         &patterns,
+        (0..=300).step_by(100),
         &graph,
         DetTrieMatcher::<BaseGraphTrie>::from_patterns,
     );
@@ -122,21 +131,28 @@ fn perform_benches(c: &mut Criterion) {
         "Balanced Graph Trie",
         &mut group,
         &patterns,
+        (0..=300).step_by(30),
         BalancedTrieMatcher::<BaseGraphTrie>::from_patterns,
     );
-    bench_trie_construction("Balanced Graph Trie (cached)", &mut group, &patterns, |p| {
-        BalancedTrieMatcher::<BaseGraphTrie>::from_patterns(p).to_cached_trie()
-    });
+    bench_trie_construction(
+        "Balanced Graph Trie (cached)",
+        &mut group,
+        &patterns,
+        (0..=300).step_by(30),
+        |p| BalancedTrieMatcher::<BaseGraphTrie>::from_patterns(p).to_cached_trie(),
+    );
     bench_trie_construction(
         "Non-deterministic Graph Trie",
         &mut group,
         &patterns,
+        (0..=300).step_by(30),
         NonDetTrieMatcher::<BaseGraphTrie>::from_patterns,
     );
     bench_trie_construction(
         "Deterministic Graph Trie",
         &mut group,
         &patterns,
+        (0..=300).step_by(30),
         DetTrieMatcher::<BaseGraphTrie>::from_patterns,
     );
     group.finish();

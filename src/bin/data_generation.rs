@@ -63,7 +63,7 @@ fn main() {
         let (n_circuits, n, q, d) = (args.n_large, args.v_large, args.q_large, args.d_large);
         for i in 0..n_circuits {
             println!("{}/{n_circuits} large circuits...", i + 1);
-            let g = gen_circ(n, q, d, &mut rng);
+            let g = gen_circ(n, q, d, |c| !exists_two_cx_gates(c), &mut rng);
             let f = format!("{dir}/large_circuits/circuit_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
         }
@@ -74,16 +74,14 @@ fn main() {
         let (n_circuits, n, q, d) = (args.n_small, args.v_small, args.q_small, args.d_small);
         for i in 0..n_circuits {
             println!("{}/{n_circuits} small circuits...", i + 1);
-            let mut g = None;
-            let mut n_fails = 0;
-            while g.is_none() || !is_connected(g.as_ref().unwrap()) {
-                g = Some(gen_circ(n, q, d, &mut rng));
-                n_fails += 1;
-                if n_fails >= 1000 {
-                    panic!("could not create connected circuit with n={n}, q={q}, d={d}")
-                }
-            }
-            let g = g.unwrap();
+
+            let g = gen_circ(
+                n,
+                q,
+                d,
+                |c| is_connected(c) && exists_two_cx_gates(c),
+                &mut rng,
+            );
             let f = format!("{dir}/small_circuits/pattern_{i}.bin");
             fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
         }
@@ -110,22 +108,68 @@ fn gen_qubits<R: Rng>(q: usize, k: usize, rng: &mut R) -> Vec<usize> {
 ///  * n: number of gates
 ///  * q: number of qubits
 ///  * d: max in- and out-degree
-fn gen_circ<R: Rng>(n: usize, q: usize, d: usize, rng: &mut R) -> PortGraph {
-    let mut prev_gates = vec![None; q];
+///  * pred: a predicate the circuit must satisfy
+///  * rng: a random number generator
+///
+/// The predicate should be montonic, i.e. if it returns true for a circuit, it
+/// should also return true for any circuit with more gates.
+fn gen_circ<R, F>(n: usize, q: usize, d: usize, pred: F, rng: &mut R) -> PortGraph
+where
+    R: Rng,
+    F: Fn(&PortGraph) -> bool,
+{
+    let mut circ = None;
+    let mut n_fails = 0;
     let d = cmp::min(d, q);
     let arity = Uniform::from(1..=d);
-    let mut circ = PortGraph::new();
-    for _ in 0..n {
-        let k = arity.sample(rng);
-        let v = circ.add_node(k, k);
-        for (i, q) in gen_qubits(q, k, rng).into_iter().enumerate() {
-            let in_p = circ.input(v, i).unwrap();
-            let out_p = circ.output(v, i).unwrap();
-            if let Some(prev_out) = prev_gates[q] {
-                circ.link_ports(prev_out, in_p).expect("could not link");
+    while circ.is_none() && n_fails < 10000 {
+        circ = {
+            let mut prev_gates = vec![None; q];
+            let mut circ = PortGraph::new();
+            for _ in 0..n {
+                let k = arity.sample(rng);
+                let n = circ.add_node(k, k);
+                let qbs = gen_qubits(q, k, rng);
+                for (&q, in_p) in qbs.iter().zip(circ.inputs(n)) {
+                    if let Some(prev_out) = prev_gates[q] {
+                        circ.link_ports(prev_out, in_p).expect("could not link");
+                    }
+                }
+                for (&q, out_p) in qbs.iter().zip(circ.outputs(n)) {
+                    prev_gates[q] = out_p.into();
+                }
             }
-            prev_gates[q] = Some(out_p);
-        }
+            pred(&circ).then_some(circ)
+        };
+        n_fails += 1;
     }
-    circ
+    circ.expect("could not generate circuit")
+}
+
+/// Whether there are two successive 2qb gates on the same two qubits
+fn exists_two_cx_gates(circ: &PortGraph) -> bool {
+    for n in circ.nodes_iter() {
+        if circ.num_outputs(n) != 2 {
+            continue;
+        }
+        let mut next = circ.outputs(n).map(|out| circ.port_link(out));
+        let Some(next0) = next.next().unwrap() else { continue };
+        let Some(next1) = next.next().unwrap() else { continue };
+        let next = [next0, next1];
+        if circ.port_offset(next[0]).expect("invalid port").index() != 0 {
+            continue;
+        }
+        if circ.port_offset(next[1]).expect("invalid port").index() != 1 {
+            continue;
+        }
+        if circ.port_node(next[0]) != circ.port_node(next[1]) {
+            continue;
+        }
+        let next = circ.port_node(next[0]).unwrap();
+        if circ.num_inputs(next) != 2 {
+            continue;
+        }
+        return true;
+    }
+    return false;
 }
