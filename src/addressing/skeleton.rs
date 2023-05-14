@@ -12,7 +12,10 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
 
 use crate::utils::{follow_path, port_opposite, pre_order::shortest_path};
 
-use super::{Address, PortGraphAddressing, Rib};
+use super::{
+    constraint::{NodeAddress, PortAddress, PortLabel},
+    Address, PortGraphAddressing, Rib,
+};
 
 type Spine = super::Spine<(Vec<PortOffset>, usize)>;
 type SpineRef<'a> = &'a [(Vec<PortOffset>, usize)];
@@ -48,6 +51,68 @@ impl<'g> Skeleton<'g> {
     /// The root node of the graph of the skeleton
     pub fn root(&self) -> NodeIndex {
         self.root
+    }
+
+    pub(crate) fn get_port_addr(&self, port: PortIndex) -> PortAddress {
+        let node = self.graph().port_node(port).expect("invalid pattern");
+        let offset = self.graph().port_offset(port).expect("invalid pattern");
+        PortAddress {
+            addr: self.get_node_addr(node),
+            label: match self.graph().port_direction(port).expect("invalid pattern") {
+                Direction::Incoming => PortLabel::Incoming(offset.index()),
+                Direction::Outgoing => PortLabel::Outgoing(offset.index()),
+            },
+        }
+    }
+
+    pub(crate) fn get_node_addr(&self, node: NodeIndex) -> NodeAddress {
+        if node == self.root {
+            return NodeAddress {
+                no_match: Vec::new(),
+                the_match: (Vec::new(), 0, 0),
+            };
+        }
+        let spine_inst = self.instantiate_spine(&self.spine);
+        let mut rev_inds: BTreeMap<_, Vec<_>> = Default::default();
+        for (i, lp) in spine_inst.iter().enumerate() {
+            if let Some(lp) = lp {
+                rev_inds.entry(lp.line_ind).or_default().push(i);
+            }
+        }
+        let mut all_addrs = Vec::new();
+        for line in self.node2line[node.index()].iter() {
+            for &spine_ind in rev_inds.get(&line.line_ind).unwrap_or(&Vec::new()) {
+                let spine = spine_inst[spine_ind].expect("By construction of in rev_inds");
+                let ind = line.ind - spine.ind;
+                all_addrs.push((spine_ind, ind))
+            }
+        }
+        all_addrs.sort_unstable();
+        let addr = all_addrs
+            .into_iter()
+            .next()
+            .expect("must have at least one address");
+        let mut ribs = self.get_ribs(&self.spine);
+        let mut spine = self.spine.clone();
+        let the_match = (spine[addr.0].0.clone(), spine[addr.0].1, addr.1);
+        if addr.1 >= 0 {
+            spine.truncate(addr.0);
+            ribs.truncate(addr.0);
+        } else {
+            // Keep the spine up to addr as we need to check that there is > 0 addr
+            spine.truncate(addr.0 + 1);
+            ribs.truncate(addr.0 + 1);
+            ribs[addr.0][0] = addr.1 + 1;
+        }
+        let no_match = spine
+            .into_iter()
+            .zip(ribs)
+            .map(|((fst, snd), third)| (fst, snd, third))
+            .collect();
+        NodeAddress {
+            the_match,
+            no_match,
+        }
     }
 
     /// Create a [`Skeleton`] from a graph and a root node.
@@ -136,9 +201,9 @@ impl<'g> Skeleton<'g> {
         spine
     }
 
-    pub(crate) fn get_spine(&self) -> &Spine {
-        &self.spine
-    }
+    // pub(crate) fn get_spine(&self) -> &Spine {
+    //     &self.spine
+    // }
 
     /// The ribs of the graph, relative to the spine
     ///
@@ -192,57 +257,57 @@ impl<'g> Skeleton<'g> {
     /// the node addressed by `addr` to the spine.
     ///
     /// Return the new address of the node
-    pub(crate) fn extend_spine(
-        &self,
-        spine: &mut Spine,
-        addr: &Address<usize>,
-        port: PortOffset,
-    ) -> Address<usize> {
-        let &(l_ind, ind) = addr;
-        let path_to_spine = spine[l_ind].0.clone();
-        let (spine_ind, l_ind) = {
-            let spine_root = follow_path(&path_to_spine, self.root, self.graph)
-                .expect("cannot reach spine root");
-            let line = self.node2line[spine_root.index()]
-                .iter()
-                .find(|l| l.offset == spine[l_ind].1)
-                .expect("Spine root is not root");
-            (line.ind, line.line_ind)
-        };
-        let mut spine_to_node = vec![None; ind.unsigned_abs()];
-        self.node2line
-            .iter()
-            .enumerate()
-            .flat_map(|(n, lines)| {
-                let node = NodeIndex::new(n);
-                lines.iter().map(move |line| (line, node))
-            })
-            .filter(|(line, _)| {
-                let spine_dst = line.ind - spine_ind;
-                line.line_ind == l_ind && ind * spine_dst >= 0 && spine_dst.abs() < ind.abs()
-            })
-            .for_each(|(line, node)| {
-                let spine_dst = line.ind - spine_ind;
-                // We check the sign of `ind` (instead of `spine_ind`) because
-                // the sign is always the same, except for the ambiguous
-                // `spine_ind == 0` case
-                let port = if ind < 0 {
-                    self.graph.input(node, line.offset)
-                } else {
-                    self.graph.output(node, line.offset)
-                };
-                spine_to_node[spine_dst.unsigned_abs()] =
-                    self.graph.port_offset(port.expect("Cannot follow path"));
-            });
-        let mut path = path_to_spine;
-        path.extend(
-            spine_to_node
-                .into_iter()
-                .map(|ind| ind.expect("Cannot follow path")),
-        );
-        spine.push((path, port.index()));
-        (spine.len() - 1, 0)
-    }
+    // pub(crate) fn extend_spine(
+    //     &self,
+    //     spine: &mut Spine,
+    //     addr: &Address<usize>,
+    //     port: PortOffset,
+    // ) -> Address<usize> {
+    //     let &(l_ind, ind) = addr;
+    //     let path_to_spine = spine[l_ind].0.clone();
+    //     let (spine_ind, l_ind) = {
+    //         let spine_root = follow_path(&path_to_spine, self.root, self.graph)
+    //             .expect("cannot reach spine root");
+    //         let line = self.node2line[spine_root.index()]
+    //             .iter()
+    //             .find(|l| l.offset == spine[l_ind].1)
+    //             .expect("Spine root is not root");
+    //         (line.ind, line.line_ind)
+    //     };
+    //     let mut spine_to_node = vec![None; ind.unsigned_abs()];
+    //     self.node2line
+    //         .iter()
+    //         .enumerate()
+    //         .flat_map(|(n, lines)| {
+    //             let node = NodeIndex::new(n);
+    //             lines.iter().map(move |line| (line, node))
+    //         })
+    //         .filter(|(line, _)| {
+    //             let spine_dst = line.ind - spine_ind;
+    //             line.line_ind == l_ind && ind * spine_dst >= 0 && spine_dst.abs() < ind.abs()
+    //         })
+    //         .for_each(|(line, node)| {
+    //             let spine_dst = line.ind - spine_ind;
+    //             // We check the sign of `ind` (instead of `spine_ind`) because
+    //             // the sign is always the same, except for the ambiguous
+    //             // `spine_ind == 0` case
+    //             let port = if ind < 0 {
+    //                 self.graph.input(node, line.offset)
+    //             } else {
+    //                 self.graph.output(node, line.offset)
+    //             };
+    //             spine_to_node[spine_dst.unsigned_abs()] =
+    //                 self.graph.port_offset(port.expect("Cannot follow path"));
+    //         });
+    //     let mut path = path_to_spine;
+    //     path.extend(
+    //         spine_to_node
+    //             .into_iter()
+    //             .map(|ind| ind.expect("Cannot follow path")),
+    //     );
+    //     spine.push((path, port.index()));
+    //     (spine.len() - 1, 0)
+    // }
 
     /// Return the spine as a list of nodes of [`self.graph`]
     fn instantiate_spine(&self, spine: SpineRef<'_>) -> Vec<Option<&LinePoint>> {

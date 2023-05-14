@@ -8,7 +8,13 @@ pub mod pattern;
 pub mod utils;
 
 pub use matcher::{
-    BalancedTrieMatcher, DetTrieMatcher, ManyPatternMatcher, Matcher, NaiveManyMatcher,
-    NonDetTrieMatcher, PatternID, SinglePatternMatcher,
+    BalancedTrieMatcher,
+    ManyPatternMatcher,
+    Matcher,
+    NaiveManyMatcher,
+    PatternID,
+    SinglePatternMatcher,
+    // DetTrieMatcher,
+    // NonDetTrieMatcher,
 };
 pub use pattern::Pattern;

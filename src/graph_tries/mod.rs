@@ -18,8 +18,16 @@ use std::{
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
 use crate::addressing::{
-    pg::AsPathOffset, Address, AddressCache, AsSpineID, Rib, SkeletonAddressing, SpineAddress,
+    constraint::{Constraint, PortAddress},
+    pg::AsPathOffset,
+    Address, AddressCache, AsSpineID, Rib, SpineAddress,
 };
+
+/// TODO turn this into a parameter or something
+pub struct GraphType<'g> {
+    pub(crate) graph: &'g PortGraph,
+    pub(crate) root: NodeIndex,
+}
 
 /// A state transition in a graph trie.
 ///
@@ -71,25 +79,25 @@ impl<A> StateTransition<A> {
 }
 
 impl StateTransition<(Address<usize>, Vec<Rib>)> {
-    /// Remove unnecessary information (ribs)
-    fn into_simplified(self) -> Self {
-        match self {
-            StateTransition::Node(mut addrs, offset) => {
-                for (addr, ribs) in addrs.iter_mut() {
-                    ribs.truncate(addr.0 + 1);
-                    if addr.1 >= 0 {
-                        ribs[addr.0] = [0, addr.1];
-                    } else {
-                        // Do not change max positive value
-                        ribs[addr.0][0] = addr.1;
-                    }
-                }
-                StateTransition::Node(addrs, offset)
-            }
-            StateTransition::NoLinkedNode => self,
-            StateTransition::FAIL => self,
-        }
-    }
+    // Remove unnecessary information (ribs)
+    // fn into_simplified(self) -> Self {
+    //     match self {
+    //         StateTransition::Node(mut addrs, offset) => {
+    //             for (addr, ribs) in addrs.iter_mut() {
+    //                 ribs.truncate(addr.0 + 1);
+    //                 if addr.1 >= 0 {
+    //                     ribs[addr.0] = [0, addr.1];
+    //                 } else {
+    //                     // Do not change max positive value
+    //                     ribs[addr.0][0] = addr.1;
+    //                 }
+    //             }
+    //             StateTransition::Node(addrs, offset)
+    //         }
+    //         StateTransition::NoLinkedNode => self,
+    //         StateTransition::FAIL => self,
+    //     }
+    // }
 }
 
 // The partial order on StateTransition is such that
@@ -146,7 +154,7 @@ pub(crate) fn root_state() -> NodeIndex {
     NodeIndex::new(0)
 }
 
-type GraphAddress<'n, G> = Address<<<G as GraphTrie>::SpineID as SpineAddress>::AsRef<'n>>;
+// type GraphAddress<'n, G> = Address<<<G as GraphTrie>::SpineID as SpineAddress>::AsRef<'n>>;
 
 /// A graph trie.
 ///
@@ -173,127 +181,80 @@ where
     // where
     //     for<'n> <Self::SpineID as SpineAddress>::AsRef<'n>: Copy + AsSpineID;
 
-    /// The addressing scheme used for the trie.
-    type Addressing<'g, 'n>: SkeletonAddressing<'g, 'n, Self::SpineID> + Clone
-    where
-        Self::SpineID: 'n;
-
     /// The underlying graph structure of the trie.
     fn trie(&self) -> &PortGraph;
 
-    /// The address of a trie state.
-    fn address(&self, state: StateID) -> Option<GraphAddress<'_, Self>>;
-
-    /// The spine of a trie state.
-    ///
-    /// Useful for the address encoding.
-    fn spine(&self, state: StateID) -> Option<&Vec<Self::SpineID>>;
+    /// The address of the current state
+    fn port_address(&self, state: StateID) -> Option<&PortAddress>;
 
     /// The port offset for the transition from `state`.
-    fn port_offset(&self, state: StateID) -> Option<PortOffset>;
+    fn ports<C: AddressCache>(
+        &self,
+        state: StateID,
+        graph: &GraphType,
+        _cache: &mut C,
+    ) -> Vec<PortIndex> {
+        let out_port = self.port_address(state);
+        out_port
+            .map(|p| p.ports(&graph.graph, graph.root))
+            .unwrap_or_default()
+    }
 
     /// The transition condition for the child linked at `port`.
     ///
     /// `port` must be an outgoing port of the trie.
-    fn transition<'g, 'n, 'm: 'n>(
-        &'n self,
-        port: PortIndex,
-        addressing: &Self::Addressing<'g, 'm>,
-    ) -> StateTransition<(Self::Addressing<'g, 'n>, GraphAddress<'n, Self>)>;
+    fn transition(&self, port: PortIndex) -> Option<&Constraint>;
 
     /// Whether the current state is not deterministic.
     fn is_non_deterministic(&self, state: StateID) -> bool;
-
-    /// The node in the current graph at `state`
-    fn node<C: AddressCache>(
-        &self,
-        state: StateID,
-        addressing: &Self::Addressing<'_, '_>,
-        cache: &mut C,
-    ) -> Option<NodeIndex> {
-        let addr = self.address(state)?;
-        addressing.get_node(&addr, cache)
-    }
-
-    /// The port in the current graph at `state`
-    fn port<C: AddressCache>(
-        &self,
-        state: StateID,
-        addressing: &Self::Addressing<'_, '_>,
-        cache: &mut C,
-    ) -> Option<PortIndex> {
-        let offset = self.port_offset(state)?;
-        addressing
-            .graph()
-            .port_index(self.node(state, addressing, cache)?, offset)
-    }
 
     /// The next node in the current graph if we follow one transition
     fn next_node<C: AddressCache>(
         &self,
         state: StateID,
-        addressing: &Self::Addressing<'_, '_>,
+        graph: &GraphType,
         cache: &mut C,
     ) -> Option<NodeIndex> {
-        let in_port = addressing
-            .graph()
-            .port_link(self.port(state, addressing, cache)?)?;
-        addressing.graph().port_node(in_port)
+        let ports = self.ports(state, graph, cache);
+        let port = if ports.len() == 1 {
+            ports[0]
+        } else {
+            return None;
+        };
+        let in_port = graph.graph.port_link(port)?;
+        graph.graph.port_node(in_port)
     }
 
     /// The next port in the current graph if we follow one transition
     fn next_port_offset<C: AddressCache>(
         &self,
         state: StateID,
-        addressing: &Self::Addressing<'_, '_>,
+        graph: &GraphType,
         cache: &mut C,
     ) -> Option<PortOffset> {
-        let in_port = addressing
-            .graph()
-            .port_link(self.port(state, addressing, cache)?)?;
-        addressing.graph().port_offset(in_port)
+        let ports = self.ports(state, graph, cache);
+        let port = if ports.len() == 1 {
+            ports[0]
+        } else {
+            return None;
+        };
+        let in_port = graph.graph.port_link(port)?;
+        graph.graph.port_offset(in_port)
     }
 
     /// The transitions to follow from `state`
     fn get_transitions<'g, 'n, 'm: 'n, C: AddressCache>(
         &'n self,
         state: StateID,
-        addressing: &Self::Addressing<'g, 'm>,
-        cache: &mut C,
+        graph: &GraphType,
+        _cache: &mut C,
     ) -> Vec<PortIndex> {
         // All transitions in `state` that are allowed for `graph`
-        let out_port = self.port(state, addressing, cache);
-        let in_port = out_port.and_then(|out_port| addressing.graph().port_link(out_port));
-        let in_offset = in_port.map(|in_port| {
-            addressing
-                .graph()
-                .port_offset(in_port)
-                .expect("invalid port")
-        });
-        let next_node =
-            in_port.map(|in_port| addressing.graph().port_node(in_port).expect("invalid port"));
         let mut transitions = self.trie().outputs(state).filter(move |&out_p| {
-            match self.transition(out_p, addressing) {
-                StateTransition::Node(addrs, offset) => {
-                    if in_offset != Some(offset) {
-                        return false;
-                    }
-                    addrs.iter().all(|(addressing, addr)| {
-                        let Some(next_addr) = addressing.get_addr(
-                                    next_node.expect("from if condition"),
-                                    cache
-                                ) else {
-                                    return false
-                                };
-                        &next_addr == addr
-                    })
-                }
-                StateTransition::NoLinkedNode => {
-                    // In read mode, out_port existing is enough
-                    out_port.is_some()
-                }
-                StateTransition::FAIL => true,
-            }
+            let Some(port_addr) = self.port_address(state) else { return false };
+            self.transition(out_p)
+                .map(|c| c.is_satisfied(&port_addr, &graph.graph, graph.root))
+                .unwrap_or(true)
         });
         if self.is_non_deterministic(state) {
             transitions.collect()
@@ -306,15 +267,10 @@ where
     fn next_states<'n, C: AddressCache>(
         &'n self,
         state: StateID,
-        addressing: &Self::Addressing<'_, 'n>,
+        graph: &GraphType,
         cache: &mut C,
     ) -> Vec<StateID> {
-        let addressing = if let Some(spine) = self.spine(state) {
-            addressing.with_spine(spine)
-        } else {
-            addressing.clone()
-        };
-        self.get_transitions(state, &addressing, cache)
+        self.get_transitions(state, graph, cache)
             .into_iter()
             .filter_map(|out_p| {
                 let in_p = self.trie().port_link(out_p)?;

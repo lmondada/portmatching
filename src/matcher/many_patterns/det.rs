@@ -4,9 +4,9 @@ use portgraph::{NodeIndex, PortGraph, PortOffset};
 
 use crate::{
     addressing::{
-        cache::Cache, pg::AsPathOffset, AsSpineID, Skeleton, SkeletonAddressing, SpineAddress,
+        cache::Cache, constraint::Constraint, pg::AsPathOffset, AsSpineID, Skeleton, SpineAddress,
     },
-    graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
+    graph_tries::{root_state, BaseGraphTrie, GraphTrie, GraphType, StateID},
     pattern::Edge,
     ManyPatternMatcher, Matcher, Pattern, PatternID,
 };
@@ -34,8 +34,8 @@ where
     fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
-        let addressing = T::Addressing::init(root, graph);
         let mut cache = Cache::default();
+        let graph = GraphType { graph, root };
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
             for state in current_states {
@@ -45,7 +45,7 @@ where
                         root,
                     });
                 }
-                for next_state in self.trie.next_states(state, &addressing, &mut cache) {
+                for next_state in self.trie.next_states(state, &graph, &mut cache) {
                     new_states.push(next_state);
                 }
             }
@@ -90,11 +90,20 @@ impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize
             );
         };
 
-        for Edge(out_port, _) in pattern.canonical_edge_ordering() {
+        for Edge(out_port, in_port) in pattern.canonical_edge_ordering() {
             // All other edges are deterministic
-            current_states = self
-                .trie
-                .add_graph_edge_det(out_port, current_states, &skeleton);
+            let constraint = if let Some(in_port) = in_port {
+                Constraint::Adjacency {
+                    other_ports: skeleton.get_port_addr(in_port),
+                }
+            } else {
+                Constraint::Dangling
+            };
+            current_states = self.trie.add_graph_edge_det(
+                &skeleton.get_port_addr(out_port),
+                current_states,
+                constraint,
+            );
         }
 
         let current_states = self.trie.finalize(clone_state);
