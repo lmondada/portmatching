@@ -87,7 +87,8 @@ impl<'g> Skeleton<'g> {
                 all_addrs.push((spine_ind, ind))
             }
         }
-        all_addrs.sort_unstable();
+        // Lower spine indices come first, prioritising positive indices
+        all_addrs.sort_unstable_by_key(|addr| (addr.0, addr.1 < 0, addr.1.abs()));
         let addr = all_addrs
             .into_iter()
             .next()
@@ -95,14 +96,17 @@ impl<'g> Skeleton<'g> {
         let mut ribs = self.get_ribs(&self.spine);
         let mut spine = self.spine.clone();
         let the_match = (spine[addr.0].0.clone(), spine[addr.0].1, addr.1);
-        if addr.1 >= 0 {
-            spine.truncate(addr.0);
-            ribs.truncate(addr.0);
-        } else {
-            // Keep the spine up to addr as we need to check that there is > 0 addr
+        if addr.1 > 0 {
+            spine.truncate(addr.0 + 1);
+            ribs.truncate(addr.0 + 1);
+            ribs[addr.0] = [0, addr.1 - 1];
+        } else if addr.1 < 0 {
             spine.truncate(addr.0 + 1);
             ribs.truncate(addr.0 + 1);
             ribs[addr.0][0] = addr.1 + 1;
+        } else {
+            spine.truncate(addr.0);
+            ribs.truncate(addr.0);
         }
         let no_match = spine
             .into_iter()
