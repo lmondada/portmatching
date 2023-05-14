@@ -282,7 +282,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     fn follow_fail(&mut self, state: StateID, new_state: &mut Option<StateID>) -> PortIndex {
         let last_port = self.graph.outputs(state).last();
         let (out_port, in_port) = if let Some(out_port) = last_port {
-            if self.weights[out_port] == None {
+            if self.weights[out_port].is_none() {
                 let in_port = self
                     .graph
                     .port_link(out_port)
@@ -409,13 +409,13 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         let mut curr_states: VecDeque<_> = [trie_state].into();
         while let Some(state) = curr_states.pop_front() {
             // Try to convert to start state
-            if self.into_start_state(state, &out_port, deterministic) {
+            if self.into_start_state(state, out_port, deterministic) {
                 start_states.push(state);
             } else {
                 // Not a start state, so follow all possible edges and start over
                 if !self.weight(state).non_deterministic {
                     for out_port in self.graph.outputs(state) {
-                        if self.weights[out_port] == None {
+                        if self.weights[out_port].is_none() {
                             // Filter out FAIL as we add it below anyway
                             continue;
                         }
@@ -459,7 +459,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         let start_states = trie_states
             .into_iter()
             .flat_map(|state| {
-                self.valid_start_states(&out_port, state, deterministic, &mut new_start_state)
+                self.valid_start_states(out_port, state, deterministic, &mut new_start_state)
                     .into_iter()
             })
             .collect::<BTreeSet<_>>();
@@ -553,17 +553,15 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                     new_transitions.push((offset, new_cond));
                     break;
                 }
-            } else {
-                if !self.weights[state].non_deterministic || curr_cond == &new_cond {
-                    // use existing transition
-                    let in_port = self
-                        .graph
-                        .port_link(transition)
-                        .expect("Disconnected transition");
-                    self.trace[transition].0.push(self.edge_cnt);
-                    self.trace[in_port].0.push(self.edge_cnt + 1);
-                    next_states.push(self.graph.port_node(in_port).expect("invalid port"));
-                }
+            } else if !self.weights[state].non_deterministic || curr_cond == &new_cond {
+                // use existing transition
+                let in_port = self
+                    .graph
+                    .port_link(transition)
+                    .expect("Disconnected transition");
+                self.trace[transition].0.push(self.edge_cnt);
+                self.trace[in_port].0.push(self.edge_cnt + 1);
+                next_states.push(self.graph.port_node(in_port).expect("invalid port"));
             }
             if merged_cond == new_cond {
                 // we've inserted the new condition, our job is done
