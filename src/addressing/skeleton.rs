@@ -96,17 +96,21 @@ impl<'g> Skeleton<'g> {
         let mut ribs = self.get_ribs(&self.spine);
         let mut spine = self.spine.clone();
         let the_match = (spine[addr.0].0.clone(), spine[addr.0].1, addr.1);
-        if addr.1 > 0 {
-            spine.truncate(addr.0 + 1);
-            ribs.truncate(addr.0 + 1);
-            ribs[addr.0] = [0, addr.1 - 1];
-        } else if addr.1 < 0 {
-            spine.truncate(addr.0 + 1);
-            ribs.truncate(addr.0 + 1);
-            ribs[addr.0][0] = addr.1 + 1;
-        } else {
-            spine.truncate(addr.0);
-            ribs.truncate(addr.0);
+        match addr.1.cmp(&0) {
+            cmp::Ordering::Greater => {
+                spine.truncate(addr.0 + 1);
+                ribs.truncate(addr.0 + 1);
+                ribs[addr.0] = [0, addr.1 - 1];
+            }
+            cmp::Ordering::Less => {
+                spine.truncate(addr.0 + 1);
+                ribs.truncate(addr.0 + 1);
+                ribs[addr.0][0] = addr.1 + 1;
+            }
+            cmp::Ordering::Equal => {
+                spine.truncate(addr.0);
+                ribs.truncate(addr.0);
+            }
         }
         let no_match = spine
             .into_iter()

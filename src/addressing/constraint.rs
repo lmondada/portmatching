@@ -66,7 +66,7 @@ fn verify_no_match(
                 if curr_node == node {
                     return false;
                 }
-                port = port_opposite(port_some, &g);
+                port = port_opposite(port_some, g);
             }
         }
         port = g.input(root, offset);
@@ -81,7 +81,7 @@ fn verify_no_match(
                 if curr_node == node {
                     return false;
                 }
-                port = port_opposite(port_some, &g);
+                port = port_opposite(port_some, g);
             }
         }
     }
@@ -137,7 +137,7 @@ impl PortAddress {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Constraint {
     // All constraints must be satisfied
-    All(Vec<Box<Constraint>>),
+    All(Vec<Constraint>),
     // Port must be linked to one of `other_ports`
     Adjacency { other_ports: PortAddress },
     // Port must be dangling (at least existing)
@@ -163,8 +163,7 @@ impl Constraint {
     pub fn and(&self, other: &Constraint) -> Option<Constraint> {
         // Gather all constraints in a vec
         let all_constraints = simplify_constraints(vec![self.clone(), other.clone()]);
-        (!all_constraints.is_empty())
-            .then(|| Constraint::All(all_constraints.into_iter().map(Box::new).collect()))
+        (!all_constraints.is_empty()).then_some(Constraint::All(all_constraints))
     }
 }
 
@@ -192,7 +191,7 @@ fn simplify_constraints(constraints: Vec<Constraint>) -> Vec<Constraint> {
         .filter_map(|(addr, ports)| {
             let no_match = mem::take(&mut no_matches).into_iter().collect();
             let addr = NodeAddress {
-                the_match: addr.clone(),
+                the_match: addr,
                 no_match,
             };
             let label = ports.into_iter().fold(None, |acc: Option<PortLabel>, e| {
@@ -209,7 +208,6 @@ fn flatten_constraints(constraints: Vec<Constraint>) -> Vec<Constraint> {
     for c in constraints {
         match c {
             Constraint::All(constraints) => {
-                let constraints = constraints.into_iter().map(|b| *b).collect();
                 let mut flattened = flatten_constraints(constraints);
                 ret.append(&mut flattened);
             }

@@ -196,7 +196,7 @@ where
     ) -> Vec<PortIndex> {
         let out_port = self.port_address(state);
         out_port
-            .map(|p| p.ports(&graph.graph, graph.root))
+            .map(|p| p.ports(graph.graph, graph.root))
             .unwrap_or_default()
     }
 
@@ -253,7 +253,7 @@ where
         let mut transitions = self.trie().outputs(state).filter(move |&out_p| {
             let Some(port_addr) = self.port_address(state) else { return false };
             self.transition(out_p)
-                .map(|c| c.is_satisfied(&port_addr, &graph.graph, graph.root))
+                .map(|c| c.is_satisfied(port_addr, graph.graph, graph.root))
                 .unwrap_or(true)
         });
         if self.is_non_deterministic(state) {
@@ -264,8 +264,8 @@ where
     }
 
     /// All allowed state transitions from `state`.
-    fn next_states<'n, C: AddressCache>(
-        &'n self,
+    fn next_states<C: AddressCache>(
+        &self,
         state: StateID,
         graph: &GraphType,
         cache: &mut C,
