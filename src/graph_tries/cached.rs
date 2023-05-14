@@ -34,7 +34,7 @@ impl BaseGraphTrie<S> {
         let mut next_ind = 0;
         for node in base.graph.nodes_iter() {
             let weight: &mut NodeWeight<S> = weights.nodes.get_mut(node);
-            weight.out_port = base.weight(node).out_port;
+            weight.out_port = base.weight(node).out_port.clone();
             if let Some(spine) = base.weight(node).spine.as_ref() {
                 let mut new_spine = Vec::with_capacity(spine.len());
                 for s in spine {

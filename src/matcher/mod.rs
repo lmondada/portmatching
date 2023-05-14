@@ -10,8 +10,12 @@ pub mod many_patterns;
 pub mod single_pattern;
 
 pub use many_patterns::{
-    BalancedTrieMatcher, DetTrieMatcher, ManyPatternMatcher, NaiveManyMatcher, NonDetTrieMatcher,
+    BalancedTrieMatcher,
+    ManyPatternMatcher,
+    NaiveManyMatcher,
     PatternID,
+    // DetTrieMatcher,
+    // NonDetTrieMatcher,
 };
 pub use single_pattern::SinglePatternMatcher;
 

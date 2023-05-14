@@ -5,9 +5,11 @@ use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortOffset};
 use crate::{
     addressing::{
         cache::{Cache, SpineID},
+        constraint::Constraint,
         pg::AsPathOffset,
-        AsSpineID, Skeleton, SkeletonAddressing, SpineAddress,
+        AsSpineID, Skeleton, SpineAddress,
     },
+    graph_tries::GraphType,
     matcher::Matcher,
     pattern::{Edge, Pattern},
 };
@@ -83,9 +85,9 @@ where
     type Match = PatternMatch;
 
     fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
+        let graph = GraphType { graph, root };
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
-        let addressing = T::Addressing::init(root, graph);
         let mut cache = Cache::default();
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
@@ -96,7 +98,7 @@ where
                         root,
                     });
                 }
-                for next_state in self.trie.next_states(state, &addressing, &mut cache) {
+                for next_state in self.trie.next_states(state, &graph, &mut cache) {
                     new_states.push(next_state);
                 }
             }
@@ -125,21 +127,28 @@ impl ManyPatternMatcher for BalancedTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, 
         for line in all_lines {
             // Traverse the line
             let mut first_edge = true;
-            for Edge(out_port, _) in line {
+            for Edge(out_port, in_port) in line {
+                let constraint = if let Some(in_port) = in_port {
+                    Constraint::Adjacency {
+                        other_ports: skeleton.get_port_addr(in_port),
+                    }
+                } else {
+                    Constraint::Dangling
+                };
                 if first_edge {
                     // The edge is added non-deterministically
                     current_states = self.trie.add_graph_edge_nondet(
-                        out_port,
+                        &skeleton.get_port_addr(out_port),
                         current_states,
-                        &skeleton,
+                        constraint,
                         // &mut clone_state,
                     );
                 } else {
                     // All other edges are deterministic
                     current_states = self.trie.add_graph_edge_det(
-                        out_port,
+                        &skeleton.get_port_addr(out_port),
                         current_states,
-                        &skeleton,
+                        constraint,
                         // &mut clone_state,
                     );
                 }

@@ -18,6 +18,7 @@
 //! larger graph.
 
 pub mod cache;
+pub(crate) mod constraint;
 pub mod pg;
 mod skeleton;
 
