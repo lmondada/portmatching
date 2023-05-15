@@ -525,18 +525,23 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
 
         // The transitions, along with the index where they should be inserted
         let mut new_transitions = Vec::new();
+        let mut alread_inserted = BTreeSet::new();
         let mut offset = 0;
 
         // Compute the transitions to add
         loop {
             let Some(transition) = self.graph.output(state, offset) else {
                 // We passed the last transition: insert and stop iteration
-                new_transitions.push((offset, new_cond));
+                if alread_inserted.insert(new_cond.clone()) {
+                    new_transitions.push((offset, new_cond));
+                }
                 break;
             };
             let Some(curr_cond) = self.weights[transition].as_ref() else {
                 // FAIL transition: insert before and stop iteration
-                new_transitions.push((offset, new_cond));
+                if alread_inserted.insert(new_cond.clone()) {
+                    new_transitions.push((offset, new_cond));
+                }
                 break;
             };
             let Some(merged_cond) = curr_cond.and(&new_cond) else {
@@ -547,10 +552,14 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
             if &merged_cond != curr_cond {
                 if !self.weights[state].non_deterministic {
                     // insert new condition before current one
-                    new_transitions.push((offset, merged_cond.clone()));
+                    if alread_inserted.insert(merged_cond.clone()) {
+                        new_transitions.push((offset, merged_cond.clone()));
+                    }
                 } else {
                     // Just insert the new condition and that's it
-                    new_transitions.push((offset, new_cond));
+                    if alread_inserted.insert(new_cond.clone()) {
+                        new_transitions.push((offset, new_cond));
+                    }
                     break;
                 }
             } else if !self.weights[state].non_deterministic || curr_cond == &new_cond {
@@ -562,6 +571,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
                 self.trace[transition].0.push(self.edge_cnt);
                 self.trace[in_port].0.push(self.edge_cnt + 1);
                 next_states.push(self.graph.port_node(in_port).expect("invalid port"));
+                alread_inserted.insert(curr_cond.clone());
             }
             if merged_cond == new_cond {
                 // we've inserted the new condition, our job is done

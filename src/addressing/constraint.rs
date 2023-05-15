@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt::Display,
-    mem,
-};
+use std::{collections::BTreeSet, fmt::Display, mem};
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
@@ -11,7 +7,7 @@ use crate::utils::{follow_path, port_opposite};
 use super::AddressCache;
 
 // TODO: use Rc or other for faster speed
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct NodeAddress {
     pub(super) no_match: Vec<(Vec<PortOffset>, usize, [isize; 2])>,
     pub(super) the_match: (Vec<PortOffset>, usize, isize),
@@ -102,8 +98,8 @@ impl NodeAddress {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PortLabel {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PortLabel {
     Outgoing(usize),
     Incoming(usize),
 }
@@ -117,7 +113,7 @@ impl PortLabel {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortAddress {
     pub(super) addr: NodeAddress,
     pub(super) label: PortLabel,
@@ -134,12 +130,18 @@ impl PortAddress {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Constraint {
     // All constraints must be satisfied
-    All(Vec<Constraint>),
+    AllAdjacencies {
+        label: PortLabel,
+        no_match: Vec<(Vec<PortOffset>, usize, [isize; 2])>,
+        the_matches: Vec<(Vec<PortOffset>, usize, isize)>,
+    },
     // Port must be linked to one of `other_ports`
-    Adjacency { other_ports: PortAddress },
+    Adjacency {
+        other_ports: PortAddress,
+    },
     // Port must be dangling (at least existing)
     Dangling,
 }
@@ -153,86 +155,123 @@ impl Constraint {
                 adjacency_constraint(g, this_ports, other_ports)
             }
             Constraint::Dangling => !this_ports.ports(g, root).is_empty(),
-            Constraint::All(constraints) => constraints
+            Constraint::AllAdjacencies { .. } => self
+                .to_vec()
                 .iter()
                 .all(|c| c.is_satisfied(this_ports, g, root)),
         }
     }
 
+    fn to_vec(&self) -> Vec<Self> {
+        let Constraint::AllAdjacencies {
+            label,
+            no_match,
+            the_matches,
+        } = self else { return vec![self.clone()] };
+        let mut no_match = no_match.clone();
+        the_matches
+            .iter()
+            .map(|m| Constraint::Adjacency {
+                other_ports: PortAddress {
+                    addr: NodeAddress {
+                        no_match: mem::take(&mut no_match),
+                        the_match: m.clone(),
+                    },
+                    label: *label,
+                },
+            })
+            .collect()
+    }
+
     // Merge two constraints
     pub fn and(&self, other: &Constraint) -> Option<Constraint> {
         // Gather all constraints in a vec
-        let all_constraints = simplify_constraints(vec![self.clone(), other.clone()]);
-        (!all_constraints.is_empty()).then_some(Constraint::All(all_constraints))
+        simplify_constraints(vec![self.clone(), other.clone()])
     }
 }
 
-fn simplify_constraints(constraints: Vec<Constraint>) -> Vec<Constraint> {
+fn simplify_constraints(constraints: Vec<Constraint>) -> Option<Constraint> {
     let constraints = flatten_constraints(constraints);
-
-    let mut matches: BTreeMap<_, Vec<_>> = BTreeMap::new();
-    let mut no_matches = BTreeSet::new();
 
     // If we only have dangling, then dangling. Otherwise we can remove danglings
     if constraints.iter().all(|c| c == &Constraint::Dangling) {
-        return vec![Constraint::Dangling];
+        return Some(Constraint::Dangling);
     }
+
+    let mut matches = BTreeSet::new();
+    let mut no_matches = BTreeSet::new();
+    let mut all_labels = Vec::new();
     for c in constraints {
         if let Constraint::Adjacency { other_ports: ports } = c {
             let node = ports.addr;
             let addr = node.the_match;
-            matches.entry(addr).or_default().push(ports.label);
+            matches.insert(addr);
             no_matches.extend(node.no_match.into_iter());
+            all_labels.push(ports.label);
         }
     }
 
-    matches
+    let Some(label) = all_labels
         .into_iter()
-        .filter_map(|(addr, ports)| {
-            let no_match = mem::take(&mut no_matches).into_iter().collect();
-            let addr = NodeAddress {
-                the_match: addr,
-                no_match,
-            };
-            let label = ports.into_iter().fold(None, |acc: Option<PortLabel>, e| {
-                acc.map(|acc| acc.and(e)).unwrap_or(Some(e))
-            })?;
-            let other_ports = PortAddress { addr, label };
-            Some(Constraint::Adjacency { other_ports })
+        .fold(None, |acc: Option<PortLabel>, e| {
+            acc.map(|acc| acc.and(e)).unwrap_or(Some(e))
         })
-        .collect()
+    else { return None };
+
+    for &(ref path, offset, ind) in matches.iter() {
+        if no_matches
+            .iter()
+            .any(|&(ref no_path, no_offset, [bef, aft])| {
+                no_path == path && no_offset == offset && (bef..=aft).contains(&ind)
+            })
+        {
+            return None;
+        }
+    }
+
+    match matches.len() {
+        0 => None,
+        1 => Some(Constraint::Adjacency {
+            other_ports: PortAddress {
+                addr: NodeAddress {
+                    no_match: no_matches.into_iter().collect(),
+                    the_match: matches.into_iter().next().unwrap(),
+                },
+                label,
+            },
+        }),
+        _ => Some(Constraint::AllAdjacencies {
+            label,
+            no_match: no_matches.into_iter().collect(),
+            the_matches: matches.into_iter().collect(),
+        }),
+    }
 }
 
 fn flatten_constraints(constraints: Vec<Constraint>) -> Vec<Constraint> {
-    let mut ret = Vec::with_capacity(constraints.capacity());
-    for c in constraints {
-        match c {
-            Constraint::All(constraints) => {
-                let mut flattened = flatten_constraints(constraints);
-                ret.append(&mut flattened);
-            }
-            cons => ret.push(cons),
-        }
-    }
-    ret
+    constraints.into_iter().flat_map(|c| c.to_vec()).collect()
 }
 
 impl Display for Constraint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Constraint::All(constraints) => {
+            Constraint::AllAdjacencies { the_matches, .. } => {
                 write!(
                     f,
                     "All({})",
-                    constraints
+                    the_matches
                         .iter()
-                        .map(|c| c.to_string())
+                        .map(|(_, i, j)| format!("({i}, {j}"))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
             }
             Constraint::Adjacency { other_ports } => {
-                write!(f, "Adjacency({:?}", other_ports)
+                write!(
+                    f,
+                    "Adjacency({:?}, {:?})",
+                    other_ports.addr.the_match, other_ports.label
+                )
             }
             Constraint::Dangling => write!(f, "Dangling"),
         }
