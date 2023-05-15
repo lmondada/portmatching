@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use portgraph::{NodeIndex, PortGraph, PortOffset};
+use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortOffset};
 
 use crate::{
     addressing::{
@@ -114,6 +114,21 @@ impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize
         }
 
         pattern_id
+    }
+}
+
+impl<S: Clone> DetTrieMatcher<BaseGraphTrie<S>> {
+    /// A dotstring representation of the trie.
+    pub fn dotstring(&self) -> String {
+        let mut weights = self.trie.str_weights();
+        for n in self.trie.graph.nodes_iter() {
+            let empty = vec![];
+            let matches = self.match_states.get(&n).unwrap_or(&empty);
+            if !matches.is_empty() {
+                weights[n] += &format!("[{:?}]", matches);
+            }
+        }
+        dot_string_weighted(&self.trie.graph, &weights)
     }
 }
 
