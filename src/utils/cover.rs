@@ -1,10 +1,10 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, VecDeque},
-    fs, mem,
+    mem,
 };
 
-use portgraph::{dot::dot_string, NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap};
+use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap};
 
 use crate::graph_tries::root_state;
 
@@ -183,8 +183,6 @@ where
     let num_out = graph.num_outputs(old_node);
     assert_eq!(n_partitions, outs.len());
 
-    debug_assert_eq!(ins.iter().map(|v| v.len()).sum::<usize>(), num_in);
-
     let mut nodes = Vec::with_capacity(n_partitions);
     nodes.push(old_node);
 
@@ -194,8 +192,6 @@ where
         clone_state(old_node, nodes[i], graph);
     }
 
-    dot_string(&graph);
-    println!("rewiring inputs");
     // Rewire all input ports (do `old_node` last, so that the ports are freed)
     for (&node, in_ports) in nodes.iter().zip(ins).rev() {
         let out_ports = in_ports
@@ -230,8 +226,6 @@ where
         let next_port = graph.port_link(out_port).expect("Disconnected port");
         *cnts.entry(graph.port_node(next_port).unwrap()).or_default() += 1;
     }
-    dot_string(&graph);
-    println!("allocating ports");
     // Allocate the additional input ports on the children nodes
     let mut new_port_offset: BTreeMap<_, _> = cnts
         .keys()
@@ -245,8 +239,6 @@ where
             &mut rekey,
         );
     }
-    dot_string(&graph);
-    println!("rewiring outputs");
 
     // Rewire all output links
     // Store in `links` the original output port -> input port mapping
@@ -266,7 +258,9 @@ where
                     // create new in_port
                     let in_node = graph.port_node(in_port).expect("Invalid port");
                     let offset = new_port_offset.get_mut(&in_node).unwrap();
-                    let new_in_port = graph.input(in_node, *offset).expect("preallocated above");
+                    let new_in_port = graph
+                        .port_index(in_node, PortOffset::new_incoming(*offset))
+                        .expect("preallocated above");
                     *offset += 1;
                     new_in_port
                 }
@@ -286,8 +280,6 @@ where
         }
     }
 
-    dot_string(&graph);
-    println!("compactify output ports");
     // Compactify output ports by moving all linked ports to beginning
     for &node in nodes.iter() {
         let linked_ports = graph
@@ -308,15 +300,11 @@ where
         }
     }
 
-    println!("truncate surplus ports");
-    println!("======= \n{}\n=======", dot_string(&graph));
     // Truncate surplus ports
     for ((&node, ins), outs) in nodes.iter().zip(ins).zip(outs) {
         graph.set_num_ports(node, ins.len(), outs.len(), &mut rekey);
     }
 
-    // fs::write("graph.gv", dot_string(&graph));
-    println!("======= \n{}\n=======", dot_string(&graph));
     debug_assert!(graph
         .ports_iter()
         .all(|port| graph.port_link(port).is_some()));
