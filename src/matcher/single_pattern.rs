@@ -77,7 +77,7 @@ impl<P: Pattern> SinglePatternMatcher<P> {
     }
 
     fn graph_ref(&self) -> &PortGraph {
-        &self.pattern.graph()
+        self.pattern.graph()
     }
 }
 
