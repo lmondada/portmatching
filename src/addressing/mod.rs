@@ -18,9 +18,8 @@
 //! larger graph.
 
 pub mod cache;
-pub(crate) mod constraint;
 pub mod pg;
-mod skeleton;
+// mod skeleton;
 
 pub use cache::CachedOption;
 #[doc(inline)]
@@ -28,7 +27,6 @@ pub use pg::PortGraphAddressing;
 
 pub(crate) use self::cache::{AddressCache, AsSpineID};
 use self::pg::AsPathOffset;
-pub use skeleton::Skeleton;
 
 use crate::utils::port_opposite;
 use ::portgraph::{NodeIndex, PortGraph};

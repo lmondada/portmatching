@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     collections::{BTreeSet, VecDeque},
-    fmt::{self, Display},
+    fmt::{self, Debug, Display},
     mem,
 };
 
@@ -11,12 +11,7 @@ use portgraph::{
 };
 
 use crate::{
-    addressing::{
-        cache::SpineID,
-        constraint::{Constraint, PortAddress},
-        pg::AsPathOffset,
-        Address, AsSpineID, Spine, SpineAddress,
-    },
+    constraint::Constraint,
     utils::{cover::untangle_threads, rekey_secmap},
 };
 
@@ -30,23 +25,25 @@ use super::{GraphTrie, StateID};
 /// `port_offset` and `address` can be unset (ie None), in which case the
 /// transition Fail is the only one that should be followed. At write time,
 /// an unset field is seen as a license to assign whatever is most convenient.
-#[derive(Clone, Default, Debug)]
-pub(crate) struct NodeWeight<T> {
-    pub(crate) out_port: Option<PortAddress>,
-    pub(crate) address: Option<Address<usize>>,
-    pub(crate) spine: Option<Spine<T>>,
+#[derive(Clone, Debug)]
+pub(crate) struct NodeWeight<A> {
+    pub(crate) out_port: Option<A>,
     pub(crate) non_deterministic: bool,
 }
 
-impl<T> Display for NodeWeight<T> {
+impl<A> Default for NodeWeight<A> {
+    fn default() -> Self {
+        Self {
+            out_port: Default::default(),
+            non_deterministic: Default::default(),
+        }
+    }
+}
+
+impl<A: Debug> Display for NodeWeight<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.non_deterministic {
             write!(f, "<font color=\"red\">")?;
-        }
-        if let Some(addr) = &self.address {
-            write!(f, "{:?}", addr)?;
-        } else {
-            write!(f, "None")?;
         }
         if let Some(port) = &self.out_port {
             write!(f, "[{port:?}]")?;
@@ -66,7 +63,7 @@ impl<T> Display for NodeWeight<T> {
 //     }
 // }
 
-type EdgeWeight = Option<Constraint>;
+type EdgeWeight<C> = Option<C>;
 
 /// A graph trie implementation using portgraph.
 ///
@@ -102,17 +99,40 @@ type EdgeWeight = Option<Constraint>;
 /// forming the "trace" of the trie. This is used in [`Self::finalize`] to
 /// split states where necessary to keep avoid cross-talk, i.e. creating new
 /// disallowed state transitions as a by-product of the new transitions.
-#[derive(Clone, Debug)]
-pub struct BaseGraphTrie<T = (Vec<PortOffset>, usize)> {
+pub struct BaseGraphTrie<C: Constraint> {
     pub(crate) graph: PortGraph,
-    pub(crate) weights: Weights<NodeWeight<T>, EdgeWeight>,
+    pub(crate) weights: Weights<NodeWeight<C::Address>, EdgeWeight<C>>,
 
     // The following are only useful during construction
     pub(super) trace: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
     pub(super) edge_cnt: usize,
 }
 
-impl Default for BaseGraphTrie<(Vec<PortOffset>, usize)> {
+impl<C: Constraint> Debug for BaseGraphTrie<C>
+where
+    C::Address: Debug,
+    C: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BaseGraphTrie")
+            .field("graph", &self.graph)
+            .field("weights", &self.weights)
+            .finish()
+    }
+}
+
+impl<C: Constraint> Clone for BaseGraphTrie<C> {
+    fn clone(&self) -> Self {
+        Self {
+            graph: self.graph.clone(),
+            weights: self.weights.clone(),
+            trace: self.trace.clone(),
+            edge_cnt: self.edge_cnt.clone(),
+        }
+    }
+}
+
+impl<C: Constraint> Default for BaseGraphTrie<C> {
     fn default() -> Self {
         let graph = Default::default();
         let weights = Default::default();
@@ -128,30 +148,18 @@ impl Default for BaseGraphTrie<(Vec<PortOffset>, usize)> {
     }
 }
 
-impl SpineAddress for (Vec<PortOffset>, usize) {
-    type AsRef<'n> = (&'n [PortOffset], usize);
-
-    fn as_ref(&self) -> Self::AsRef<'_> {
-        (self.0.as_slice(), self.1)
-    }
-}
-
-impl<S> GraphTrie for BaseGraphTrie<S>
-where
-    S: SpineAddress + Clone,
-    for<'n> S::AsRef<'n>: Copy + Default + PartialEq + AsPathOffset + AsSpineID,
-{
-    type SpineID = S;
+impl<C: Constraint> GraphTrie for BaseGraphTrie<C> {
+    type Constraint = C;
 
     fn trie(&self) -> &PortGraph {
         &self.graph
     }
 
-    fn port_address(&self, state: StateID) -> Option<&PortAddress> {
+    fn port_address(&self, state: StateID) -> Option<&C::Address> {
         self.weights[state].out_port.as_ref()
     }
 
-    fn transition(&self, port: PortIndex) -> Option<&Constraint> {
+    fn transition(&self, port: PortIndex) -> Option<&Self::Constraint> {
         self.weights[port].as_ref()
     }
 
@@ -160,7 +168,10 @@ where
     }
 }
 
-impl<T: Clone> BaseGraphTrie<T> {
+impl<C: Constraint + Display> BaseGraphTrie<C>
+where
+    C::Address: Debug,
+{
     pub(crate) fn str_weights(&self) -> Weights<String, String> {
         let mut str_weights = Weights::new();
         for p in self.graph.ports_iter() {
@@ -181,6 +192,13 @@ impl<T: Clone> BaseGraphTrie<T> {
     pub(crate) fn _dotstring(&self) -> String {
         dot_string_weighted(&self.graph, &self.str_weights())
     }
+}
+
+impl<C: Constraint> BaseGraphTrie<C> {
+    /// An empty graph trie
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Try to convert into a non-deterministic state.
     ///
@@ -197,15 +215,8 @@ impl<T: Clone> BaseGraphTrie<T> {
         }
         *det_flag
     }
-}
 
-impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
-    /// An empty graph trie
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn weight(&self, state: StateID) -> &NodeWeight<(Vec<PortOffset>, usize)> {
+    pub(crate) fn weight(&self, state: StateID) -> &NodeWeight<C::Address> {
         &self.weights[state]
     }
 
@@ -301,81 +312,6 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         in_port
     }
 
-    /// Follow NoLinkedNode transition, creating a new state if necessary.
-    ///
-    /// This requires shifting FAIL transition if it exists
-    // fn follow_no_linked_node(
-    //     &mut self,
-    //     state: StateID,
-    //     new_state: &mut Option<StateID>,
-    // ) -> NodeIndex {
-    //     let num_outputs = self.graph.num_outputs(state);
-    //     let last_port = num_outputs
-    //         .checked_sub(1)
-    //         .map(|o| self.graph.output(state, o).expect("valid offset"));
-    //     let prev_port = num_outputs
-    //         .checked_sub(2)
-    //         .map(|o| self.graph.output(state, o).expect("valid offset"));
-    //     let last_weight = last_port.map(|p| &self.weights[p]);
-    //     let prev_weight = prev_port.map(|p| &self.weights[p]);
-    //     let (out_port, in_port) = match (last_weight, prev_weight) {
-    //         (Some(Some(Constraint::Dangling)), _) => {
-    //             // Follow existing NoLinkedNode transition
-    //             let out_port = last_port.expect("last_weight is Some");
-    //             let in_port = self
-    //                 .graph
-    //                 .port_link(out_port)
-    //                 .expect("Disconnected transition");
-    //             (out_port, in_port)
-    //         }
-    //         (_, Some(Some(Constraint::Dangling))) => {
-    //             // Follow existing NoLinkedNode transition
-    //             let out_port = prev_port.expect("prev_weight is Some");
-    //             let in_port = self
-    //                 .graph
-    //                 .port_link(out_port)
-    //                 .expect("Disconnected transition");
-    //             (out_port, in_port)
-    //         }
-    //         (Some(Some(_)), _) | (None, _) => {
-    //             // Add a NoLinkedNode transition at the end
-    //             self.append_transition(state, new_state, Some(Constraint::Dangling))
-    //         }
-    //         (Some(None), _) => {
-    //             // The trickiest case: add port, then move FAIL to the end
-    //             self.set_num_ports(
-    //                 state,
-    //                 self.graph.num_inputs(state),
-    //                 self.graph.num_outputs(state) + 1,
-    //             );
-    //             // Move FAIL to make space for NoLinkedNode
-    //             let fail_offset = self.graph.num_outputs(state) - 1;
-    //             let dangling_offset = fail_offset - 1;
-    //             let fail = self
-    //                 .graph
-    //                 .output(state, fail_offset)
-    //                 .expect("offset < num_outputs");
-    //             let dangling = self
-    //                 .graph
-    //                 .output(state, dangling_offset)
-    //                 .expect("offset < num_outputs");
-    //             self.move_out_port(dangling, fail);
-    //             // Add NoLinkedNode weight
-    //             self.weights[dangling] = Some(Constraint::Dangling);
-    //             // Link falls back to FAIL transition
-    //             let next_p = self.graph.port_link(fail).expect("Disconnected transition");
-    //             let next = self.graph.port_node(next_p).expect("invalid port");
-    //             let in_port = self
-    //                 .add_edge(dangling, next)
-    //                 .expect("freed by move_out_port");
-    //             (dangling, in_port)
-    //         }
-    //     };
-    //     self.trace[out_port].0.push(self.edge_cnt);
-    //     self.trace[in_port].0.push(self.edge_cnt + 1);
-    //     self.graph.port_node(in_port).expect("invalid port")
-    // }
-
     /// Append transition at the end of `state`
     ///
     /// Careful! The order of transitions is very important and appending at the
@@ -384,7 +320,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         &mut self,
         state: StateID,
         new_state: &mut Option<StateID>,
-        constraint: EdgeWeight,
+        constraint: EdgeWeight<C>,
     ) -> (PortIndex, PortIndex) {
         self.set_num_ports(
             state,
@@ -400,7 +336,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
 
     fn valid_start_states(
         &mut self,
-        out_port: &PortAddress,
+        out_port: &C::Address,
         trie_state: StateID,
         deterministic: bool,
         new_start_state: &mut Option<StateID>,
@@ -448,10 +384,10 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     /// Returns the trie states after the edge has been added.
     pub fn add_graph_edge(
         &mut self,
-        out_port: &PortAddress,
+        out_port: &C::Address,
         trie_states: impl IntoIterator<Item = StateID>,
         deterministic: bool,
-        constraint: Constraint,
+        constraint: C,
     ) -> BTreeSet<StateID> {
         // 1. Find trie states that can be used as start states, i.e. states
         // whose address matches the source node of the edge
@@ -483,9 +419,9 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     /// Add graph edge to the trie using deterministic strategy.
     pub fn add_graph_edge_det(
         &mut self,
-        edge: &PortAddress,
+        edge: &C::Address,
         trie_states: impl IntoIterator<Item = StateID>,
-        constraint: Constraint,
+        constraint: C,
     ) -> BTreeSet<StateID> {
         self.add_graph_edge(edge, trie_states, true, constraint)
     }
@@ -493,9 +429,9 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     /// Add graph edge to the trie using non-deterministic strategy.
     pub fn add_graph_edge_nondet(
         &mut self,
-        edge: &PortAddress,
+        edge: &C::Address,
         trie_states: impl IntoIterator<Item = StateID>,
-        constraint: Constraint,
+        constraint: C,
     ) -> BTreeSet<StateID> {
         self.add_graph_edge(edge, trie_states, false, constraint)
     }
@@ -517,7 +453,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     fn insert_transitions(
         &mut self,
         state: NodeIndex,
-        new_cond: Constraint,
+        new_cond: C,
         new_state: &mut Option<NodeIndex>,
     ) -> Vec<NodeIndex> {
         // The states we are transitioning to, to be returned
@@ -642,7 +578,7 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
     fn into_start_state(
         &mut self,
         trie_state: StateID,
-        out_port: &PortAddress,
+        out_port: &C::Address,
         deterministic: bool,
     ) -> bool {
         // let start_node = graph.port_node(graph_edge).expect("invalid port");
@@ -680,193 +616,4 @@ impl BaseGraphTrie<(Vec<PortOffset>, usize)> {
         rekey_secmap(&mut self.trace, old, Some(new));
         rekey_secmap(&mut self.weights.ports, old, Some(new));
     }
-
-    // fn port_state(&self, port: PermPortIndex) -> Option<StateID> {
-    //     let port = self.to_port(port)?;
-    //     self.graph.port_node(port)
-    // }
-
-    // fn to_port(&self, port: PermPortIndex) -> Option<PortIndex> {
-    //     let &(port, _) = self.perm_indices.borrow().get(&port)?;
-    //     Some(port)
-    // }
-
-    // pub(crate) fn free(&self, port: PermPortIndex) -> Option<(PortIndex, usize)> {
-    //     self.perm_indices.borrow_mut().remove(&port)
-    // }
-
-    // fn spine(&self, state: StateID) -> Option<&[(Vec<PortOffset>, usize)]> {
-    //     self.weight(state).spine.as_deref()
-    // }
-
-    pub(crate) fn to_cached_trie(&self) -> BaseGraphTrie<(SpineID, Vec<PortOffset>, usize)> {
-        BaseGraphTrie::<(SpineID, Vec<PortOffset>, usize)>::new(self)
-    }
 }
-
-// fn update_ribs(ribs: &mut [[isize; 2]], (line, ind): (usize, isize)) {
-//     let [min, max] = &mut ribs[line];
-//     *min = cmp::min(*min, ind);
-//     *max = cmp::max(*max, ind);
-// }
-
-// fn is_satisfied(
-//     node: NodeIndex,
-//     addrs: &[(Address<usize>, Vec<Rib>)],
-//     addressing: &PortGraphAddressing<'_, '_, (Vec<PortOffset>, usize)>,
-//     spine: &[(Vec<PortOffset>, usize)],
-// ) -> bool {
-//     addrs.iter().all(|&((line_ind, ind), _)| {
-//         let spine = spine[line_ind].as_ref();
-//         let addr = (spine, ind);
-//         if let Some(graph_node) = addressing.get_node(&addr, &mut ()) {
-//             node == graph_node
-//         } else {
-//             true
-//         }
-//     })
-// }
-
-// fn merge_addrs(
-//     addrs1: &[(Address<usize>, Vec<Rib>)],
-//     addrs2: &[(Address<usize>, Vec<Rib>)],
-// ) -> Option<Vec<(Address<usize>, Vec<Rib>)>> {
-//     let mut addrs = Vec::from_iter(addrs1.iter().cloned());
-//     for (a, rib_a) in addrs2 {
-//         let mut already_inserted = false;
-//         for (b, rib_b) in addrs.iter_mut() {
-//             if a == b {
-//                 // If they share the same address, then ribs is union of ribs
-//                 for (ra, rb) in rib_a.iter().zip(rib_b.iter_mut()) {
-//                     rb[0] = cmp::min(ra[0], rb[0]);
-//                     rb[1] = cmp::max(ra[1], rb[1]);
-//                 }
-//                 already_inserted = true;
-//             } else {
-//                 // Otherwise the smaller address must be outside larger's ribs
-//                 let (a, rib_b) = if a < b {
-//                     (a, rib_b as &_)
-//                 } else {
-//                     (b as &_, rib_a)
-//                 };
-//                 let b_int = rib_b[a.0];
-//                 if b_int[0] <= a.1 && b_int[1] >= a.1 {
-//                     // Then address A < B would have been chosen as B's address!
-//                     return None;
-//                 }
-//             }
-//         }
-//         if !already_inserted {
-//             addrs.push((*a, rib_a.clone()));
-//         }
-//     }
-//     Some(addrs)
-// }
-
-/*#[cfg(test)]
-mod tests {
-    use portgraph::{NodeIndex, PortGraph, PortOffset};
-
-    use crate::addressing::Skeleton;
-
-    use super::BaseGraphTrie;
-
-    fn link(graph: &mut PortGraph, (out_n, out_p): (usize, usize), (in_n, in_p): (usize, usize)) {
-        let out_n = NodeIndex::new(out_n);
-        let in_n = NodeIndex::new(in_n);
-        let out_p = graph
-            .port_index(out_n, PortOffset::new_outgoing(out_p))
-            .unwrap();
-        let in_p = graph
-            .port_index(in_n, PortOffset::new_incoming(in_p))
-            .unwrap();
-        graph.link_ports(out_p, in_p).unwrap();
-    }
-
-    #[test]
-    fn test_add_transition_deterministic() {
-        let mut trie = BaseGraphTrie::<(Vec<PortOffset>, usize)>::new();
-        let state = trie.add_state(false);
-
-        // graph 1
-        let mut graph = PortGraph::new();
-        let root = graph.add_node(0, 3);
-        graph.add_node(2, 0);
-        let out_port = graph.port_index(root, PortOffset::new_outgoing(1)).unwrap();
-        link(&mut graph, (0, 0), (1, 0));
-        link(&mut graph, (0, 1), (1, 1));
-
-        let skel = Skeleton::new(&graph, root);
-        trie.weights[state].address = Some((0, 0));
-        trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
-
-        trie.add_graph_edge_det(out_port, [state], &skel);
-
-        // graph 2
-        let mut graph = PortGraph::new();
-        let root = graph.add_node(0, 3);
-        graph.add_node(2, 0);
-        let out_port = graph.port_index(root, PortOffset::new_outgoing(1)).unwrap();
-        link(&mut graph, (0, 1), (1, 1));
-        let skel = Skeleton::new(&graph, root);
-
-        trie.add_graph_edge_det(out_port, [state], &skel);
-
-        assert_eq!(trie.graph.num_outputs(state), 3);
-        assert_eq!(trie.graph.node_count(), 4);
-
-        // graph 3
-        let mut graph = PortGraph::new();
-        let root = graph.add_node(0, 1);
-        graph.add_node(2, 0);
-        let out_port = graph.port_index(root, PortOffset::new_outgoing(0)).unwrap();
-        link(&mut graph, (0, 0), (1, 1));
-
-        let skel = Skeleton::new(&graph, root);
-        trie.add_graph_edge_det(out_port, [state], &skel);
-
-        assert_eq!(trie.graph.num_outputs(state), 4);
-        assert_eq!(trie.graph.node_count(), 6);
-
-        // graph 4
-        let mut graph = PortGraph::new();
-        let root = graph.add_node(0, 1);
-        let out_port = graph.port_index(root, PortOffset::new_outgoing(0)).unwrap();
-        let skel = Skeleton::new(&graph, root);
-
-        trie.add_graph_edge_det(out_port, [state], &skel);
-
-        assert_eq!(trie.graph.node_count(), 7);
-    }
-
-    #[test]
-    fn test_add_transition_non_deterministic() {
-        let mut trie = BaseGraphTrie::<(Vec<PortOffset>, usize)>::new();
-        let state = trie.add_state(true);
-
-        // graph 1
-        let mut graph = PortGraph::new();
-        let root = graph.add_node(0, 3);
-        graph.add_node(2, 0);
-        let out_port = graph.port_index(root, PortOffset::new_outgoing(1)).unwrap();
-        link(&mut graph, (0, 0), (1, 0));
-        link(&mut graph, (0, 1), (1, 1));
-        let skel = Skeleton::new(&graph, root);
-        trie.weights[state].address = (0, 0).into();
-        trie.weights[state].out_port = PortOffset::new_outgoing(1).into();
-
-        trie.add_graph_edge_nondet(out_port, [state], &skel);
-
-        // graph 2
-        let mut graph = PortGraph::new();
-        let root = graph.add_node(0, 3);
-        graph.add_node(2, 0);
-        let out_port = graph.port_index(root, PortOffset::new_outgoing(1)).unwrap();
-        link(&mut graph, (0, 1), (1, 1));
-        let skel = Skeleton::new(&graph, root);
-        trie.add_graph_edge_nondet(out_port, [state], &skel);
-
-        assert_eq!(trie.graph.num_outputs(state), 2);
-        assert_eq!(trie.graph.node_count(), 4);
-    }
-}*/

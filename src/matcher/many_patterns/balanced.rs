@@ -1,15 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortOffset};
+use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 
 use crate::{
-    addressing::{
-        cache::{Cache, SpineID},
-        constraint::Constraint,
-        pg::AsPathOffset,
-        AsSpineID, Skeleton, SpineAddress,
-    },
-    graph_tries::GraphType,
+    constraint::{Skeleton, UnweightedConstraint},
     matcher::Matcher,
     pattern::{Edge, Pattern},
 };
@@ -25,30 +19,30 @@ use crate::graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID};
 ///
 /// This spreads out the occurence of non-deterministic (expensive) states in the trie
 /// in-between deterministic (cheap) ones.
-pub struct BalancedTrieMatcher<T> {
-    trie: T,
+pub struct BalancedTrieMatcher {
+    trie: BaseGraphTrie<UnweightedConstraint>,
     match_states: BTreeMap<StateID, Vec<PatternID>>,
     patterns: Vec<Pattern>,
 }
 
-impl<T: Default> Default for BalancedTrieMatcher<T> {
+impl Default for BalancedTrieMatcher {
     fn default() -> Self {
         Self {
-            trie: T::default(),
+            trie: Default::default(),
             match_states: Default::default(),
             patterns: Default::default(),
         }
     }
 }
 
-impl<T: Default> BalancedTrieMatcher<T> {
+impl BalancedTrieMatcher {
     /// Create a new empty matcher.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl<S: Clone> BalancedTrieMatcher<BaseGraphTrie<S>> {
+impl BalancedTrieMatcher {
     /// A dotstring representation of the trie.
     pub fn dotstring(&self) -> String {
         let mut weights = self.trie.str_weights();
@@ -63,32 +57,12 @@ impl<S: Clone> BalancedTrieMatcher<BaseGraphTrie<S>> {
     }
 }
 
-impl BalancedTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
-    /// Convert the trie to using [`SpineID`]s for caching.
-    pub fn to_cached_trie(
-        &self,
-    ) -> BalancedTrieMatcher<BaseGraphTrie<(SpineID, Vec<PortOffset>, usize)>> {
-        BalancedTrieMatcher {
-            trie: self.trie.to_cached_trie(),
-            match_states: self.match_states.clone(),
-            patterns: self.patterns.clone(),
-        }
-    }
-}
-
-impl<T> Matcher for BalancedTrieMatcher<T>
-where
-    T: GraphTrie,
-    for<'n> <<T as GraphTrie>::SpineID as SpineAddress>::AsRef<'n>:
-        Copy + AsSpineID + AsPathOffset + PartialEq,
-{
+impl Matcher for BalancedTrieMatcher {
     type Match = PatternMatch;
 
     fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
-        let graph = GraphType { graph, root };
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
-        let mut cache = Cache::default();
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
             for state in current_states {
@@ -98,7 +72,7 @@ where
                         root,
                     });
                 }
-                for next_state in self.trie.next_states(state, &graph, &mut cache) {
+                for next_state in self.trie.next_states(state, graph, root) {
                     new_states.push(next_state);
                 }
             }
@@ -108,7 +82,7 @@ where
     }
 }
 
-impl ManyPatternMatcher for BalancedTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
+impl ManyPatternMatcher for BalancedTrieMatcher {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());
@@ -129,11 +103,11 @@ impl ManyPatternMatcher for BalancedTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, 
             let mut first_edge = true;
             for Edge(out_port, in_port) in line {
                 let constraint = if let Some(in_port) = in_port {
-                    Constraint::Adjacency {
+                    UnweightedConstraint::Adjacency {
                         other_ports: skeleton.get_port_addr(in_port),
                     }
                 } else {
-                    Constraint::Dangling
+                    UnweightedConstraint::Dangling
                 };
                 if first_edge {
                     // The edge is added non-deterministically
@@ -191,7 +165,6 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::{
-        graph_tries::BaseGraphTrie,
         matcher::{
             many_patterns::{
                 balanced::BalancedTrieMatcher, ManyPatternMatcher, PatternID, PatternMatch,
@@ -207,7 +180,7 @@ mod tests {
         let mut g = PortGraph::new();
         g.add_node(0, 1);
         let p = Pattern::from_graph(g.clone()).unwrap();
-        let mut matcher = BalancedTrieMatcher::<BaseGraphTrie>::new();
+        let mut matcher = BalancedTrieMatcher::new();
         matcher.add_pattern(p);
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
@@ -457,162 +430,4 @@ mod tests {
             prop_assert_eq!(many_matches, single_matches);
         }
     }
-
-    proptest! {
-        #[ignore = "a bit slow"]
-        #[cfg(feature = "serde")]
-        #[test]
-        fn many_graphs_proptest_cached(
-            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
-            g in gen_portgraph(30, 4, 60)
-        ) {
-            // for entry in glob("pattern_*.bin").expect("glob pattern failed") {
-            //     match entry {
-            //         Ok(path) => fs::remove_file(path).expect("Removing file failed"),
-            //         Err(_) => {},
-            //     }
-            // }
-            // for (i, p) in patterns.iter().enumerate() {
-            //     fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
-            // }
-            // fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
-            let patterns = patterns
-                .into_iter()
-                .map(|p| Pattern::from_graph(p).unwrap())
-                .collect_vec();
-            let single_matchers = patterns
-                .clone()
-                .into_iter()
-                .map(SinglePatternMatcher::from_pattern)
-                .collect_vec();
-            let single_matches = single_matchers
-                .into_iter()
-                .enumerate()
-                .map(|(i, m)| {
-                    m.find_matches(&g)
-                        .into_iter()
-                        .map(|m| PatternMatch {
-                            id: PatternID(i),
-                            root: m[&patterns[i].root],
-                        })
-                        .collect_vec()
-                })
-                .collect_vec();
-            // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
-            let matcher = BalancedTrieMatcher::from_patterns(patterns.clone()).to_cached_trie();
-            let many_matches = matcher.find_matches(&g);
-            let many_matches = (0..patterns.len())
-                .map(|i| {
-                    many_matches
-                        .iter()
-                        .filter(|m| m.id == PatternID(i))
-                        .cloned()
-                        .collect_vec()
-                })
-                .collect_vec();
-            prop_assert_eq!(many_matches, single_matches);
-        }
-    }
-
-    // #[test]
-    // fn traverse_from_test() {
-    //     let mut matcher = ManyPatternMatcher::new();
-    //     let tree = &mut matcher.tree.line_trees[0];
-    //     tree[0].transitions.insert(
-    //         NodeTransition::NewNode(PortOffset(0)),
-    //         TreeNodeID::SameTree(1),
-    //     );
-    //     tree[0].transitions.insert(
-    //         NodeTransition::NewNode(PortOffset(1)),
-    //         TreeNodeID::SameTree(2),
-    //     );
-    //     tree.push(TreeNode {
-    //         out_port: Some(PortOffset(1)),
-    //         address: PatternNodeAddress(0, 1),
-    //         transitions: [(
-    //             NodeTransition::NewNode(PortOffset(0)),
-    //             TreeNodeID::SameTree(3),
-    //         )]
-    //         .into(),
-    //         matches: vec![],
-    //     });
-    //     tree.push(TreeNode {
-    //         out_port: PortOffset(2).into(),
-    //         address: PatternNodeAddress(0, 1),
-    //         transitions: [(NodeTransition::NoLinkedNode, TreeNodeID::SameTree(4))].into(),
-    //         matches: vec![],
-    //     });
-    //     tree.push(TreeNode {
-    //         out_port: PortOffset(1).into(),
-    //         address: PatternNodeAddress(0, 2),
-    //         transitions: [].into(),
-    //         matches: vec![],
-    //     });
-    //     tree.push(TreeNode {
-    //         out_port: PortOffset(0).into(),
-    //         address: PatternNodeAddress(0, 1),
-    //         transitions: [(NodeTransition::NoLinkedNode, TreeNodeID::SameTree(4))].into(),
-    //         matches: vec![],
-    //     });
-
-    //     let mut g = PortGraph::new();
-    //     let v0 = g.add_node(0, 2);
-    //     let v1 = g.add_node(1, 1);
-    //     let v2 = g.add_node(2, 1);
-    //     let v3 = g.add_node(1, 1);
-    //     let v4 = g.add_node(1, 0);
-    //     let v0_0 = g.port_index(v0, 0, Direction::Outgoing).unwrap();
-    //     let v1_0 = g.port_index(v1, 0, Direction::Incoming).unwrap();
-    //     g.link_ports(v0_0, v1_0).unwrap();
-    //     let v1_1 = g.port_index(v1, 0, Direction::Outgoing).unwrap();
-    //     let v3_0 = g.port_index(v3, 0, Direction::Incoming).unwrap();
-    //     g.link_ports(v1_1, v3_0).unwrap();
-    //     let v3_1 = g.port_index(v3, 0, Direction::Outgoing).unwrap();
-    //     let v4_0 = g.port_index(v4, 0, Direction::Incoming).unwrap();
-    //     g.link_ports(v3_1, v4_0).unwrap();
-    //     let line = vec![
-    //         Edge(v0_0, v1_0.into()),
-    //         Edge(v1_1, v3_0.into()),
-    //         Edge(v3_1, v4_0.into()),
-    //     ];
-    //     let pattern = Pattern { graph: g, root: v0 };
-    //     let mut transitioner = TransitionCalculator::new(&pattern);
-    //     assert_eq!(
-    //         transitioner.traverse_line(tree, &line),
-    //         (3, Some(&Edge(v3_1, v4_0.into())))
-    //     );
-    //     assert_eq!(
-    //         transitioner.mapped_nodes,
-    //         [
-    //             (v0, PatternNodeAddress(0, 0)),
-    //             (v1, PatternNodeAddress(0, 1)),
-    //             (v3, PatternNodeAddress(0, 2)),
-    //         ]
-    //         .into()
-    //     );
-
-    //     let mut g = PortGraph::new();
-    //     let v0 = g.add_node(0, 2);
-    //     let v1 = g.add_node(1, 1);
-    //     let v2 = g.add_node(2, 1);
-    //     let v0_0 = g.port_index(v0, 0, Direction::Outgoing).unwrap();
-    //     let v2_1 = g.port_index(v2, 1, Direction::Incoming).unwrap();
-    //     let v2_2 = g.port_index(v2, 0, Direction::Outgoing).unwrap();
-    //     g.link_ports(v0_0, v2_1).unwrap();
-    //     let line = vec![Edge(v0_0, v2_1.into()), Edge(v2_2, None)];
-    //     let pattern = Pattern { graph: g, root: v0 };
-    //     let mut transitioner = TransitionCalculator::new(&pattern);
-    //     assert_eq!(
-    //         transitioner.traverse_line(tree, &line, TransitionPolicy::NoDanglingEdge),
-    //         (4, None)
-    //     );
-    //     assert_eq!(
-    //         transitioner.mapped_nodes,
-    //         [
-    //             (v0, PatternNodeAddress(0, 0)),
-    //             (v2, PatternNodeAddress(0, 1)),
-    //         ]
-    //         .into()
-    //     );
-    // }
 }

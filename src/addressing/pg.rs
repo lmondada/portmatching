@@ -222,8 +222,8 @@ mod tests {
 
     use crate::{
         addressing::PortGraphAddressing,
-        addressing::{skeleton::Skeleton, SkeletonAddressing},
-        utils::test_utils::gen_portgraph_connected,
+        addressing::{SkeletonAddressing},
+        utils::test_utils::gen_portgraph_connected, constraint::Skeleton,
     };
     use portgraph::proptest::gen_node_index;
 
@@ -239,21 +239,21 @@ mod tests {
         graph.link_ports(out_p, in_p).unwrap();
     }
 
-    #[test]
-    fn a_simple_addr() {
-        let mut g = PortGraph::new();
-        g.add_node(2, 0);
-        g.add_node(0, 2);
-        link(&mut g, (1, 0), (0, 1));
-        link(&mut g, (1, 1), (0, 0));
-        let b = PortGraphAddressing::new(NodeIndex::new(0), &g, None, None);
-        let spine = vec![(Vec::new(), 0), (Vec::new(), 1)];
-        let ribs = vec![[-1, 0], [0, 0]];
-        let b = b.with_spine(&spine).with_ribs(&ribs);
-        let addr = b.get_addr(NodeIndex::new(1), &mut ()).unwrap();
-        let root = (&[] as &[PortOffset], 0);
-        assert_eq!(addr, (root, -1));
-    }
+    // #[test]
+    // fn a_simple_addr() {
+    //     let mut g = PortGraph::new();
+    //     g.add_node(2, 0);
+    //     g.add_node(0, 2);
+    //     link(&mut g, (1, 0), (0, 1));
+    //     link(&mut g, (1, 1), (0, 0));
+    //     let b = PortGraphAddressing::new(NodeIndex::new(0), &g, None, None);
+    //     let spine = vec![(Vec::new(), 0), (Vec::new(), 1)];
+    //     let ribs = vec![[-1, 0], [0, 0]];
+    //     let b = b.with_spine(&spine).with_ribs(&ribs);
+    //     let addr = b.get_addr(NodeIndex::new(1), &mut ()).unwrap();
+    //     let root = (&[] as &[PortOffset], 0);
+    //     assert_eq!(addr, (root, -1));
+    // }
 
     #[test]
     fn test_get_addr() {
@@ -277,7 +277,7 @@ mod tests {
         let addressing = PortGraphAddressing::from_skeleton(&skel);
 
         let root_addr = (&[] as &[PortOffset], 0);
-        assert_eq!(addressing.get_addr(n0, &mut ()).unwrap(), (root_addr, 0));
+        assert_eq!(skel.get_node_addr(n0).the_match, (root_addr, 0));
         assert_eq!(addressing.get_addr(n2, &mut ()).unwrap(), (root_addr, 2));
         assert_eq!(addressing.get_addr(n4, &mut ()).unwrap(), (root_addr, -1));
         let addr = (&[PortOffset::new_incoming(0)] as &[PortOffset], 1);

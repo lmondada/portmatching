@@ -152,18 +152,11 @@ fn from_saved_patterns() {
         let exp = load_results(&path).unwrap();
 
         let matcher = BalancedTrieMatcher::from_patterns(patterns.clone());
-        let matcher2 = BalancedTrieMatcher::from_patterns(patterns.clone()).to_cached_trie();
         // {
         //     let mut path = path.clone();
         //     path.push("trie.gv");
         //     fs::write(path, matcher.dotstring()).unwrap();
         // }
-        // {
-        //     let mut path = path;
-        //     path.push("trie2.gv");
-        //     fs::write(path, matcher2.dotstring()).unwrap();
-        // }
         test(matcher, &graph, &exp, patterns.len());
-        test(matcher2, &graph, &exp, patterns.len());
     }
 }
