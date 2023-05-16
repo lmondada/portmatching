@@ -8,17 +8,17 @@ use itertools::Itertools;
 use portgraph::PortGraph;
 use portmatching::{
     matcher::{
-        many_patterns::{BalancedTrieMatcher, ManyPatternMatcher, PatternID, PatternMatch},
+        many_patterns::{ManyPatternMatcher, PatternID, PatternMatch, TrieMatcher},
         Matcher,
     },
-    pattern::Pattern,
+    pattern::UnweightedPattern,
 };
 
 fn valid_binary_file(s: &str, pattern: &str) -> bool {
     s.starts_with(pattern) && s.ends_with(".bin")
 }
 
-fn load_patterns(dir: &Path) -> io::Result<Vec<Pattern>> {
+fn load_patterns(dir: &Path) -> io::Result<Vec<UnweightedPattern>> {
     let mut patterns = Vec::new();
     let mut all_patterns: Vec<_> = fs::read_dir(dir)?
         .filter_map(|entry| {
@@ -36,7 +36,7 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<Pattern>> {
         //     path.set_extension("gv");
         //     fs::write(path, dot_string(&p)).unwrap();
         // }
-        patterns.push(Pattern::from_graph(p).unwrap());
+        patterns.push(UnweightedPattern::from_graph(p).unwrap());
     }
 
     Ok(patterns)
@@ -151,7 +151,7 @@ fn from_saved_patterns() {
         let graph = load_graph(&path).unwrap();
         let exp = load_results(&path).unwrap();
 
-        let matcher = BalancedTrieMatcher::from_patterns(patterns.clone());
+        let matcher = TrieMatcher::from_patterns(patterns.clone());
         // {
         //     let mut path = path.clone();
         //     path.push("trie.gv");

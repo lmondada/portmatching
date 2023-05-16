@@ -1,16 +1,17 @@
 #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 
-// pub mod addressing;
 mod constraint;
 pub mod graph_tries;
 pub mod matcher;
 pub mod pattern;
 pub mod utils;
 
+#[doc(inline)]
 pub use constraint::{Constraint, Skeleton};
+
 pub use matcher::{
-    BalancedTrieMatcher, DetTrieMatcher, ManyPatternMatcher, Matcher, NaiveManyMatcher,
-    NonDetTrieMatcher, PatternID, SinglePatternMatcher,
+    ManyPatternMatcher, Matcher, NaiveManyMatcher, PatternID, SinglePatternMatcher,
+    TrieConstruction, TrieMatcher,
 };
-pub use pattern::Pattern;
+pub use pattern::{Pattern, UnweightedPattern};

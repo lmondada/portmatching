@@ -1,13 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use portgraph::PortGraph;
-use portmatching::{
-    matcher::{
-        many_patterns::{BalancedTrieMatcher, ManyPatternMatcher},
-        Matcher,
-    },
-    pattern::Pattern,
-};
+use portmatching::{pattern::UnweightedPattern, ManyPatternMatcher, Matcher, TrieMatcher};
 
 fn main() {
     let path: PathBuf = ["examples", "data"].iter().collect();
@@ -15,13 +9,13 @@ fn main() {
     for i in 0..100 {
         let path = path.join(format!("small_graphs/pattern_{}.bin", i));
         let p: PortGraph = rmp_serde::from_read(fs::File::open(&path).unwrap()).unwrap();
-        patterns.push(Pattern::from_graph(p).unwrap());
+        patterns.push(UnweightedPattern::from_graph(p).unwrap());
     }
     let path = path.join("large_graphs/graph_0.bin");
     let graph: PortGraph = rmp_serde::from_read(fs::File::open(&path).unwrap()).unwrap();
 
     println!("Loaded graph and patterns");
-    let matcher = BalancedTrieMatcher::from_patterns(patterns);
+    let matcher = TrieMatcher::from_patterns(patterns);
     println!("Built matcher");
     matcher.find_matches(&graph);
 }

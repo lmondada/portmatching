@@ -1,6 +1,6 @@
 use crate::{
     matcher::{Matcher, SinglePatternMatcher},
-    pattern::Pattern,
+    Constraint, Pattern,
 };
 
 use super::{ManyPatternMatcher, PatternID, PatternMatch};
@@ -9,12 +9,19 @@ use super::{ManyPatternMatcher, PatternID, PatternMatch};
 ///
 /// This matcher uses [`SinglePatternMatcher`]s to match each pattern separately.
 /// Useful as a baseline in benchmarking.
-#[derive(Default)]
-pub struct NaiveManyMatcher {
-    matchers: Vec<SinglePatternMatcher>,
+pub struct NaiveManyMatcher<C> {
+    matchers: Vec<SinglePatternMatcher<Box<dyn Pattern<Constraint = C>>>>,
 }
 
-impl Matcher for NaiveManyMatcher {
+impl<C> Default for NaiveManyMatcher<C> {
+    fn default() -> Self {
+        Self {
+            matchers: Default::default(),
+        }
+    }
+}
+
+impl<C: Constraint> Matcher for NaiveManyMatcher<C> {
     type Match = PatternMatch;
 
     fn find_anchored_matches(
@@ -37,10 +44,12 @@ impl Matcher for NaiveManyMatcher {
     }
 }
 
-impl ManyPatternMatcher for NaiveManyMatcher {
-    fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
+impl<C: Constraint> ManyPatternMatcher for NaiveManyMatcher<C> {
+    type Constraint = C;
+
+    fn add_pattern(&mut self, pattern: impl Pattern<Constraint = C> + 'static) -> PatternID {
         self.matchers
-            .push(SinglePatternMatcher::from_pattern(pattern));
+            .push(SinglePatternMatcher::from_pattern(Box::new(pattern)));
         PatternID(self.matchers.len() - 1)
     }
 }

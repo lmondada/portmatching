@@ -36,7 +36,7 @@ type SpineRef<'a> = &'a [(Vec<PortOffset>, usize)];
 ///
 /// This data structure can be used to obtain the spine and ribs of a graph,
 /// relative to a root node.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Skeleton<'g> {
     pub(super) node2line: Vec<Vec<LinePoint>>,
     graph: &'g PortGraph,
