@@ -1,12 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::{Debug, Display},
+};
 
-use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortOffset};
+use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 
 use crate::{
-    addressing::{
-        cache::Cache, constraint::Constraint, pg::AsPathOffset, AsSpineID, Skeleton, SpineAddress,
-    },
-    graph_tries::{root_state, BaseGraphTrie, GraphTrie, GraphType, StateID},
+    constraint::{Constraint, Skeleton, UnweightedConstraint},
+    graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
     pattern::Edge,
     ManyPatternMatcher, Matcher, Pattern, PatternID,
 };
@@ -26,16 +27,12 @@ pub struct DetTrieMatcher<T> {
 impl<T> Matcher for DetTrieMatcher<T>
 where
     T: GraphTrie,
-    for<'n> <<T as GraphTrie>::SpineID as SpineAddress>::AsRef<'n>:
-        Copy + AsSpineID + AsPathOffset + PartialEq,
 {
     type Match = PatternMatch;
 
     fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
-        let mut cache = Cache::default();
-        let graph = GraphType { graph, root };
         while !current_states.is_empty() {
             let mut new_states = Vec::new();
             for state in current_states {
@@ -45,7 +42,7 @@ where
                         root,
                     });
                 }
-                for next_state in self.trie.next_states(state, &graph, &mut cache) {
+                for next_state in self.trie.next_states(state, graph, root) {
                     new_states.push(next_state);
                 }
             }
@@ -55,7 +52,7 @@ where
     }
 }
 
-impl Default for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
+impl<C: Constraint + Clone> Default for DetTrieMatcher<BaseGraphTrie<C>> {
     fn default() -> Self {
         Self {
             trie: Default::default(),
@@ -65,7 +62,7 @@ impl Default for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
     }
 }
 
-impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize)>> {
+impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<UnweightedConstraint>> {
     fn add_pattern(&mut self, pattern: Pattern) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());
@@ -93,11 +90,11 @@ impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize
         for Edge(out_port, in_port) in pattern.canonical_edge_ordering() {
             // All other edges are deterministic
             let constraint = if let Some(in_port) = in_port {
-                Constraint::Adjacency {
+                UnweightedConstraint::Adjacency {
                     other_ports: skeleton.get_port_addr(in_port),
                 }
             } else {
-                Constraint::Dangling
+                UnweightedConstraint::Dangling
             };
             current_states = self.trie.add_graph_edge_det(
                 &skeleton.get_port_addr(out_port),
@@ -117,7 +114,10 @@ impl ManyPatternMatcher for DetTrieMatcher<BaseGraphTrie<(Vec<PortOffset>, usize
     }
 }
 
-impl<S: Clone> DetTrieMatcher<BaseGraphTrie<S>> {
+impl<C: Constraint + Display> DetTrieMatcher<BaseGraphTrie<C>>
+where
+    C::Address: Debug,
+{
     /// A dotstring representation of the trie.
     pub fn dotstring(&self) -> String {
         let mut weights = self.trie.str_weights();

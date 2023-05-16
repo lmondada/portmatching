@@ -4,7 +4,7 @@
 
 pub(crate) mod cover;
 mod depth;
-pub(crate) mod iter;
+// pub(crate) mod iter;
 pub(crate) mod pre_order;
 
 use std::mem;
