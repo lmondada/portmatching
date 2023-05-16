@@ -183,7 +183,7 @@ impl Constraint for UnweightedConstraint {
             UnweightedConstraint::Adjacency { other_ports } => {
                 let other_ports = other_ports.ports(g, root);
                 let this_ports = this_ports.ports(g, root);
-                adjacency_constraint(g, this_ports, other_ports)
+                adjacency_constraint(g, this_ports, other_ports).any(|_| true)
             }
             UnweightedConstraint::Dangling => !this_ports.ports(g, root).is_empty(),
             UnweightedConstraint::AllAdjacencies { .. } => self
@@ -291,14 +291,15 @@ impl Display for UnweightedConstraint {
     }
 }
 
-fn adjacency_constraint(
+/// Find the ports in `other_ports` that are linked to one of `this_ports`.
+pub(super) fn adjacency_constraint(
     g: &PortGraph,
     this_ports: Vec<PortIndex>,
     other_ports: Vec<PortIndex>,
-) -> bool {
-    this_ports.into_iter().any(|p| {
-        let Some(other_p) = g.port_link(p) else { return false };
-        other_ports.contains(&other_p)
+) -> impl Iterator<Item = PortIndex> + '_ {
+    this_ports.into_iter().filter_map(move |p| {
+        let other_p = g.port_link(p)?;
+        other_ports.contains(&other_p).then_some(other_p)
     })
 }
 
