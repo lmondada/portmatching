@@ -126,7 +126,7 @@ impl<C: Constraint<Address = unweighted::Address>> ManyPatternMatcher for TrieMa
         let pattern_id = PatternID(self.patterns.len());
         self.patterns.push(Box::new(pattern));
         let pattern = &self.patterns[pattern_id.0];
-        let skeleton = Skeleton::new(&pattern.graph(), pattern.root());
+        let skeleton = Skeleton::new(pattern.graph(), pattern.root());
 
         // Stores the current positions in the graph trie, along with the
         // match that corresponds to that position
