@@ -12,12 +12,12 @@ use crate::pattern::{Edge, Pattern};
 use super::Matcher;
 
 /// A simple matcher for a single pattern.
-pub struct SinglePatternMatcher {
-    pattern: Pattern,
+pub struct SinglePatternMatcher<P> {
+    pattern: P,
     edges: Vec<Edge>,
 }
 
-impl Matcher for SinglePatternMatcher {
+impl<P: Pattern> Matcher for SinglePatternMatcher<P> {
     type Match = BTreeMap<NodeIndex, NodeIndex>;
 
     fn find_anchored_matches(&self, graph: &PortGraph, anchor: NodeIndex) -> Vec<Self::Match> {
@@ -27,9 +27,9 @@ impl Matcher for SinglePatternMatcher {
     }
 }
 
-impl SinglePatternMatcher {
+impl<P: Pattern> SinglePatternMatcher<P> {
     /// Create a new matcher for a single pattern.
-    pub fn from_pattern(pattern: Pattern) -> Self {
+    pub fn from_pattern(pattern: P) -> Self {
         // This is our "matching recipe" -- we precompute it once and store it
         let edges = pattern.canonical_edge_ordering();
         Self { pattern, edges }
@@ -73,11 +73,11 @@ impl SinglePatternMatcher {
     }
 
     fn root(&self) -> NodeIndex {
-        self.pattern.root
+        self.pattern.root()
     }
 
     fn graph_ref(&self) -> &PortGraph {
-        &self.pattern.graph
+        &self.pattern.graph()
     }
 }
 
@@ -88,14 +88,14 @@ mod tests {
     use itertools::Itertools;
     use portgraph::{NodeIndex, PortGraph, PortOffset};
 
-    use crate::{matcher::Matcher, pattern::Pattern, utils::test_utils::graph};
+    use crate::{matcher::Matcher, pattern::UnweightedPattern, utils::test_utils::graph};
 
     use super::SinglePatternMatcher;
 
     #[test]
     fn single_pattern_match_simple() {
         let g = graph();
-        let p = Pattern::from_graph(g.clone()).unwrap();
+        let p = UnweightedPattern::from_graph(g.clone()).unwrap();
         let matcher = SinglePatternMatcher::from_pattern(p);
 
         let (n0, n1, n3, n4) = (
@@ -114,7 +114,7 @@ mod tests {
     fn single_pattern_distinguish_input_output() {
         let mut g = PortGraph::new();
         g.add_node(0, 1);
-        let p = Pattern::from_graph(g.clone()).unwrap();
+        let p = UnweightedPattern::from_graph(g.clone()).unwrap();
         let matcher = SinglePatternMatcher::from_pattern(p);
         let mut g = PortGraph::new();
         g.add_node(1, 0);
@@ -131,7 +131,7 @@ mod tests {
             g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
-        let p = Pattern::from_graph(g).unwrap();
+        let p = UnweightedPattern::from_graph(g).unwrap();
         let matcher = SinglePatternMatcher::from_pattern(p);
 
         let mut g = PortGraph::new();
@@ -154,7 +154,7 @@ mod tests {
             g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
-        let p = Pattern::from_graph(g).unwrap();
+        let p = UnweightedPattern::from_graph(g).unwrap();
         let matcher = SinglePatternMatcher::from_pattern(p);
 
         let mut g = PortGraph::new();
@@ -188,7 +188,7 @@ mod tests {
         let pi = |i| pattern.nodes_iter().nth(i).unwrap();
         let ps = [pi(0), pi(1), pi(2), pi(3)];
         add_pattern(&mut pattern, &ps);
-        let p = Pattern::from_graph(pattern).unwrap();
+        let p = UnweightedPattern::from_graph(pattern).unwrap();
         let matcher = SinglePatternMatcher::from_pattern(p);
 
         let mut g = PortGraph::new();

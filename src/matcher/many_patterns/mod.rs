@@ -5,18 +5,8 @@
 //!
 //! The [`LineGraphTrie`] is a more sophisticated matcher that uses a graph trie
 //! data structure to match all patterns at once.
-mod balanced;
-mod det;
 mod naive;
-mod nondet;
-#[doc(inline)]
-pub use balanced::BalancedTrieMatcher;
-#[doc(inline)]
-pub use det::DetTrieMatcher;
-#[doc(inline)]
-pub use naive::NaiveManyMatcher;
-#[doc(inline)]
-pub use nondet::NonDetTrieMatcher;
+mod trie_matcher;
 
 use portgraph::NodeIndex;
 use std::fmt;
@@ -26,6 +16,10 @@ use serde::{Deserialize, Serialize};
 
 use super::Matcher;
 use crate::pattern::Pattern;
+#[doc(inline)]
+pub use naive::NaiveManyMatcher;
+#[doc(inline)]
+pub use trie_matcher::{TrieConstruction, TrieMatcher};
 
 /// A match instance returned by a ManyPatternMatcher instance.
 ///
@@ -71,14 +65,25 @@ impl fmt::Display for PatternID {
 /// previously constructed matchers and thus do not support adding patterns
 /// one-by-one.
 pub trait ManyPatternMatcher: Default + Matcher {
+    /// The constraint type used by the matcher.
+    ///
+    /// Defines the type of patterns that can be matched by the matcher.
+    type Constraint;
+
     /// Add a pattern to the matcher.
     ///
     /// Patterns are assigned a unique ID, which is returned by this method. All
     /// patterns must be connected.
-    fn add_pattern(&mut self, pattern: Pattern) -> PatternID;
+    fn add_pattern(
+        &mut self,
+        pattern: impl Pattern<Constraint = Self::Constraint> + 'static,
+    ) -> PatternID;
 
     /// Construct a pattern matcher from patterns.
-    fn from_patterns(patterns: impl IntoIterator<Item = Pattern>) -> Self {
+    fn from_patterns<P: 'static>(patterns: impl IntoIterator<Item = P> + 'static) -> Self
+    where
+        P: Pattern<Constraint = Self::Constraint>,
+    {
         let mut obj = Self::default();
         for pattern in patterns {
             obj.add_pattern(pattern);

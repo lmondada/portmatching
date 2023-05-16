@@ -1,7 +1,7 @@
 use portgraph::{NodeIndex, PortGraph, PortIndex};
 
 mod skeleton;
-mod unweighted;
+pub(crate) mod unweighted;
 
 pub use skeleton::Skeleton;
 pub use unweighted::UnweightedConstraint;

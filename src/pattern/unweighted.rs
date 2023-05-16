@@ -1,10 +1,14 @@
-//! Patterns for graph matching.
-//!
-//! Patterns are graphs that can be matched against other graphs.
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 
-use crate::utils::{centre, NoCentreError};
-use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
+use portgraph::{NodeIndex, PortGraph, PortIndex};
+
+use crate::{
+    constraint::UnweightedConstraint,
+    utils::{centre, NoCentreError},
+    Skeleton,
+};
+
+use super::{Edge, InvalidPattern, Pattern};
 
 /// A pattern graph.
 ///
@@ -12,34 +16,37 @@ use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 /// which by default is chosen to be the centre of the graph, for fast
 /// matching and short relative paths to the root.
 #[derive(Debug, Clone)]
-pub struct Pattern {
+pub struct UnweightedPattern {
     /// The pattern graph.
     pub(crate) graph: PortGraph,
     /// The root of the pattern.
     pub(crate) root: NodeIndex,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Edge(pub(crate) PortIndex, pub(crate) Option<PortIndex>);
+impl Pattern for UnweightedPattern {
+    type Constraint = UnweightedConstraint;
 
-impl Pattern {
-    /// Create a new pattern from a graph.
-    pub fn from_graph(graph: PortGraph) -> Result<Self, InvalidPattern> {
-        let root = centre(&graph).map_err(|err| match err {
-            NoCentreError::DisconnectedGraph => InvalidPattern::DisconnectedPattern,
-            NoCentreError::EmptyGraph => InvalidPattern::EmptyPattern,
-        })?;
-        Ok(Pattern { graph, root })
+    fn graph(&self) -> &PortGraph {
+        &self.graph
     }
 
-    /// Every pattern has a unique canonical ordering of its edges.
-    ///
-    /// Pattern matching can be done by matching these edges one-by-one
-    pub(crate) fn canonical_edge_ordering(&self) -> Vec<Edge> {
-        self.all_lines().into_iter().flatten().collect()
+    fn root(&self) -> NodeIndex {
+        self.root
     }
 
-    pub(crate) fn all_lines(&self) -> Vec<Vec<Edge>> {
+    fn to_constraint(&self, Edge(_, in_port): &Edge) -> Self::Constraint {
+        if let &Some(in_port) = in_port {
+            // TODO: dont recompute skeleton each time
+            let skeleton = Skeleton::new(&self.graph, self.root);
+            UnweightedConstraint::Adjacency {
+                other_ports: skeleton.get_port_addr(in_port),
+            }
+        } else {
+            UnweightedConstraint::Dangling
+        }
+    }
+
+    fn all_lines(&self) -> Vec<Vec<Edge>> {
         let mut node_queue = VecDeque::from([self.root]);
         let mut all_lines = Vec::new();
         let mut visited_ports = BTreeSet::new();
@@ -61,48 +68,17 @@ impl Pattern {
         }
         all_lines
     }
-
-    /// Get the boundary of this pattern in a graph.
-    ///
-    /// This is useful to get the location of a pattern in a graph
-    /// given a mapping of its root.
-    pub fn get_boundary(&self, root: NodeIndex, graph: &PortGraph) -> PatternBoundaries {
-        let mut out_edges = Vec::new();
-        let mut in_edges = Vec::new();
-        let mut pattern_to_graph = BTreeMap::from([(self.root, root)]);
-        for line in self.all_lines() {
-            for edge in line {
-                let curr_pattern = self.graph.port_node(edge.0).unwrap();
-                let curr_graph = pattern_to_graph[&curr_pattern];
-                let port_offset = self.graph.port_offset(edge.0).unwrap();
-                let port_out = graph.port_index(curr_graph, port_offset).unwrap();
-                if let Some(next_port) = edge.1 {
-                    let next_pattern = self.graph.port_node(next_port).unwrap();
-                    let port_in = graph.port_link(port_out).unwrap();
-                    let next_graph = graph.port_node(port_in).unwrap();
-                    pattern_to_graph.insert(next_pattern, next_graph);
-                } else {
-                    match &port_offset {
-                        PortOffset::Incoming(_) => in_edges.push(port_out),
-                        PortOffset::Outgoing(_) => out_edges.push(port_out),
-                    }
-                }
-            }
-        }
-        PatternBoundaries {
-            _in_edges: in_edges,
-            _out_edges: out_edges,
-        }
-    }
 }
 
-/// The boundary of a pattern in a graph.
-///
-/// Given as a list of in- and out-edges.
-#[derive(Debug)]
-pub struct PatternBoundaries {
-    _in_edges: Vec<PortIndex>,
-    _out_edges: Vec<PortIndex>,
+impl UnweightedPattern {
+    /// Create a new pattern from a graph.
+    pub fn from_graph(graph: PortGraph) -> Result<Self, InvalidPattern> {
+        let root = centre(&graph).map_err(|err| match err {
+            NoCentreError::DisconnectedGraph => InvalidPattern::DisconnectedPattern,
+            NoCentreError::EmptyGraph => InvalidPattern::EmptyPattern,
+        })?;
+        Ok(UnweightedPattern { graph, root })
+    }
 }
 
 /// Starting at `port`, keep following edges as long as possible
@@ -145,28 +121,19 @@ fn traverse_node(graph: &PortGraph, port: PortIndex) -> Option<PortIndex> {
     }
 }
 
-/// Error that can occur when creating a pattern from a graph.
-#[derive(Debug, PartialEq, Eq)]
-pub enum InvalidPattern {
-    /// A pattern must always be connected.
-    DisconnectedPattern,
-    /// Empty patterns are not allowed.
-    EmptyPattern,
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::utils::test_utils::*;
+    use crate::{pattern::InvalidPattern, utils::test_utils::*};
 
     use super::*;
     use itertools::Itertools;
-    use portgraph::PortGraph;
+    use portgraph::{PortGraph, PortOffset};
 
     #[test]
     fn empty_pattern() {
         let g = PortGraph::new();
         assert_eq!(
-            Pattern::from_graph(g).unwrap_err(),
+            UnweightedPattern::from_graph(g).unwrap_err(),
             InvalidPattern::EmptyPattern
         );
     }
@@ -175,7 +142,7 @@ mod tests {
     fn ok_pattern() {
         let mut g = PortGraph::new();
         g.add_node(3, 3);
-        Pattern::from_graph(g).unwrap();
+        UnweightedPattern::from_graph(g).unwrap();
     }
 
     #[test]
@@ -186,7 +153,7 @@ mod tests {
             .map(|n| g.all_ports(n).collect_vec())
             .collect_tuple()
             .unwrap();
-        let p = Pattern::from_graph(g).unwrap();
+        let p = UnweightedPattern::from_graph(g).unwrap();
         assert_eq!(
             p.canonical_edge_ordering(),
             vec![

@@ -10,19 +10,18 @@ use criterion::Throughput;
 use itertools::Itertools;
 
 use portgraph::PortGraph;
-use portmatching::matcher::many_patterns::{
-    BalancedTrieMatcher, DetTrieMatcher, ManyPatternMatcher, NaiveManyMatcher, NonDetTrieMatcher,
-};
+use portmatching::matcher::many_patterns::{ManyPatternMatcher, NaiveManyMatcher, TrieMatcher};
 use portmatching::matcher::Matcher;
-use portmatching::pattern::Pattern;
+use portmatching::pattern::UnweightedPattern;
+use portmatching::TrieConstruction;
 
 fn bench_matching<M: Matcher>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
-    patterns: &[Pattern],
+    patterns: &[UnweightedPattern],
     sizes: impl Iterator<Item = usize>,
     graph: &PortGraph,
-    mut get_matcher: impl FnMut(Vec<Pattern>) -> M,
+    mut get_matcher: impl FnMut(Vec<UnweightedPattern>) -> M,
 ) {
     group.sample_size(10);
     for n in sizes {
@@ -38,9 +37,9 @@ fn bench_matching<M: Matcher>(
 fn bench_trie_construction<M: Matcher>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
-    patterns: &[Pattern],
+    patterns: &[UnweightedPattern],
     sizes: impl Iterator<Item = usize>,
-    mut get_matcher: impl FnMut(Vec<Pattern>) -> M,
+    mut get_matcher: impl FnMut(Vec<UnweightedPattern>) -> M,
 ) {
     group.sample_size(10);
     for n in sizes {
@@ -63,7 +62,7 @@ fn perform_benches(c: &mut Criterion) {
                     .expect("Could not open small circuit"),
             )
             .expect("could not serialize");
-            Pattern::from_graph(g).expect("pattern not connected")
+            UnweightedPattern::from_graph(g).expect("pattern not connected")
         })
         .collect_vec();
     // TODO: use more than one graph in benchmark
@@ -94,7 +93,7 @@ fn perform_benches(c: &mut Criterion) {
         &patterns,
         (0..=1000).step_by(100),
         &graph,
-        BalancedTrieMatcher::from_patterns,
+        TrieMatcher::from_patterns,
     );
     bench_matching(
         "Non-deterministic Graph Trie",
@@ -102,7 +101,13 @@ fn perform_benches(c: &mut Criterion) {
         &patterns,
         (0..=1000).step_by(100),
         &graph,
-        NonDetTrieMatcher::from_patterns,
+        |ps| {
+            let mut matcher = TrieMatcher::new(TrieConstruction::NonDeterministic);
+            for p in ps {
+                matcher.add_pattern(p);
+            }
+            matcher
+        },
     );
     bench_matching(
         "Deterministic Graph Trie",
@@ -110,7 +115,13 @@ fn perform_benches(c: &mut Criterion) {
         &patterns,
         (0..=300).step_by(100),
         &graph,
-        DetTrieMatcher::from_patterns,
+        |ps| {
+            let mut matcher = TrieMatcher::new(TrieConstruction::Deterministic);
+            for p in ps {
+                matcher.add_pattern(p);
+            }
+            matcher
+        },
     );
     // This is too slow
     // bench_matching("Naive", &mut group, &patterns, &graph, |p| {
@@ -124,21 +135,33 @@ fn perform_benches(c: &mut Criterion) {
         &mut group,
         &patterns,
         (0..=300).step_by(30),
-        BalancedTrieMatcher::from_patterns,
+        TrieMatcher::from_patterns,
     );
     bench_trie_construction(
         "Non-deterministic Graph Trie",
         &mut group,
         &patterns,
         (0..=300).step_by(30),
-        NonDetTrieMatcher::from_patterns,
+        |ps| {
+            let mut matcher = TrieMatcher::new(TrieConstruction::NonDeterministic);
+            for p in ps {
+                matcher.add_pattern(p);
+            }
+            matcher
+        },
     );
     bench_trie_construction(
         "Deterministic Graph Trie",
         &mut group,
         &patterns,
         (0..=300).step_by(30),
-        DetTrieMatcher::from_patterns,
+        |ps| {
+            let mut matcher = TrieMatcher::new(TrieConstruction::Deterministic);
+            for p in ps {
+                matcher.add_pattern(p);
+            }
+            matcher
+        },
     );
     group.finish();
 }
