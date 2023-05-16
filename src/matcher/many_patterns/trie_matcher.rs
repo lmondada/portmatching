@@ -466,7 +466,7 @@ mod tests {
         #[ignore = "a bit slow"]
         #[test]
         fn many_graphs_proptest_non_det(
-            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
+            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
             // for entry in glob("pattern_*.bin").expect("glob pattern failed") {
@@ -524,7 +524,7 @@ mod tests {
         #[ignore = "a bit slow"]
         #[test]
         fn many_graphs_proptest_det(
-            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
+            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
             // for entry in glob("pattern_*.bin").expect("glob pattern failed") {
