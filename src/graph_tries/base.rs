@@ -127,7 +127,7 @@ impl<C: Constraint> Clone for BaseGraphTrie<C> {
             graph: self.graph.clone(),
             weights: self.weights.clone(),
             trace: self.trace.clone(),
-            edge_cnt: self.edge_cnt.clone(),
+            edge_cnt: self.edge_cnt,
         }
     }
 }

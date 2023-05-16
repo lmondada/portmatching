@@ -19,20 +19,11 @@ use crate::graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID};
 ///
 /// This spreads out the occurence of non-deterministic (expensive) states in the trie
 /// in-between deterministic (cheap) ones.
+#[derive(Debug, Default)]
 pub struct BalancedTrieMatcher {
     trie: BaseGraphTrie<UnweightedConstraint>,
     match_states: BTreeMap<StateID, Vec<PatternID>>,
     patterns: Vec<Pattern>,
-}
-
-impl Default for BalancedTrieMatcher {
-    fn default() -> Self {
-        Self {
-            trie: Default::default(),
-            match_states: Default::default(),
-            patterns: Default::default(),
-        }
-    }
 }
 
 impl BalancedTrieMatcher {

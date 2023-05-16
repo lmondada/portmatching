@@ -39,7 +39,7 @@ where
                         root,
                     });
                 }
-                for next_state in self.trie.next_states(state, &graph, root) {
+                for next_state in self.trie.next_states(state, graph, root) {
                     new_states.push(next_state);
                 }
             }
