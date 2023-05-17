@@ -220,7 +220,7 @@ impl Constraint for UnweightedConstraint {
             UnweightedConstraint::Adjacency { other_ports } => {
                 let other_ports = other_ports.ports(g);
                 let this_ports = this_ports.ports(g);
-                adjacency_constraint(&g.0, this_ports, other_ports).any(|_| true)
+                adjacency_constraint(g.0, this_ports, other_ports).any(|_| true)
             }
             UnweightedConstraint::Dangling => !this_ports.ports(g).is_empty(),
             UnweightedConstraint::AllAdjacencies { .. } => {

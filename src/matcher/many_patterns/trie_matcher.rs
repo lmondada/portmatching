@@ -94,9 +94,8 @@ type Graph<'g> = (&'g PortGraph, NodeIndex);
 
 impl<'g, C, A> Matcher<Graph<'g>> for TrieMatcher<C, A>
 where
-    C: Clone + Constraint<Graph<'g> = (&'g PortGraph, NodeIndex)> + Ord,
-    A: Clone + Ord,
-    A: PortAddress<(&'g PortGraph, NodeIndex)>,
+    C: Clone + Constraint<Graph<'g> = Graph<'g>> + Ord,
+    A: Clone + Ord + PortAddress<Graph<'g>>,
 {
     type Match = PatternMatch;
 
@@ -122,10 +121,40 @@ where
     }
 }
 
-impl<'g, C: Clone + Ord + Constraint> ManyPatternMatcher<Graph<'g>>
-    for TrieMatcher<C, unweighted::Address>
+type GraphBis<'g, W> = (&'g PortGraph, W, NodeIndex);
+
+impl<'g, C, A, W: Copy> Matcher<GraphBis<'g, W>> for TrieMatcher<C, A>
 where
-    C: Constraint<Graph<'g> = Graph<'g>>,
+    C: Clone + Constraint<Graph<'g> = GraphBis<'g, W>> + Ord,
+    A: Clone + Ord + PortAddress<GraphBis<'g, W>>,
+{
+    type Match = PatternMatch;
+
+    fn find_anchored_matches(&self, g @ (_, _, root): GraphBis<'g, W>) -> Vec<Self::Match> {
+        let mut current_states = vec![root_state()];
+        let mut matches = BTreeSet::new();
+        while !current_states.is_empty() {
+            let mut new_states = Vec::new();
+            for state in current_states {
+                for &pattern_id in self.match_states.get(&state).into_iter().flatten() {
+                    matches.insert(PatternMatch {
+                        id: pattern_id,
+                        root,
+                    });
+                }
+                for next_state in self.trie.next_states(state, g) {
+                    new_states.push(next_state);
+                }
+            }
+            current_states = new_states;
+        }
+        Vec::from_iter(matches)
+    }
+}
+
+impl<C: Clone + Ord + Constraint, G> ManyPatternMatcher<G> for TrieMatcher<C, unweighted::Address>
+where
+    Self: Matcher<G>,
 {
     type Constraint = C;
 
@@ -199,7 +228,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset};
+    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset, SecondaryMap};
 
     use proptest::prelude::*;
 
@@ -211,7 +240,7 @@ mod tests {
             },
             Matcher, SinglePatternMatcher,
         },
-        pattern::UnweightedPattern,
+        pattern::{UnweightedPattern, WeightedPattern},
         utils::test_utils::gen_portgraph_connected,
     };
 
@@ -394,6 +423,43 @@ mod tests {
         let mut matcher = TrieMatcher::new(TrieConstruction::Balanced);
         matcher.add_pattern(UnweightedPattern::from_graph(p1).unwrap());
         matcher.add_pattern(UnweightedPattern::from_graph(p2).unwrap());
+    }
+
+    #[test]
+    fn weighted_pattern_matching() {
+        let mut p1 = PortGraph::new();
+        let n0 = p1.add_node(2, 1);
+        let n1 = p1.add_node(1, 0);
+        link(&mut p1, (n0, 0), (n1, 0));
+        let mut w1 = SecondaryMap::new();
+        w1[n0] = 2;
+        w1[n1] = 1;
+        let mut p2 = PortGraph::new();
+        let n0 = p2.add_node(2, 0);
+        let n1 = p2.add_node(0, 2);
+        link(&mut p2, (n1, 0), (n0, 1));
+        link(&mut p2, (n1, 1), (n0, 0));
+        let mut w2 = SecondaryMap::new();
+        w2[n0] = 3;
+        w2[n1] = 4;
+        let mut matcher = TrieMatcher::new(TrieConstruction::Balanced);
+        matcher.add_pattern(WeightedPattern::from_weighted_graph(p1, w1).unwrap());
+        matcher.add_pattern(WeightedPattern::from_weighted_graph(p2, w2).unwrap());
+        let mut g = PortGraph::new();
+        let mut w = SecondaryMap::new();
+        let n0 = g.add_node(0, 2);
+        let n1 = g.add_node(2, 1);
+        let n2 = g.add_node(2, 1);
+        let n3 = g.add_node(1, 0);
+        w[n0] = 4;
+        w[n1] = 3;
+        w[n2] = 2;
+        w[n3] = 1;
+        link(&mut g, (n0, 0), (n1, 1));
+        link(&mut g, (n0, 1), (n1, 0));
+        link(&mut g, (n1, 0), (n2, 0));
+        link(&mut g, (n2, 0), (n3, 0));
+        assert_eq!(matcher.find_weighted_matches(&g, &w).len(), 2);
     }
 
     proptest! {

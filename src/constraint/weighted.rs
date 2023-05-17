@@ -45,7 +45,7 @@ impl<N: Clone> WeightedConstraint<N> {
         } = self else { return vec![self.clone()] };
         let mut no_match = no_match.clone();
         the_matches
-            .into_iter()
+            .iter()
             .map(|the_match| WeightedConstraint::Adjacency {
                 other_ports: Address {
                     addr: NodeAddress {
