@@ -7,12 +7,12 @@ fn main() {
     let path: PathBuf = ["examples", "data"].iter().collect();
     let mut patterns = Vec::with_capacity(100);
     for i in 0..100 {
-        let path = path.join(format!("small_graphs/pattern_{}.bin", i));
-        let p: PortGraph = rmp_serde::from_read(fs::File::open(&path).unwrap()).unwrap();
+        let path = path.join(format!("small_graphs/pattern_{}.json", i));
+        let p: PortGraph = serde_json::from_reader(fs::File::open(&path).unwrap()).unwrap();
         patterns.push(UnweightedPattern::from_graph(p).unwrap());
     }
-    let path = path.join("large_graphs/graph_0.bin");
-    let graph: PortGraph = rmp_serde::from_read(fs::File::open(&path).unwrap()).unwrap();
+    let path = path.join("large_graphs/graph_0.json");
+    let graph: PortGraph = serde_json::from_reader(fs::File::open(&path).unwrap()).unwrap();
 
     println!("Loaded graph and patterns");
     let matcher = TrieMatcher::from_patterns(patterns);

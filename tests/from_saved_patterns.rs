@@ -14,8 +14,8 @@ use portmatching::{
     pattern::UnweightedPattern,
 };
 
-fn valid_binary_file(s: &str, pattern: &str) -> bool {
-    s.starts_with(pattern) && s.ends_with(".bin")
+fn valid_json_file(s: &str, pattern: &str) -> bool {
+    s.starts_with(pattern) && s.ends_with(".json")
 }
 
 fn load_patterns(dir: &Path) -> io::Result<Vec<UnweightedPattern>> {
@@ -25,12 +25,12 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<UnweightedPattern>> {
             let Ok(entry) = entry else { return None };
             let file_name = entry.file_name().to_str().unwrap().to_string();
             let path = entry.path();
-            valid_binary_file(&file_name, "pattern").then_some(path)
+            valid_json_file(&file_name, "pattern").then_some(path)
         })
         .collect();
     all_patterns.sort_unstable();
     for path in all_patterns {
-        let p: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
+        let p: PortGraph = serde_json::from_reader(fs::File::open(&path)?).unwrap();
         // {
         //     let mut path = path;
         //     path.set_extension("gv");
@@ -47,8 +47,8 @@ fn load_graph(dir: &Path) -> io::Result<PortGraph> {
         let Ok(entry) = entry else { continue };
         let file_name = entry.file_name().to_str().unwrap().to_string();
         let path = entry.path();
-        if valid_binary_file(&file_name, "graph") {
-            let graph: PortGraph = rmp_serde::from_read(fs::File::open(&path)?).unwrap();
+        if valid_json_file(&file_name, "graph") {
+            let graph: PortGraph = serde_json::from_reader(fs::File::open(&path)?).unwrap();
             // {
             //     let mut path = path;
             //     path.set_extension("gv");
@@ -66,10 +66,10 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
         let Ok(entry) = entry else { continue };
         let file_name = entry.file_name().to_str().unwrap().to_string();
         let path = entry.path();
-        if valid_binary_file(&file_name, "results") {
-            let graph: Vec<Vec<PatternMatch>> =
-                rmp_serde::from_read(fs::File::open(&path)?).unwrap();
-            return Ok(graph);
+        if valid_json_file(&file_name, "results") {
+            let res: Vec<Vec<PatternMatch>> =
+                serde_json::from_reader(fs::File::open(&path)?).unwrap();
+            return Ok(res);
         }
     }
 
