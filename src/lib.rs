@@ -14,4 +14,4 @@ pub use matcher::{
     ManyPatternMatcher, Matcher, NaiveManyMatcher, PatternID, SinglePatternMatcher,
     TrieConstruction, TrieMatcher,
 };
-pub use pattern::{Pattern, UnweightedPattern};
+pub use pattern::{Pattern, UnweightedPattern, WeightedPattern};
