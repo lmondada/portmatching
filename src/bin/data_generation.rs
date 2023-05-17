@@ -1,6 +1,5 @@
 use clap::Parser;
 use portmatching::utils::is_connected;
-use rmp_serde;
 use std::{cmp, fs};
 
 use portgraph::PortGraph;
@@ -64,8 +63,8 @@ fn main() {
         for i in 0..n_circuits {
             println!("{}/{n_circuits} large circuits...", i + 1);
             let g = gen_circ(n, q, d, |c| !exists_two_cx_gates(c), &mut rng);
-            let f = format!("{dir}/large_circuits/circuit_{i}.bin");
-            fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
+            let f = format!("{dir}/large_circuits/circuit_{i}.json");
+            fs::write(f, serde_json::to_vec(&g).unwrap()).expect("could not write to file");
         }
     }
     // small circuits
@@ -82,8 +81,8 @@ fn main() {
                 |c| is_connected(c) && exists_two_cx_gates(c),
                 &mut rng,
             );
-            let f = format!("{dir}/small_circuits/pattern_{i}.bin");
-            fs::write(f, rmp_serde::to_vec(&g).unwrap()).expect("could not write to file");
+            let f = format!("{dir}/small_circuits/pattern_{i}.json");
+            fs::write(f, serde_json::to_vec(&g).unwrap()).expect("could not write to file");
         }
     }
 }

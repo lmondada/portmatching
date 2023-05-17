@@ -57,10 +57,10 @@ fn bench_trie_construction<'g, M: Matcher<Graph<'g>>>(
 }
 
 fn perform_benches(c: &mut Criterion) {
-    let patterns = glob::glob("datasets/small_circuits/*.bin")
+    let patterns = glob::glob("datasets/small_circuits/*.json")
         .expect("cannot read small circuits directory")
         .map(|p| {
-            let g = rmp_serde::from_read(
+            let g = serde_json::from_reader(
                 File::open(p.as_ref().expect("path does not exist?"))
                     .expect("Could not open small circuit"),
             )
@@ -69,10 +69,10 @@ fn perform_benches(c: &mut Criterion) {
         })
         .collect_vec();
     // TODO: use more than one graph in benchmark
-    let graph = glob::glob("datasets/large_circuits/*.bin")
+    let graph = glob::glob("datasets/large_circuits/*.json")
         .expect("cannot read large circuits directory")
         .map(|p| {
-            rmp_serde::from_read(
+            serde_json::from_reader(
                 File::open(p.as_ref().expect("path does not exist?"))
                     .expect("Could not open small circuit"),
             )
