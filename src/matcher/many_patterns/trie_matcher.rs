@@ -99,10 +99,7 @@ where
     type Match = PatternMatch;
     type Graph<'g> = (&'g PortGraph, NodeIndex);
 
-    fn find_anchored_matches<'g>(
-        &self,
-        g@(_, root): Self::Graph<'g>,
-    ) -> Vec<Self::Match> {
+    fn find_anchored_matches<'g>(&self, g @ (_, root): Self::Graph<'g>) -> Vec<Self::Match> {
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
         while !current_states.is_empty() {

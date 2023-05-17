@@ -9,7 +9,7 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
 
 use crate::utils::{follow_path, port_opposite};
 
-use super::{Constraint, PortAddress, Skeleton};
+use super::{weighted::WeightedConstraint, Constraint, PortAddress, Skeleton};
 
 // TODO: use Rc or other for faster speed
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -130,6 +130,18 @@ impl<'g> PortAddress<Graph<'g>> for Address {
     }
 }
 
+type GraphBis<'g, V> = (&'g PortGraph, V, NodeIndex);
+impl<'g, V> PortAddress<GraphBis<'g, V>> for Address {
+    fn ports(&self, (g, _, root): GraphBis<'g, V>) -> Vec<PortIndex> {
+        let Some(node) = self.addr.node(g, root) else { return vec![] };
+        let as_vec = |p: Option<_>| p.into_iter().collect();
+        match self.label {
+            PortLabel::Outgoing(out_p) => as_vec(g.output(node, out_p)),
+            PortLabel::Incoming(in_p) => as_vec(g.input(node, in_p)),
+        }
+    }
+}
+
 /// A state transition for an unweighted graph trie.
 ///
 /// This corresponds to following an edge of the input graph.
@@ -173,6 +185,26 @@ impl UnweightedConstraint {
             })
             .collect()
     }
+
+    pub(crate) fn to_weighted<N>(&self, target_weight: Option<N>) -> WeightedConstraint<N> {
+        match self.clone() {
+            UnweightedConstraint::AllAdjacencies {
+                label,
+                no_match,
+                the_matches,
+            } => WeightedConstraint::AllAdjacencies {
+                label,
+                target_weight: target_weight.expect("target_weight cannot be None"),
+                no_match,
+                the_matches,
+            },
+            UnweightedConstraint::Adjacency { other_ports } => WeightedConstraint::Adjacency {
+                other_ports,
+                target_weight: target_weight.expect("target_weight cannot be None"),
+            },
+            UnweightedConstraint::Dangling => WeightedConstraint::Dangling,
+        }
+    }
 }
 
 type Graph<'g> = (&'g PortGraph, NodeIndex);
@@ -204,7 +236,9 @@ impl Constraint for UnweightedConstraint {
     }
 }
 
-fn simplify_constraints(constraints: Vec<UnweightedConstraint>) -> Option<UnweightedConstraint> {
+pub(super) fn simplify_constraints(
+    constraints: Vec<UnweightedConstraint>,
+) -> Option<UnweightedConstraint> {
     let constraints = flatten_constraints(constraints);
 
     // If we only have dangling, then dangling. Otherwise we can remove danglings

@@ -3,11 +3,16 @@
 //! Patterns are graphs that can be matched against other graphs.
 
 mod unweighted;
+mod weighted;
 
 use std::collections::BTreeMap;
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
+
+#[doc(inline)]
 pub use unweighted::UnweightedPattern;
+#[doc(inline)]
+pub use weighted::WeightedPattern;
 
 /// An edge in a graph.
 ///

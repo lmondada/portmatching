@@ -42,4 +42,23 @@ pub trait Matcher {
         }
         matches
     }
+
+    /// Find matches of all patterns in `graph` with `weights`.
+    ///
+    /// The default implementation loops over all possible `root` nodes and
+    /// calls [`Matcher::find_anchored_matches`] for each of them.
+    fn find_weighted_matches<'g, W: Copy>(
+        &self,
+        graph: &'g PortGraph,
+        weights: W,
+    ) -> Vec<Self::Match>
+    where
+        Self: Matcher<Graph<'g> = (&'g PortGraph, W, NodeIndex)>,
+    {
+        let mut matches = Vec::new();
+        for root in graph.nodes_iter() {
+            matches.append(&mut self.find_anchored_matches((graph, weights, root)));
+        }
+        matches
+    }
 }

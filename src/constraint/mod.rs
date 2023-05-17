@@ -2,9 +2,11 @@ use portgraph::PortIndex;
 
 mod skeleton;
 pub(crate) mod unweighted;
+pub(crate) mod weighted;
 
 pub use skeleton::Skeleton;
 pub use unweighted::UnweightedConstraint;
+pub use weighted::WeightedConstraint;
 
 /// Constraints for graph trie transitions.
 ///
@@ -14,7 +16,7 @@ pub use unweighted::UnweightedConstraint;
 /// The simplest constraint is the [`UnweightedConstraint`], which only checks
 /// for adjacency. More complex constraints can be defined by implementing this
 /// trait, for example for weighted or hierarchical graphs.
-pub trait Constraint//: Clone + PartialEq + Eq + PartialOrd + Ord
+pub trait Constraint
 where
     Self: Sized,
 {

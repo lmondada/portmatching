@@ -148,8 +148,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> Default for BaseGraphTrie<C, A
     }
 }
 
-impl<C: Clone, A: Clone> GraphTrie for BaseGraphTrie<C, A>
-{
+impl<C: Clone, A: Clone> GraphTrie for BaseGraphTrie<C, A> {
     type Constraint = C;
     type Address = A;
 

@@ -5,7 +5,7 @@ use std::{
 
 use itertools::Itertools;
 // use portgraph::dot::dot_string;
-use portgraph::{PortGraph, NodeIndex};
+use portgraph::{NodeIndex, PortGraph};
 use portmatching::{
     matcher::{
         many_patterns::{ManyPatternMatcher, PatternID, PatternMatch, TrieMatcher},
