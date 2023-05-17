@@ -16,7 +16,9 @@ use portmatching::matcher::Matcher;
 use portmatching::pattern::UnweightedPattern;
 use portmatching::TrieConstruction;
 
-fn bench_matching<'g, M: Matcher<Graph<'g> = (&'g PortGraph, NodeIndex)>>(
+type Graph<'g> = (&'g PortGraph, NodeIndex);
+
+fn bench_matching<'g, M: Matcher<Graph<'g>>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[UnweightedPattern],
@@ -35,7 +37,7 @@ fn bench_matching<'g, M: Matcher<Graph<'g> = (&'g PortGraph, NodeIndex)>>(
     }
 }
 
-fn bench_trie_construction<M: Matcher>(
+fn bench_trie_construction<'g, M: Matcher<Graph<'g>>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[UnweightedPattern],

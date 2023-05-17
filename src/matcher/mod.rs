@@ -19,22 +19,23 @@ pub use single_pattern::SinglePatternMatcher;
 /// A pattern matcher is a type that can find matches of a pattern in a graph.
 /// Implement [`Matcher::find_anchored_matches`] that finds matches of all
 /// patterns anchored at a given root node.
-pub trait Matcher {
+pub trait Matcher<Graph> {
     /// A pattern match as returned by [`Matcher::find_anchored_matches`] and [`Matcher::find_matches`].
     type Match;
-    /// The graph type that the matcher operates on.
-    type Graph<'g>;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_anchored_matches<'g>(&self, graph: Self::Graph<'g>) -> Vec<Self::Match>;
+    fn find_anchored_matches(&self, graph: Graph) -> Vec<Self::Match>;
 
     /// Find matches of all patterns in `graph`.
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`Matcher::find_anchored_matches`] for each of them.
-    fn find_matches<'g>(&self, graph: &'g PortGraph) -> Vec<Self::Match>
+    fn find_matches<'g>(
+        &self,
+        graph: &'g PortGraph,
+    ) -> Vec<<Self as Matcher<(&'g PortGraph, NodeIndex)>>::Match>
     where
-        Self: Matcher<Graph<'g> = (&'g PortGraph, NodeIndex)>,
+        Self: Matcher<(&'g PortGraph, NodeIndex)>,
     {
         let mut matches = Vec::new();
         for root in graph.nodes_iter() {
@@ -51,9 +52,9 @@ pub trait Matcher {
         &self,
         graph: &'g PortGraph,
         weights: W,
-    ) -> Vec<Self::Match>
+    ) -> Vec<<Self as Matcher<(&'g PortGraph, W, NodeIndex)>>::Match>
     where
-        Self: Matcher<Graph<'g> = (&'g PortGraph, W, NodeIndex)>,
+        Self: Matcher<(&'g PortGraph, W, NodeIndex)>,
     {
         let mut matches = Vec::new();
         for root in graph.nodes_iter() {

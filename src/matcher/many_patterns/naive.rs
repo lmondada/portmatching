@@ -23,11 +23,12 @@ impl<C> Default for NaiveManyMatcher<C> {
     }
 }
 
-impl<C> Matcher for NaiveManyMatcher<C> {
-    type Match = PatternMatch;
-    type Graph<'g> = (&'g PortGraph, NodeIndex);
+type Graph<'g> = (&'g PortGraph, NodeIndex);
 
-    fn find_anchored_matches<'g>(&self, graph @ (_, root): Self::Graph<'g>) -> Vec<Self::Match> {
+impl<'g, C> Matcher<Graph<'g>> for NaiveManyMatcher<C> {
+    type Match = PatternMatch;
+
+    fn find_anchored_matches(&self, graph @ (_, root): Graph<'g>) -> Vec<Self::Match> {
         self.matchers
             .iter()
             .enumerate()
@@ -43,7 +44,7 @@ impl<C> Matcher for NaiveManyMatcher<C> {
     }
 }
 
-impl<C> ManyPatternMatcher for NaiveManyMatcher<C> {
+impl<'g, C> ManyPatternMatcher<Graph<'g>> for NaiveManyMatcher<C> {
     type Constraint = C;
 
     fn add_pattern(&mut self, pattern: impl Pattern<Constraint = C> + 'static) -> PatternID {

@@ -64,7 +64,7 @@ impl fmt::Display for PatternID {
 /// implement this trait, as some matchers are obtained by converting
 /// previously constructed matchers and thus do not support adding patterns
 /// one-by-one.
-pub trait ManyPatternMatcher: Default + Matcher {
+pub trait ManyPatternMatcher<G>: Default + Matcher<G> {
     /// The constraint type used by the matcher.
     ///
     /// Defines the type of patterns that can be matched by the matcher.
