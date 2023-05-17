@@ -5,7 +5,7 @@ use std::{
 
 use itertools::Itertools;
 // use portgraph::dot::dot_string;
-use portgraph::PortGraph;
+use portgraph::{NodeIndex, PortGraph};
 use portmatching::{
     matcher::{
         many_patterns::{ManyPatternMatcher, PatternID, PatternMatch, TrieMatcher},
@@ -76,9 +76,9 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
     Err(io::Error::new(io::ErrorKind::Other, "no file found"))
 }
 
-fn test<M: Matcher<Match = PatternMatch>>(
+fn test<'g, M: Matcher<(&'g PortGraph, NodeIndex), Match = PatternMatch>>(
     matcher: M,
-    graph: &PortGraph,
+    graph: &'g PortGraph,
     exp: &[Vec<PatternMatch>],
     n_patterns: usize,
 ) {

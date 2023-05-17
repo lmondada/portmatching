@@ -9,7 +9,7 @@ use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
 
 use crate::utils::{follow_path, port_opposite};
 
-use super::{Constraint, PortAddress, Skeleton};
+use super::{weighted::WeightedConstraint, Constraint, PortAddress, Skeleton};
 
 // TODO: use Rc or other for faster speed
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -119,8 +119,20 @@ pub struct Address {
     pub(super) label: PortLabel,
 }
 
-impl PortAddress for Address {
-    fn ports(&self, g: &PortGraph, root: NodeIndex) -> Vec<PortIndex> {
+impl<'g> PortAddress<Graph<'g>> for Address {
+    fn ports(&self, (g, root): Graph<'g>) -> Vec<PortIndex> {
+        let Some(node) = self.addr.node(g, root) else { return vec![] };
+        let as_vec = |p: Option<_>| p.into_iter().collect();
+        match self.label {
+            PortLabel::Outgoing(out_p) => as_vec(g.output(node, out_p)),
+            PortLabel::Incoming(in_p) => as_vec(g.input(node, in_p)),
+        }
+    }
+}
+
+type GraphBis<'g, V> = (&'g PortGraph, V, NodeIndex);
+impl<'g, V> PortAddress<GraphBis<'g, V>> for Address {
+    fn ports(&self, (g, _, root): GraphBis<'g, V>) -> Vec<PortIndex> {
         let Some(node) = self.addr.node(g, root) else { return vec![] };
         let as_vec = |p: Option<_>| p.into_iter().collect();
         match self.label {
@@ -173,23 +185,47 @@ impl UnweightedConstraint {
             })
             .collect()
     }
+
+    pub(crate) fn to_weighted<N>(&self, target_weight: Option<N>) -> WeightedConstraint<N> {
+        match self.clone() {
+            UnweightedConstraint::AllAdjacencies {
+                label,
+                no_match,
+                the_matches,
+            } => WeightedConstraint::AllAdjacencies {
+                label,
+                target_weight: target_weight.expect("target_weight cannot be None"),
+                no_match,
+                the_matches,
+            },
+            UnweightedConstraint::Adjacency { other_ports } => WeightedConstraint::Adjacency {
+                other_ports,
+                target_weight: target_weight.expect("target_weight cannot be None"),
+            },
+            UnweightedConstraint::Dangling => WeightedConstraint::Dangling,
+        }
+    }
 }
 
-impl Constraint for UnweightedConstraint {
-    type Address = Address;
+type Graph<'g> = (&'g PortGraph, NodeIndex);
 
-    fn is_satisfied(&self, this_ports: &Address, g: &PortGraph, root: NodeIndex) -> bool {
+impl Constraint for UnweightedConstraint {
+    type Graph<'g> = Graph<'g>;
+
+    fn is_satisfied<'g, A>(&self, this_ports: &A, g: Graph<'g>) -> bool
+    where
+        A: PortAddress<Graph<'g>>,
+    {
         match self {
             UnweightedConstraint::Adjacency { other_ports } => {
-                let other_ports = other_ports.ports(g, root);
-                let this_ports = this_ports.ports(g, root);
-                adjacency_constraint(g, this_ports, other_ports)
+                let other_ports = other_ports.ports(g);
+                let this_ports = this_ports.ports(g);
+                adjacency_constraint(g.0, this_ports, other_ports).any(|_| true)
             }
-            UnweightedConstraint::Dangling => !this_ports.ports(g, root).is_empty(),
-            UnweightedConstraint::AllAdjacencies { .. } => self
-                .to_vec()
-                .iter()
-                .all(|c| c.is_satisfied(this_ports, g, root)),
+            UnweightedConstraint::Dangling => !this_ports.ports(g).is_empty(),
+            UnweightedConstraint::AllAdjacencies { .. } => {
+                self.to_vec().iter().all(|c| c.is_satisfied(this_ports, g))
+            }
         }
     }
 
@@ -200,7 +236,9 @@ impl Constraint for UnweightedConstraint {
     }
 }
 
-fn simplify_constraints(constraints: Vec<UnweightedConstraint>) -> Option<UnweightedConstraint> {
+pub(super) fn simplify_constraints(
+    constraints: Vec<UnweightedConstraint>,
+) -> Option<UnweightedConstraint> {
     let constraints = flatten_constraints(constraints);
 
     // If we only have dangling, then dangling. Otherwise we can remove danglings
@@ -291,14 +329,15 @@ impl Display for UnweightedConstraint {
     }
 }
 
-fn adjacency_constraint(
+/// Find the ports in `other_ports` that are linked to one of `this_ports`.
+pub(super) fn adjacency_constraint(
     g: &PortGraph,
     this_ports: Vec<PortIndex>,
     other_ports: Vec<PortIndex>,
-) -> bool {
-    this_ports.into_iter().any(|p| {
-        let Some(other_p) = g.port_link(p) else { return false };
-        other_ports.contains(&other_p)
+) -> impl Iterator<Item = PortIndex> + '_ {
+    this_ports.into_iter().filter_map(move |p| {
+        let other_p = g.port_link(p)?;
+        other_ports.contains(&other_p).then_some(other_p)
     })
 }
 

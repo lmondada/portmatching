@@ -19,21 +19,46 @@ pub use single_pattern::SinglePatternMatcher;
 /// A pattern matcher is a type that can find matches of a pattern in a graph.
 /// Implement [`Matcher::find_anchored_matches`] that finds matches of all
 /// patterns anchored at a given root node.
-pub trait Matcher {
+pub trait Matcher<Graph> {
     /// A pattern match as returned by [`Matcher::find_anchored_matches`] and [`Matcher::find_matches`].
     type Match;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match>;
+    fn find_anchored_matches(&self, graph: Graph) -> Vec<Self::Match>;
 
     /// Find matches of all patterns in `graph`.
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`Matcher::find_anchored_matches`] for each of them.
-    fn find_matches(&self, graph: &PortGraph) -> Vec<Self::Match> {
+    fn find_matches<'g>(
+        &self,
+        graph: &'g PortGraph,
+    ) -> Vec<<Self as Matcher<(&'g PortGraph, NodeIndex)>>::Match>
+    where
+        Self: Matcher<(&'g PortGraph, NodeIndex)>,
+    {
         let mut matches = Vec::new();
         for root in graph.nodes_iter() {
-            matches.append(&mut self.find_anchored_matches(graph, root));
+            matches.append(&mut self.find_anchored_matches((graph, root)));
+        }
+        matches
+    }
+
+    /// Find matches of all patterns in `graph` with `weights`.
+    ///
+    /// The default implementation loops over all possible `root` nodes and
+    /// calls [`Matcher::find_anchored_matches`] for each of them.
+    fn find_weighted_matches<'g, W: Copy>(
+        &self,
+        graph: &'g PortGraph,
+        weights: W,
+    ) -> Vec<<Self as Matcher<(&'g PortGraph, W, NodeIndex)>>::Match>
+    where
+        Self: Matcher<(&'g PortGraph, W, NodeIndex)>,
+    {
+        let mut matches = Vec::new();
+        for root in graph.nodes_iter() {
+            matches.append(&mut self.find_anchored_matches((graph, weights, root)));
         }
         matches
     }

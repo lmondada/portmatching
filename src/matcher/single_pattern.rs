@@ -17,11 +17,13 @@ pub struct SinglePatternMatcher<P> {
     edges: Vec<Edge>,
 }
 
-impl<P: Pattern> Matcher for SinglePatternMatcher<P> {
+type Graph<'g> = (&'g PortGraph, NodeIndex);
+
+impl<'g, P: Pattern> Matcher<Graph<'g>> for SinglePatternMatcher<P> {
     type Match = BTreeMap<NodeIndex, NodeIndex>;
 
-    fn find_anchored_matches(&self, graph: &PortGraph, anchor: NodeIndex) -> Vec<Self::Match> {
-        self.find_anchored_match(graph, anchor)
+    fn find_anchored_matches(&self, (graph, root): Graph<'g>) -> Vec<Self::Match> {
+        self.find_anchored_match(graph, root)
             .map(|m| vec![m])
             .unwrap_or_default()
     }

@@ -3,13 +3,16 @@
 //! Patterns are graphs that can be matched against other graphs.
 
 mod unweighted;
+mod weighted;
 
 use std::collections::BTreeMap;
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
-pub use unweighted::UnweightedPattern;
 
-use crate::Constraint;
+#[doc(inline)]
+pub use unweighted::UnweightedPattern;
+#[doc(inline)]
+pub use weighted::WeightedPattern;
 
 /// An edge in a graph.
 ///
@@ -23,7 +26,7 @@ pub struct Edge(pub(crate) PortIndex, pub(crate) Option<PortIndex>);
 /// implementations might support e.g. weighted graphs.
 pub trait Pattern {
     /// The type of constraints used by this pattern.
-    type Constraint: Constraint;
+    type Constraint;
 
     /// The pattern graph as a [`PortGraph`].
     fn graph(&self) -> &PortGraph;
