@@ -99,18 +99,18 @@ type EdgeWeight<C> = Option<C>;
 /// forming the "trace" of the trie. This is used in [`Self::finalize`] to
 /// split states where necessary to keep avoid cross-talk, i.e. creating new
 /// disallowed state transitions as a by-product of the new transitions.
-pub struct BaseGraphTrie<C: Constraint> {
+pub struct BaseGraphTrie<C, A> {
     pub(crate) graph: PortGraph,
-    pub(crate) weights: Weights<NodeWeight<C::Address>, EdgeWeight<C>>,
+    pub(crate) weights: Weights<NodeWeight<A>, EdgeWeight<C>>,
 
     // The following are only useful during construction
     pub(super) trace: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
     pub(super) edge_cnt: usize,
 }
 
-impl<C: Constraint> Debug for BaseGraphTrie<C>
+impl<C, A> Debug for BaseGraphTrie<C, A>
 where
-    C::Address: Debug,
+    A: Debug,
     C: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -121,7 +121,7 @@ where
     }
 }
 
-impl<C: Constraint> Clone for BaseGraphTrie<C> {
+impl<C: Clone, A: Clone> Clone for BaseGraphTrie<C, A> {
     fn clone(&self) -> Self {
         Self {
             graph: self.graph.clone(),
@@ -132,7 +132,7 @@ impl<C: Constraint> Clone for BaseGraphTrie<C> {
     }
 }
 
-impl<C: Constraint> Default for BaseGraphTrie<C> {
+impl<C: Clone + Ord + Constraint, A: Clone + Ord> Default for BaseGraphTrie<C, A> {
     fn default() -> Self {
         let graph = Default::default();
         let weights = Default::default();
@@ -148,14 +148,16 @@ impl<C: Constraint> Default for BaseGraphTrie<C> {
     }
 }
 
-impl<C: Constraint> GraphTrie for BaseGraphTrie<C> {
+impl<C: Clone, A: Clone> GraphTrie for BaseGraphTrie<C, A>
+{
     type Constraint = C;
+    type Address = A;
 
     fn trie(&self) -> &PortGraph {
         &self.graph
     }
 
-    fn port_address(&self, state: StateID) -> Option<&C::Address> {
+    fn port_address(&self, state: StateID) -> Option<&A> {
         self.weights[state].out_port.as_ref()
     }
 
@@ -168,10 +170,7 @@ impl<C: Constraint> GraphTrie for BaseGraphTrie<C> {
     }
 }
 
-impl<C: Constraint + Display> BaseGraphTrie<C>
-where
-    C::Address: Debug,
-{
+impl<C: Display + Clone, A: Debug + Clone> BaseGraphTrie<C, A> {
     pub(crate) fn str_weights(&self) -> Weights<String, String> {
         let mut str_weights = Weights::new();
         for p in self.graph.ports_iter() {
@@ -194,7 +193,7 @@ where
     }
 }
 
-impl<C: Constraint> BaseGraphTrie<C> {
+impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     /// An empty graph trie
     pub fn new() -> Self {
         Self::default()
@@ -216,7 +215,7 @@ impl<C: Constraint> BaseGraphTrie<C> {
         *det_flag
     }
 
-    pub(crate) fn weight(&self, state: StateID) -> &NodeWeight<C::Address> {
+    pub(crate) fn weight(&self, state: StateID) -> &NodeWeight<A> {
         &self.weights[state]
     }
 
@@ -336,7 +335,7 @@ impl<C: Constraint> BaseGraphTrie<C> {
 
     fn valid_start_states(
         &mut self,
-        out_port: &C::Address,
+        out_port: &A,
         trie_state: StateID,
         deterministic: bool,
         new_start_state: &mut Option<StateID>,
@@ -384,7 +383,7 @@ impl<C: Constraint> BaseGraphTrie<C> {
     /// Returns the trie states after the edge has been added.
     pub fn add_graph_edge(
         &mut self,
-        out_port: &C::Address,
+        out_port: &A,
         trie_states: impl IntoIterator<Item = StateID>,
         deterministic: bool,
         constraint: C,
@@ -419,7 +418,7 @@ impl<C: Constraint> BaseGraphTrie<C> {
     /// Add graph edge to the trie using deterministic strategy.
     pub fn add_graph_edge_det(
         &mut self,
-        edge: &C::Address,
+        edge: &A,
         trie_states: impl IntoIterator<Item = StateID>,
         constraint: C,
     ) -> BTreeSet<StateID> {
@@ -429,7 +428,7 @@ impl<C: Constraint> BaseGraphTrie<C> {
     /// Add graph edge to the trie using non-deterministic strategy.
     pub fn add_graph_edge_nondet(
         &mut self,
-        edge: &C::Address,
+        edge: &A,
         trie_states: impl IntoIterator<Item = StateID>,
         constraint: C,
     ) -> BTreeSet<StateID> {
@@ -575,12 +574,7 @@ impl<C: Constraint> BaseGraphTrie<C> {
 
     /// Try to convert into a start state for `graph_edge`
     #[allow(clippy::wrong_self_convention)]
-    fn into_start_state(
-        &mut self,
-        trie_state: StateID,
-        out_port: &C::Address,
-        deterministic: bool,
-    ) -> bool {
+    fn into_start_state(&mut self, trie_state: StateID, out_port: &A, deterministic: bool) -> bool {
         // let start_node = graph.port_node(graph_edge).expect("invalid port");
         // let start_offset = graph.port_offset(graph_edge).expect("invalid port");
 

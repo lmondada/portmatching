@@ -22,18 +22,23 @@ pub use single_pattern::SinglePatternMatcher;
 pub trait Matcher {
     /// A pattern match as returned by [`Matcher::find_anchored_matches`] and [`Matcher::find_matches`].
     type Match;
+    /// The graph type that the matcher operates on.
+    type Graph<'g>;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match>;
+    fn find_anchored_matches<'g>(&self, graph: Self::Graph<'g>) -> Vec<Self::Match>;
 
     /// Find matches of all patterns in `graph`.
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`Matcher::find_anchored_matches`] for each of them.
-    fn find_matches(&self, graph: &PortGraph) -> Vec<Self::Match> {
+    fn find_matches<'g>(&self, graph: &'g PortGraph) -> Vec<Self::Match>
+    where
+        Self: Matcher<Graph<'g> = (&'g PortGraph, NodeIndex)>,
+    {
         let mut matches = Vec::new();
         for root in graph.nodes_iter() {
-            matches.append(&mut self.find_anchored_matches(graph, root));
+            matches.append(&mut self.find_anchored_matches((graph, root)));
         }
         matches
     }

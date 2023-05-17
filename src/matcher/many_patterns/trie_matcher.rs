@@ -6,7 +6,7 @@ use std::{
 use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 
 use crate::{
-    constraint::unweighted,
+    constraint::{unweighted, PortAddress},
     graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
     pattern::{Edge, Pattern},
     Constraint, ManyPatternMatcher, Matcher, PatternID, Skeleton,
@@ -30,9 +30,9 @@ use super::PatternMatch;
 /// [`Deterministic`]: TrieConstruction::Deterministic
 /// [`NonDeterministic`]: TrieConstruction::NonDeterministic
 /// [`Balanced`]: TrieConstruction::Balanced
-pub struct TrieMatcher<C: Constraint> {
+pub struct TrieMatcher<C, A> {
     strategy: TrieConstruction,
-    trie: BaseGraphTrie<C>,
+    trie: BaseGraphTrie<C, A>,
     match_states: BTreeMap<StateID, Vec<PatternID>>,
     patterns: Vec<Box<dyn Pattern<Constraint = C>>>,
 }
@@ -49,13 +49,13 @@ pub enum TrieConstruction {
     Balanced,
 }
 
-impl<C: Constraint> Default for TrieMatcher<C> {
+impl<C: Clone + Ord + Constraint, A: Clone + Ord> Default for TrieMatcher<C, A> {
     fn default() -> Self {
         Self::new(TrieConstruction::Balanced)
     }
 }
 
-impl<C: Constraint> TrieMatcher<C> {
+impl<C: Constraint + Clone + Ord, A: Clone + Ord> TrieMatcher<C, A> {
     /// Create a new matcher with the given trie construction strategy.
     pub fn new(strategy: TrieConstruction) -> Self {
         Self {
@@ -75,10 +75,7 @@ impl<C: Constraint> TrieMatcher<C> {
     }
 }
 
-impl<C: Constraint + Display> TrieMatcher<C>
-where
-    C::Address: Debug,
-{
+impl<C: Display + Clone, A: Debug + Clone> TrieMatcher<C, A> {
     /// A dotstring representation of the trie.
     pub fn dotstring(&self) -> String {
         let mut weights = self.trie.str_weights();
@@ -93,10 +90,19 @@ where
     }
 }
 
-impl<C: Constraint> Matcher for TrieMatcher<C> {
+impl<C, A> Matcher for TrieMatcher<C, A>
+where
+    C: Clone + for<'g> Constraint<Graph<'g> = (&'g PortGraph, NodeIndex)> + Ord,
+    A: Clone + Ord,
+    A: for<'g> PortAddress<(&'g PortGraph, NodeIndex)>,
+{
     type Match = PatternMatch;
+    type Graph<'g> = (&'g PortGraph, NodeIndex);
 
-    fn find_anchored_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Self::Match> {
+    fn find_anchored_matches<'g>(
+        &self,
+        g@(_, root): Self::Graph<'g>,
+    ) -> Vec<Self::Match> {
         let mut current_states = vec![root_state()];
         let mut matches = BTreeSet::new();
         while !current_states.is_empty() {
@@ -108,7 +114,7 @@ impl<C: Constraint> Matcher for TrieMatcher<C> {
                         root,
                     });
                 }
-                for next_state in self.trie.next_states(state, graph, root) {
+                for next_state in self.trie.next_states(state, g) {
                     new_states.push(next_state);
                 }
             }
@@ -118,7 +124,10 @@ impl<C: Constraint> Matcher for TrieMatcher<C> {
     }
 }
 
-impl<C: Constraint<Address = unweighted::Address>> ManyPatternMatcher for TrieMatcher<C> {
+impl<C: Clone + Ord + Constraint> ManyPatternMatcher for TrieMatcher<C, unweighted::Address>
+where
+    C: for<'g> Constraint<Graph<'g> = (&'g PortGraph, NodeIndex)>,
+{
     type Constraint = C;
 
     fn add_pattern(&mut self, pattern: impl Pattern<Constraint = C> + 'static) -> PatternID {

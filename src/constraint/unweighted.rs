@@ -119,8 +119,8 @@ pub struct Address {
     pub(super) label: PortLabel,
 }
 
-impl PortAddress for Address {
-    fn ports(&self, g: &PortGraph, root: NodeIndex) -> Vec<PortIndex> {
+impl<'g> PortAddress<Graph<'g>> for Address {
+    fn ports(&self, (g, root): Graph<'g>) -> Vec<PortIndex> {
         let Some(node) = self.addr.node(g, root) else { return vec![] };
         let as_vec = |p: Option<_>| p.into_iter().collect();
         match self.label {
@@ -175,21 +175,25 @@ impl UnweightedConstraint {
     }
 }
 
-impl Constraint for UnweightedConstraint {
-    type Address = Address;
+type Graph<'g> = (&'g PortGraph, NodeIndex);
 
-    fn is_satisfied(&self, this_ports: &Address, g: &PortGraph, root: NodeIndex) -> bool {
+impl Constraint for UnweightedConstraint {
+    type Graph<'g> = Graph<'g>;
+
+    fn is_satisfied<'g, A>(&self, this_ports: &A, g: Graph<'g>) -> bool
+    where
+        A: PortAddress<Graph<'g>>,
+    {
         match self {
             UnweightedConstraint::Adjacency { other_ports } => {
-                let other_ports = other_ports.ports(g, root);
-                let this_ports = this_ports.ports(g, root);
-                adjacency_constraint(g, this_ports, other_ports).any(|_| true)
+                let other_ports = other_ports.ports(g);
+                let this_ports = this_ports.ports(g);
+                adjacency_constraint(&g.0, this_ports, other_ports).any(|_| true)
             }
-            UnweightedConstraint::Dangling => !this_ports.ports(g, root).is_empty(),
-            UnweightedConstraint::AllAdjacencies { .. } => self
-                .to_vec()
-                .iter()
-                .all(|c| c.is_satisfied(this_ports, g, root)),
+            UnweightedConstraint::Dangling => !this_ports.ports(g).is_empty(),
+            UnweightedConstraint::AllAdjacencies { .. } => {
+                self.to_vec().iter().all(|c| c.is_satisfied(this_ports, g))
+            }
         }
     }
 

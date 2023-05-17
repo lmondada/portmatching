@@ -9,18 +9,19 @@ use criterion::Criterion;
 use criterion::Throughput;
 use itertools::Itertools;
 
+use portgraph::NodeIndex;
 use portgraph::PortGraph;
 use portmatching::matcher::many_patterns::{ManyPatternMatcher, NaiveManyMatcher, TrieMatcher};
 use portmatching::matcher::Matcher;
 use portmatching::pattern::UnweightedPattern;
 use portmatching::TrieConstruction;
 
-fn bench_matching<M: Matcher>(
+fn bench_matching<'g, M: Matcher<Graph<'g> = (&'g PortGraph, NodeIndex)>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[UnweightedPattern],
     sizes: impl Iterator<Item = usize>,
-    graph: &PortGraph,
+    graph: &'g PortGraph,
     mut get_matcher: impl FnMut(Vec<UnweightedPattern>) -> M,
 ) {
     group.sample_size(10);

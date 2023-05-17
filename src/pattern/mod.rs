@@ -9,8 +9,6 @@ use std::collections::BTreeMap;
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 pub use unweighted::UnweightedPattern;
 
-use crate::Constraint;
-
 /// An edge in a graph.
 ///
 /// The edge might be dangling, in which case the second port index is `None`.
@@ -23,7 +21,7 @@ pub struct Edge(pub(crate) PortIndex, pub(crate) Option<PortIndex>);
 /// implementations might support e.g. weighted graphs.
 pub trait Pattern {
     /// The type of constraints used by this pattern.
-    type Constraint: Constraint;
+    type Constraint;
 
     /// The pattern graph as a [`PortGraph`].
     fn graph(&self) -> &PortGraph;

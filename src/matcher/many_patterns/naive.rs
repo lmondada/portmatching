@@ -1,6 +1,8 @@
+use portgraph::{NodeIndex, PortGraph};
+
 use crate::{
     matcher::{Matcher, SinglePatternMatcher},
-    Constraint, Pattern,
+    Pattern,
 };
 
 use super::{ManyPatternMatcher, PatternID, PatternMatch};
@@ -21,19 +23,16 @@ impl<C> Default for NaiveManyMatcher<C> {
     }
 }
 
-impl<C: Constraint> Matcher for NaiveManyMatcher<C> {
+impl<C> Matcher for NaiveManyMatcher<C> {
     type Match = PatternMatch;
+    type Graph<'g> = (&'g PortGraph, NodeIndex);
 
-    fn find_anchored_matches(
-        &self,
-        graph: &portgraph::PortGraph,
-        root: portgraph::NodeIndex,
-    ) -> Vec<Self::Match> {
+    fn find_anchored_matches<'g>(&self, graph @ (_, root): Self::Graph<'g>) -> Vec<Self::Match> {
         self.matchers
             .iter()
             .enumerate()
             .flat_map(|(i, m)| {
-                m.find_anchored_matches(graph, root)
+                m.find_anchored_matches(graph)
                     .into_iter()
                     .map(move |m| PatternMatch {
                         id: PatternID(i),
@@ -44,7 +43,7 @@ impl<C: Constraint> Matcher for NaiveManyMatcher<C> {
     }
 }
 
-impl<C: Constraint> ManyPatternMatcher for NaiveManyMatcher<C> {
+impl<C> ManyPatternMatcher for NaiveManyMatcher<C> {
     type Constraint = C;
 
     fn add_pattern(&mut self, pattern: impl Pattern<Constraint = C> + 'static) -> PatternID {
