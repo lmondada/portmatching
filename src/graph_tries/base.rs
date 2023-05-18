@@ -609,4 +609,54 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         rekey_secmap(&mut self.trace, old, Some(new));
         rekey_secmap(&mut self.weights.ports, old, Some(new));
     }
+
+    /// Turn nodes into multiple ones by only relying on elementary constraints
+    pub fn optimise(&mut self) {
+        let cutoff = 5;
+        let nodes = self
+            .graph
+            .nodes_iter()
+            .filter(|&n| self.graph.num_outputs(n) > cutoff)
+            .collect::<Vec<_>>();
+
+        for node in nodes {
+            self.split_into_tree(node);
+        }
+    }
+
+    fn split_into_tree(&mut self, node: StateID) {
+        let transitions = self
+            .graph
+            .outputs(node)
+            .map(|p| self.graph.unlink_port(p).expect("unlinked transition"))
+            .collect::<Vec<_>>();
+        let constraints = self
+            .graph
+            .outputs(node)
+            .map(|p| mem::take(&mut self.weights[p]))
+            .collect::<Vec<_>>();
+        self.set_num_ports(node, self.graph.num_inputs(node), 0);
+        for (mut cons, in_port) in constraints.into_iter().zip(transitions) {
+            let mut state = node;
+            if let Some(cons) = cons.as_mut() {
+                let all_cons = cons.to_elementary();
+                let Some((last, rest)) = all_cons.split_last() else {panic!("bla")};
+                for cons in rest.iter().cloned() {
+                    let states = self.insert_transitions(state, cons, &mut None);
+                    assert_eq!(states.len(), 1);
+                    state = states[0];
+                    self.weights[state] = self.weights[node].clone();
+                }
+                *cons = last.clone();
+            }
+            self.set_num_ports(
+                state,
+                self.graph.num_inputs(state),
+                self.graph.num_outputs(state) + 1,
+            );
+            let out_port = self.graph.outputs(state).last().expect("just created");
+            self.weights[out_port] = cons;
+            self.graph.link_ports(out_port, in_port).unwrap();
+        }
+    }
 }

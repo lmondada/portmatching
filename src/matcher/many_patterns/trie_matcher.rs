@@ -73,6 +73,12 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord> TrieMatcher<C, A> {
             TrieConstruction::Balanced => is_first_edge,
         }
     }
+
+    /// Spread transitions across nodes to minimise the number of constraints
+    /// to check
+    pub fn optimise(&mut self) {
+        self.trie.optimise();
+    }
 }
 
 impl<C: Display + Clone, A: Debug + Clone> TrieMatcher<C, A> {
