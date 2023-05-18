@@ -8,9 +8,9 @@ use std::{
     vec,
 };
 
-use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
+use portgraph::{Direction, NodeIndex, PortGraph, PortIndex};
 
-use crate::utils::{follow_path, port_opposite, pre_order::shortest_path};
+use crate::utils::{follow_path, port_opposite, pre_order::shortest_path, ZeroRange};
 
 // use super::{
 //     Address, PortGraphAddressing, Rib,
@@ -19,7 +19,9 @@ use crate::utils::{follow_path, port_opposite, pre_order::shortest_path};
 
 use bitvec::prelude::*;
 
-type Rib = [isize; 2];
+use super::SpineAddress;
+
+type Rib = ZeroRange;
 
 /// A node on a line
 #[derive(Clone, Debug)]
@@ -29,8 +31,7 @@ pub(super) struct LinePoint {
     offset: usize,
 }
 
-type Spine = Vec<(Vec<PortOffset>, usize)>;
-type SpineRef<'a> = &'a [(Vec<PortOffset>, usize)];
+type Spine = Vec<SpineAddress>;
 
 /// Partition graph into paths that form a skeleton
 ///
@@ -136,7 +137,10 @@ impl<'g> Skeleton<'g> {
                 .filter(|line| line.line_ind == line_ind)
                 .min_by_key(|line| line.ind.abs())
                 .expect("invalid spine of path");
-            spine.push((path.out_ports.clone(), spine_lp.offset));
+            spine.push(SpineAddress {
+                path: path.out_ports.into(),
+                offset: spine_lp.offset,
+            });
         }
         spine
     }
@@ -149,25 +153,23 @@ impl<'g> Skeleton<'g> {
     ///
     /// The spine can be any set of nodes of the graph, even if it does not form
     /// a complete spine of the entire graph
-    pub(crate) fn get_ribs(&self, spine: SpineRef<'_>) -> Vec<Rib> {
+    pub(crate) fn get_ribs(&self, spine: &[SpineAddress]) -> Vec<Rib> {
         // Compute intervals
         // All indices that we must represent must be in the interval
         let spine_len = cmp::max(spine.len(), 1);
-        let mut ribs = vec![[0, -1]; spine_len];
+        let mut ribs = vec![ZeroRange::Empty; spine_len];
         let all_addrs = self
             .graph
             .nodes_iter()
             .flat_map(|n| self.get_all_addresses(n, spine));
         for (l_ind, ind) in all_addrs {
-            let [min, max] = &mut ribs[l_ind];
-            *min = cmp::min(*min, ind);
-            *max = cmp::max(*max, ind);
+            ribs[l_ind].insert(ind);
         }
         ribs
     }
 
     /// All the addresses of `node`, relative to the spine
-    fn get_all_addresses(&self, node: NodeIndex, spine: SpineRef<'_>) -> Vec<(usize, isize)> {
+    fn get_all_addresses(&self, node: NodeIndex, spine: &[SpineAddress]) -> Vec<(usize, isize)> {
         if node == self.root {
             return vec![(0, 0)];
         }
@@ -250,14 +252,14 @@ impl<'g> Skeleton<'g> {
     // }
 
     /// Return the spine as a list of nodes of [`self.graph`]
-    pub(super) fn instantiate_spine(&self, spine: SpineRef<'_>) -> Vec<Option<&LinePoint>> {
+    pub(super) fn instantiate_spine(&self, spine: &[SpineAddress]) -> Vec<Option<&LinePoint>> {
         spine
             .iter()
-            .map(|(path, out_port)| {
+            .map(|SpineAddress { path, offset }| {
                 let n = follow_path(path, self.root, self.graph)?;
                 self.node2line[n.index()]
                     .iter()
-                    .find(|line| line.offset == *out_port)
+                    .find(|line| line.offset == *offset)
             })
             .collect()
     }
@@ -318,8 +320,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use proptest::prelude::*;
+    use smallvec::{smallvec, SmallVec};
 
     use super::Skeleton;
+    use crate::constraint::{NodeAddress, SpineAddress};
     use crate::utils::test_utils::gen_portgraph_connected;
 
     use portgraph::{NodeIndex, PortGraph, PortOffset};
@@ -402,17 +406,43 @@ mod tests {
 
         let skel = Skeleton::new(&g, NodeIndex::new(0));
 
-        assert_eq!(skel.get_node_addr(n0).the_match, (Vec::new(), 0, 0));
-        assert_eq!(skel.get_node_addr(n2).the_match, (Vec::new(), 0, 2));
-        assert_eq!(skel.get_node_addr(n4).the_match, (Vec::new(), 0, -1));
+        let root = SpineAddress {
+            path: SmallVec::new(),
+            offset: 0,
+        };
         assert_eq!(
-            skel.get_node_addr(n5).the_match,
-            (vec![PortOffset::new_incoming(0)], 1, 1)
+            skel.get_node_addr(n0),
+            NodeAddress {
+                spine: root.clone(),
+                ind: 0
+            }
         );
         assert_eq!(
-            skel.get_node_addr(n6).the_match,
-            (vec![PortOffset::new_incoming(0)], 1, -1)
+            skel.get_node_addr(n2),
+            NodeAddress {
+                spine: root.clone(),
+                ind: 2
+            }
         );
+        assert_eq!(
+            skel.get_node_addr(n4),
+            NodeAddress {
+                spine: root,
+                ind: -1
+            }
+        );
+        let spine = SpineAddress {
+            path: smallvec![PortOffset::new_incoming(0)],
+            offset: 1,
+        };
+        assert_eq!(
+            skel.get_node_addr(n5),
+            NodeAddress {
+                spine: spine.clone(),
+                ind: 1
+            }
+        );
+        assert_eq!(skel.get_node_addr(n6), NodeAddress { spine, ind: -1 });
     }
 
     // #[test]
@@ -444,7 +474,7 @@ mod tests {
         fn prop_get_addr((g, n) in gen_node_index(gen_portgraph_connected(10, 4, 20))) {
             let skel = Skeleton::new(&g, NodeIndex::new(0));
             let addr = skel.get_node_addr(n);
-            prop_assert_eq!(n, addr.node(&g, NodeIndex::new(0)).unwrap());
+            prop_assert_eq!(n, addr.get_node(&g, NodeIndex::new(0)).unwrap());
         }
     }
 }

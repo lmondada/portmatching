@@ -180,7 +180,7 @@ where
                 if self.add_non_det(first_edge) {
                     // The edge is added non-deterministically
                     current_states = self.trie.add_graph_edge_nondet(
-                        &skeleton.get_port_addr(out_port),
+                        &skeleton.get_address(out_port),
                         current_states,
                         constraint,
                         // &mut clone_state,
@@ -188,7 +188,7 @@ where
                 } else {
                     // All other edges are deterministic
                     current_states = self.trie.add_graph_edge_det(
-                        &skeleton.get_port_addr(out_port),
+                        &skeleton.get_address(out_port),
                         current_states,
                         constraint,
                         // &mut clone_state,

@@ -1,117 +1,16 @@
 use std::{
     cmp,
-    collections::{BTreeMap, BTreeSet},
-    fmt::Display,
-    mem,
+    collections::BTreeMap,
+    fmt::{self, Display},
 };
 
-use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
+use portgraph::{Direction, NodeIndex, PortGraph, PortIndex};
+use smallvec::SmallVec;
 
-use crate::utils::{follow_path, port_opposite};
-
-use super::{weighted::WeightedConstraint, Constraint, PortAddress, Skeleton};
-
-// TODO: use Rc or other for faster speed
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct NodeAddress {
-    pub(super) no_match: Vec<(Vec<PortOffset>, usize, [isize; 2])>,
-    pub(super) the_match: (Vec<PortOffset>, usize, isize),
-}
-
-fn find_match(
-    &(ref spine, offset, ind): &(Vec<PortOffset>, usize, isize),
-    g: &PortGraph,
-    root: NodeIndex,
-) -> Option<NodeIndex> {
-    let root = follow_path(spine, root, g)?;
-    if ind == 0 {
-        return Some(root);
-    }
-    let mut port = if ind < 0 {
-        g.input(root, offset)
-    } else {
-        g.output(root, offset)
-    };
-    let mut node = g.port_node(port?).expect("invalid port");
-    for _ in 0..ind.abs() {
-        port = g.port_link(port?);
-        node = g.port_node(port?).expect("invalid port");
-        port = port_opposite(port?, g);
-    }
-    Some(node)
-}
-
-// TODO: maybe use skeleton
-fn verify_no_match(
-    no_match: &[(Vec<PortOffset>, usize, [isize; 2])],
-    node: NodeIndex,
-    g: &PortGraph,
-    root: NodeIndex,
-) -> bool {
-    for &(ref spine, offset, [bef, aft]) in no_match.iter() {
-        let Some(root) = follow_path(spine, root, g) else {
-            continue;
-        };
-        if root == node {
-            return false;
-        }
-        let mut port = g.output(root, offset);
-        // Loop over positive inds
-        for _ in 0..aft {
-            if port.is_none() {
-                break;
-            }
-            port = g.port_link(port.unwrap());
-            if let Some(port_some) = port {
-                let curr_node = g.port_node(port_some).expect("invalid port");
-                if curr_node == node {
-                    return false;
-                }
-                port = port_opposite(port_some, g);
-            }
-        }
-        port = g.input(root, offset);
-        // Loop over negative inds
-        for _ in ((bef + 1)..=0).rev() {
-            if port.is_none() {
-                break;
-            }
-            port = g.port_link(port.unwrap());
-            if let Some(port_some) = port {
-                let curr_node = g.port_node(port_some).expect("invalid port");
-                if curr_node == node {
-                    return false;
-                }
-                port = port_opposite(port_some, g);
-            }
-        }
-    }
-    true
-}
-
-impl NodeAddress {
-    pub fn node(&self, g: &PortGraph, root: NodeIndex) -> Option<NodeIndex> {
-        let node = find_match(&self.the_match, g, root)?;
-
-        // Check there is no address that also points to node in `no_match`
-        verify_no_match(&self.no_match, node, g, root).then_some(node)
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PortLabel {
-    Outgoing(usize),
-    Incoming(usize),
-}
-impl PortLabel {
-    fn and(self, e: PortLabel) -> Option<PortLabel> {
-        if self == e {
-            Some(self)
-        } else {
-            None
-        }
-    }
-}
+use super::{
+    Constraint, ConstraintVec, ElementaryConstraint, NodeAddress, NodeRange, PortAddress,
+    PortLabel, Skeleton, SpineAddress,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Address {
@@ -119,9 +18,10 @@ pub struct Address {
     pub(super) label: PortLabel,
 }
 
+type Graph<'g> = (&'g PortGraph, NodeIndex);
 impl<'g> PortAddress<Graph<'g>> for Address {
     fn ports(&self, (g, root): Graph<'g>) -> Vec<PortIndex> {
-        let Some(node) = self.addr.node(g, root) else { return vec![] };
+        let Some(node) = self.addr.get_node(g, root) else { return vec![] };
         let as_vec = |p: Option<_>| p.into_iter().collect();
         match self.label {
             PortLabel::Outgoing(out_p) => as_vec(g.output(node, out_p)),
@@ -133,7 +33,7 @@ impl<'g> PortAddress<Graph<'g>> for Address {
 type GraphBis<'g, V> = (&'g PortGraph, V, NodeIndex);
 impl<'g, V> PortAddress<GraphBis<'g, V>> for Address {
     fn ports(&self, (g, _, root): GraphBis<'g, V>) -> Vec<PortIndex> {
-        let Some(node) = self.addr.node(g, root) else { return vec![] };
+        let Some(node) = self.addr.get_node(g, root) else { return vec![] };
         let as_vec = |p: Option<_>| p.into_iter().collect();
         match self.label {
             PortLabel::Outgoing(out_p) => as_vec(g.output(node, out_p)),
@@ -142,232 +42,114 @@ impl<'g, V> PortAddress<GraphBis<'g, V>> for Address {
     }
 }
 
-/// A state transition for an unweighted graph trie.
+/// Adjacency constraint for unweighted graphs.
 ///
 /// This corresponds to following an edge of the input graph.
 /// This edge is given by one of the outgoing port at the current node.
 /// Either the port exists and is connected to another port, or the port exist
 /// but is unlinked (it is "dangling"), or the port does not exist.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum UnweightedConstraint {
-    // All constraints must be satisfied
-    AllAdjacencies {
-        label: PortLabel,
-        no_match: Vec<(Vec<PortOffset>, usize, [isize; 2])>,
-        the_matches: Vec<(Vec<PortOffset>, usize, isize)>,
-    },
-    // Port must be linked to one of `other_ports`
-    Adjacency {
-        other_ports: Address,
-    },
-    // Port must be dangling (at least existing)
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UnweightedAdjConstraint {
     Dangling,
+    Link(ConstraintVec<()>),
 }
 
-impl UnweightedConstraint {
-    fn to_vec(&self) -> Vec<Self> {
-        let UnweightedConstraint::AllAdjacencies {
-            label,
-            no_match,
-            the_matches,
-        } = self else { return vec![self.clone()] };
-        let mut no_match = no_match.clone();
-        the_matches
-            .iter()
-            .map(|m| UnweightedConstraint::Adjacency {
-                other_ports: Address {
-                    addr: NodeAddress {
-                        no_match: mem::take(&mut no_match),
-                        the_match: m.clone(),
-                    },
-                    label: *label,
-                },
-            })
+impl UnweightedAdjConstraint {
+    pub(crate) fn dangling() -> Self {
+        Self::Dangling
+    }
+
+    pub(crate) fn link(
+        label: PortLabel,
+        address: NodeAddress,
+        no_addresses: Vec<NodeRange>,
+    ) -> Self {
+        let constraints = no_addresses
+            .into_iter()
+            .map(ElementaryConstraint::NoMatch)
+            .chain([ElementaryConstraint::PortLabel(label)])
+            .chain([ElementaryConstraint::Match(address)])
+            .collect();
+        Self::Link(constraints)
+    }
+}
+
+impl Constraint for UnweightedAdjConstraint {
+    type Graph<'g> = (&'g PortGraph, NodeIndex);
+
+    fn is_satisfied<'g, A>(&self, ports: &A, g: Self::Graph<'g>) -> bool
+    where
+        A: PortAddress<Self::Graph<'g>>,
+    {
+        let ports = ports.ports(g);
+        match self {
+            UnweightedAdjConstraint::Dangling => !ports.is_empty(),
+            UnweightedAdjConstraint::Link(constraints) => ports
+                .into_iter()
+                .filter_map(|p| g.0.port_link(p))
+                .any(|p| constraints.is_satisfied(p, g.0, g.1, &())),
+        }
+    }
+
+    fn and(&self, other: &Self) -> Option<Self> {
+        match (self, other) {
+            (Self::Dangling, Self::Dangling) => Some(Self::Dangling),
+            (Self::Dangling, Self::Link(_)) => Some(other.clone()),
+            (Self::Link(_), Self::Dangling) => Some(self.clone()),
+            (Self::Link(c1), Self::Link(c2)) => c1.and(c2).map(Self::Link),
+        }
+    }
+
+    fn to_elementary(&self) -> Vec<Self>
+    where
+        Self: Clone,
+    {
+        let Self::Link(c) = self else {
+            return vec![self.clone()];
+        };
+        let ConstraintVec::Vec(c) = c else {
+            return vec![]
+        };
+        c.iter()
+            .cloned()
+            .map(|c| Self::Link(ConstraintVec::new(vec![c])))
             .collect()
     }
-
-    pub(crate) fn to_weighted<N>(&self, target_weight: Option<N>) -> WeightedConstraint<N> {
-        match self.clone() {
-            UnweightedConstraint::AllAdjacencies {
-                label,
-                no_match,
-                the_matches,
-            } => WeightedConstraint::AllAdjacencies {
-                label,
-                target_weight: target_weight.expect("target_weight cannot be None"),
-                no_match,
-                the_matches,
-            },
-            UnweightedConstraint::Adjacency { other_ports } => WeightedConstraint::Adjacency {
-                other_ports,
-                target_weight: target_weight.expect("target_weight cannot be None"),
-            },
-            UnweightedConstraint::Dangling => WeightedConstraint::Dangling,
-        }
-    }
 }
 
-type Graph<'g> = (&'g PortGraph, NodeIndex);
-
-impl Constraint for UnweightedConstraint {
-    type Graph<'g> = Graph<'g>;
-
-    fn is_satisfied<'g, A>(&self, this_ports: &A, g: Graph<'g>) -> bool
-    where
-        A: PortAddress<Graph<'g>>,
-    {
+impl Display for UnweightedAdjConstraint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UnweightedConstraint::Adjacency { other_ports } => {
-                let other_ports = other_ports.ports(g);
-                let this_ports = this_ports.ports(g);
-                adjacency_constraint(g.0, this_ports, other_ports).any(|_| true)
-            }
-            UnweightedConstraint::Dangling => !this_ports.ports(g).is_empty(),
-            UnweightedConstraint::AllAdjacencies { .. } => {
-                self.to_vec().iter().all(|c| c.is_satisfied(this_ports, g))
-            }
+            Self::Dangling => write!(f, "dangling"),
+            Self::Link(c) => write!(f, "{:?}", c),
         }
     }
-
-    // Merge two constraints
-    fn and(&self, other: &UnweightedConstraint) -> Option<UnweightedConstraint> {
-        // Gather all constraints in a vec
-        simplify_constraints(vec![self.clone(), other.clone()])
-    }
-}
-
-pub(super) fn simplify_constraints(
-    constraints: Vec<UnweightedConstraint>,
-) -> Option<UnweightedConstraint> {
-    let constraints = flatten_constraints(constraints);
-
-    // If we only have dangling, then dangling. Otherwise we can remove danglings
-    if constraints
-        .iter()
-        .all(|c| c == &UnweightedConstraint::Dangling)
-    {
-        return Some(UnweightedConstraint::Dangling);
-    }
-
-    let mut matches = BTreeSet::new();
-    let mut no_matches = BTreeMap::new();
-    let mut all_labels = Vec::new();
-    for c in constraints {
-        if let UnweightedConstraint::Adjacency { other_ports: ports } = c {
-            let node = ports.addr;
-            let addr = node.the_match;
-            matches.insert(addr);
-            for (a, b, c) in node.no_match {
-                let curr = no_matches.entry((a, b)).or_insert(c);
-                curr[0] = curr[0].min(c[0]);
-                curr[1] = curr[1].max(c[1]);
-            }
-            all_labels.push(ports.label);
-        }
-    }
-
-    let Some(label) = all_labels
-        .into_iter()
-        .fold(None, |acc: Option<PortLabel>, e| {
-            acc.map(|acc| acc.and(e)).unwrap_or(Some(e))
-        })
-    else { return None };
-    let no_matches = no_matches
-        .into_iter()
-        .map(|((a, b), c)| (a, b, c))
-        .collect::<Vec<_>>();
-
-    for &(ref path, offset, ind) in matches.iter() {
-        if no_matches
-            .iter()
-            .any(|&(ref no_path, no_offset, [bef, aft])| {
-                no_path == path && no_offset == offset && (bef..=aft).contains(&ind)
-            })
-        {
-            return None;
-        }
-    }
-
-    match matches.len() {
-        0 => None,
-        1 => Some(UnweightedConstraint::Adjacency {
-            other_ports: Address {
-                addr: NodeAddress {
-                    no_match: no_matches.into_iter().collect(),
-                    the_match: matches.into_iter().next().unwrap(),
-                },
-                label,
-            },
-        }),
-        _ => Some(UnweightedConstraint::AllAdjacencies {
-            label,
-            no_match: no_matches.into_iter().collect(),
-            the_matches: matches.into_iter().collect(),
-        }),
-    }
-}
-
-fn flatten_constraints(constraints: Vec<UnweightedConstraint>) -> Vec<UnweightedConstraint> {
-    constraints.into_iter().flat_map(|c| c.to_vec()).collect()
-}
-
-impl Display for UnweightedConstraint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            UnweightedConstraint::AllAdjacencies { the_matches, .. } => {
-                write!(
-                    f,
-                    "All({})",
-                    the_matches
-                        .iter()
-                        .map(|(_, i, j)| format!("({i}, {j}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-            UnweightedConstraint::Adjacency { other_ports } => {
-                write!(
-                    f,
-                    "Adjacency({:?}, {:?})",
-                    other_ports.addr.the_match, other_ports.label
-                )
-            }
-            UnweightedConstraint::Dangling => write!(f, "Dangling"),
-        }
-    }
-}
-
-/// Find the ports in `other_ports` that are linked to one of `this_ports`.
-pub(super) fn adjacency_constraint(
-    g: &PortGraph,
-    this_ports: Vec<PortIndex>,
-    other_ports: Vec<PortIndex>,
-) -> impl Iterator<Item = PortIndex> + '_ {
-    this_ports.into_iter().filter_map(move |p| {
-        let other_p = g.port_link(p)?;
-        other_ports.contains(&other_p).then_some(other_p)
-    })
 }
 
 impl<'g> Skeleton<'g> {
-    pub(crate) fn get_port_addr(&self, port: PortIndex) -> Address {
+    pub(crate) fn get_coordinates(
+        &self,
+        port: PortIndex,
+    ) -> (PortLabel, NodeAddress, Vec<NodeRange>) {
         let node = self.graph().port_node(port).expect("invalid pattern");
         let offset = self.graph().port_offset(port).expect("invalid pattern");
-        Address {
-            addr: self.get_node_addr(node),
-            label: match self.graph().port_direction(port).expect("invalid pattern") {
-                Direction::Incoming => PortLabel::Incoming(offset.index()),
-                Direction::Outgoing => PortLabel::Outgoing(offset.index()),
-            },
-        }
+        let addr = self.get_node_addr(node);
+        let label = match self.graph().port_direction(port).expect("invalid pattern") {
+            Direction::Incoming => PortLabel::Incoming(offset.index()),
+            Direction::Outgoing => PortLabel::Outgoing(offset.index()),
+        };
+        let no_addr = self.get_no_addresses(node);
+        (label, addr, no_addr)
     }
 
-    pub(crate) fn get_node_addr(&self, node: NodeIndex) -> NodeAddress {
+    pub(crate) fn get_address(&self, port: PortIndex) -> Address {
+        let (label, addr, _) = self.get_coordinates(port);
+        Address { label, addr }
+    }
+
+    pub(crate) fn get_no_addresses(&self, node: NodeIndex) -> Vec<NodeRange> {
         if node == self.root {
-            return NodeAddress {
-                no_match: Vec::new(),
-                the_match: (Vec::new(), 0, 0),
-            };
+            return vec![];
         }
         let spine_inst = self.instantiate_spine(&self.spine);
         let mut rev_inds: BTreeMap<_, Vec<_>> = Default::default();
@@ -392,31 +174,63 @@ impl<'g> Skeleton<'g> {
             .expect("must have at least one address");
         let mut ribs = self.get_ribs(&self.spine);
         let mut spine = self.spine.clone();
-        let the_match = (spine[addr.0].0.clone(), spine[addr.0].1, addr.1);
         match addr.1.cmp(&0) {
             cmp::Ordering::Greater => {
                 spine.truncate(addr.0 + 1);
                 ribs.truncate(addr.0 + 1);
-                ribs[addr.0] = [0, addr.1 - 1];
+                ribs[addr.0] = (0..=addr.1 - 1).try_into().unwrap();
             }
             cmp::Ordering::Less => {
                 spine.truncate(addr.0 + 1);
                 ribs.truncate(addr.0 + 1);
-                ribs[addr.0][0] = addr.1 + 1;
+                ribs[addr.0] = (addr.1 + 1..=ribs[addr.0].end()).try_into().unwrap();
             }
             cmp::Ordering::Equal => {
                 spine.truncate(addr.0);
                 ribs.truncate(addr.0);
             }
         }
-        let no_match = spine
+        spine
             .into_iter()
             .zip(ribs)
-            .map(|((fst, snd), third)| (fst, snd, third))
-            .collect();
+            .map(|(spine, range)| NodeRange { spine, range })
+            .collect()
+    }
+
+    pub(crate) fn get_node_addr(&self, node: NodeIndex) -> NodeAddress {
+        if node == self.root {
+            return NodeAddress {
+                spine: SpineAddress {
+                    path: SmallVec::new(),
+                    offset: 0,
+                },
+                ind: 0,
+            };
+        }
+        let spine_inst = self.instantiate_spine(&self.spine);
+        let mut rev_inds: BTreeMap<_, Vec<_>> = Default::default();
+        for (i, lp) in spine_inst.iter().enumerate() {
+            if let Some(lp) = lp {
+                rev_inds.entry(lp.line_ind).or_default().push(i);
+            }
+        }
+        let mut all_addrs = Vec::new();
+        for line in self.node2line[node.index()].iter() {
+            for &spine_ind in rev_inds.get(&line.line_ind).unwrap_or(&Vec::new()) {
+                let spine = spine_inst[spine_ind].expect("By construction of in rev_inds");
+                let ind = line.ind - spine.ind;
+                all_addrs.push((spine_ind, ind))
+            }
+        }
+        // Lower spine indices come first, prioritising positive indices
+        all_addrs.sort_unstable_by_key(|addr| (addr.0, addr.1 < 0, addr.1.abs()));
+        let addr = all_addrs
+            .into_iter()
+            .next()
+            .expect("must have at least one address");
         NodeAddress {
-            the_match,
-            no_match,
+            spine: self.spine[addr.0].clone(),
+            ind: addr.1,
         }
     }
 }
