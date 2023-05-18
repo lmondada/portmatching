@@ -18,6 +18,7 @@ serde = { version = "1.0.152", features = ["derive"], optional = true }
 rand = { version = "0.8.5", optional = true }
 serde_json = { version = "1.0.96", optional = true }
 clap = { version = "4.2.2", features = ["derive"], optional = true }
+smallvec = "1.10.0"
 
 [features]
 serde = ["dep:serde", "portgraph/serde"]

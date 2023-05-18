@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, VecDeque};
 use portgraph::{NodeIndex, PortGraph, PortIndex};
 
 use crate::{
-    constraint::UnweightedConstraint,
+    constraint::UnweightedAdjConstraint,
     utils::{centre, NoCentreError},
     Skeleton,
 };
@@ -24,7 +24,7 @@ pub struct UnweightedPattern {
 }
 
 impl Pattern for UnweightedPattern {
-    type Constraint = UnweightedConstraint;
+    type Constraint = UnweightedAdjConstraint;
 
     fn graph(&self) -> &PortGraph {
         &self.graph
@@ -38,11 +38,10 @@ impl Pattern for UnweightedPattern {
         if let &Some(in_port) = in_port {
             // TODO: dont recompute skeleton each time
             let skeleton = Skeleton::new(&self.graph, self.root);
-            UnweightedConstraint::Adjacency {
-                other_ports: skeleton.get_port_addr(in_port),
-            }
+            let (label, addr, no_addr) = skeleton.get_coordinates(in_port);
+            UnweightedAdjConstraint::link(label, addr, no_addr)
         } else {
-            UnweightedConstraint::Dangling
+            UnweightedAdjConstraint::dangling()
         }
     }
 

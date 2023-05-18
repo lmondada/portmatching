@@ -1,6 +1,6 @@
 use portgraph::{NodeIndex, PortGraph, SecondaryMap};
 
-use crate::{constraint::WeightedConstraint, Pattern, UnweightedPattern};
+use crate::{constraint::WeightedAdjConstraint, Pattern, Skeleton, UnweightedPattern};
 
 use super::{Edge, InvalidPattern};
 
@@ -16,8 +16,8 @@ pub struct WeightedPattern<N> {
     pub(crate) weights: SecondaryMap<NodeIndex, N>,
 }
 
-impl<N: Clone> Pattern for WeightedPattern<N> {
-    type Constraint = WeightedConstraint<N>;
+impl<N: Clone + Eq> Pattern for WeightedPattern<N> {
+    type Constraint = WeightedAdjConstraint<N>;
 
     fn graph(&self) -> &PortGraph {
         self.pattern.graph()
@@ -27,13 +27,16 @@ impl<N: Clone> Pattern for WeightedPattern<N> {
         self.pattern.root()
     }
 
-    fn to_constraint(&self, e @ Edge(_, in_port): &Edge) -> Self::Constraint {
-        self.pattern
-            .to_constraint(e)
-            .to_weighted(in_port.map(|in_port| {
-                let node = self.graph().port_node(in_port).expect("invalid port");
-                self.weights[node].clone()
-            }))
+    fn to_constraint(&self, Edge(_, in_port): &Edge) -> Self::Constraint {
+        if let &Some(in_port) = in_port {
+            // TODO: dont recompute skeleton each time
+            let skeleton = Skeleton::new(self.graph(), self.root());
+            let (label, addr, no_addr) = skeleton.get_coordinates(in_port);
+            let node = self.graph().port_node(in_port).expect("invalid port");
+            WeightedAdjConstraint::link(label, addr, no_addr, self.weights[node].clone())
+        } else {
+            WeightedAdjConstraint::dangling()
+        }
     }
 
     fn all_lines(&self) -> Vec<Vec<Edge>> {

@@ -7,6 +7,9 @@ mod depth;
 // pub(crate) mod iter;
 pub(crate) mod pre_order;
 
+pub(crate) mod zero_range;
+pub(crate) use zero_range::ZeroRange;
+
 use std::mem;
 
 pub use depth::is_connected;
