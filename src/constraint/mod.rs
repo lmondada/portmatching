@@ -1,3 +1,5 @@
+use std::iter::repeat;
+
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
 mod elementary;
@@ -110,4 +112,85 @@ impl NodeRange {
     fn contains(&self, node: &NodeAddress) -> bool {
         self.spine == node.spine && self.range.contains(node.ind)
     }
+
+    /// Whether node does not appear in the address range
+    fn verify_no_match(&self, node: NodeIndex, g: &PortGraph, root: NodeIndex) -> bool {
+        let Self { spine, range } = self;
+
+        let Some(root) = follow_path(&spine.path, root, g) else {
+            return true
+        };
+        if root == node {
+            return false;
+        }
+
+        let n_neg = -range.start() as usize;
+        let n_pos = if range.end() >= 0 {
+            range.end() as usize
+        } else {
+            0
+        };
+
+        // go in both directions from root
+        for (port, n_jumps) in [
+            (g.output(root, spine.offset), n_pos),
+            (g.input(root, spine.offset), n_neg),
+        ] {
+            let Some(port) = port else { continue };
+            if n_times(n_jumps)
+                .scan(port, |port, ()| {
+                    let next_port = g.port_link(*port)?;
+                    let node = g.port_node(next_port).expect("invalid port");
+                    *port = port_opposite(next_port, g)?;
+                    Some(node)
+                })
+                .any(|in_range| node == in_range)
+            {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Address {
+    addr: NodeAddress,
+    label: PortLabel,
+    no_addr: Vec<NodeRange>,
+}
+
+type Graph<'g> = (&'g PortGraph, NodeIndex);
+impl<'g> PortAddress<Graph<'g>> for Address {
+    fn ports(&self, (g, root): Graph<'g>) -> Vec<PortIndex> {
+        let Some(node) = self.addr.get_node(g, root) else { return vec![] };
+        if self
+            .no_addr
+            .iter()
+            .any(|range| range.verify_no_match(node, g, root))
+        {
+            return vec![];
+        }
+        let as_vec = |p: Option<_>| p.into_iter().collect();
+        match self.label {
+            PortLabel::Outgoing(out_p) => as_vec(g.output(node, out_p)),
+            PortLabel::Incoming(in_p) => as_vec(g.input(node, in_p)),
+        }
+    }
+}
+
+type GraphBis<'g, V> = (&'g PortGraph, V, NodeIndex);
+impl<'g, V> PortAddress<GraphBis<'g, V>> for Address {
+    fn ports(&self, (g, _, root): GraphBis<'g, V>) -> Vec<PortIndex> {
+        let Some(node) = self.addr.get_node(g, root) else { return vec![] };
+        let as_vec = |p: Option<_>| p.into_iter().collect();
+        match self.label {
+            PortLabel::Outgoing(out_p) => as_vec(g.output(node, out_p)),
+            PortLabel::Incoming(in_p) => as_vec(g.input(node, in_p)),
+        }
+    }
+}
+
+fn n_times(n: usize) -> impl Iterator<Item = ()> {
+    repeat(()).take(n)
 }

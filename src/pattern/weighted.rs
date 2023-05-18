@@ -31,9 +31,11 @@ impl<N: Clone + Eq> Pattern for WeightedPattern<N> {
         if let &Some(in_port) = in_port {
             // TODO: dont recompute skeleton each time
             let skeleton = Skeleton::new(self.graph(), self.root());
-            let (label, addr, no_addr) = skeleton.get_coordinates(in_port);
             let node = self.graph().port_node(in_port).expect("invalid port");
-            WeightedAdjConstraint::link(label, addr, no_addr, self.weights[node].clone())
+            WeightedAdjConstraint::link(
+                skeleton.get_port_address(in_port),
+                self.weights[node].clone(),
+            )
         } else {
             WeightedAdjConstraint::dangling()
         }

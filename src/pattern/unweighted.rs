@@ -38,8 +38,7 @@ impl Pattern for UnweightedPattern {
         if let &Some(in_port) = in_port {
             // TODO: dont recompute skeleton each time
             let skeleton = Skeleton::new(&self.graph, self.root);
-            let (label, addr, no_addr) = skeleton.get_coordinates(in_port);
-            UnweightedAdjConstraint::link(label, addr, no_addr)
+            UnweightedAdjConstraint::link(skeleton.get_port_address(in_port))
         } else {
             UnweightedAdjConstraint::dangling()
         }

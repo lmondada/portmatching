@@ -9,17 +9,13 @@ use std::{
 };
 
 use portgraph::{Direction, NodeIndex, PortGraph, PortIndex};
+use smallvec::SmallVec;
 
 use crate::utils::{follow_path, port_opposite, pre_order::shortest_path, ZeroRange};
 
-// use super::{
-//     Address, PortGraphAddressing, Rib,
-// };
-// use crate::constraint::unweighted::{NodeAddress, PortAddress, PortLabel};
-
 use bitvec::prelude::*;
 
-use super::SpineAddress;
+use super::{Address, NodeAddress, NodeRange, PortLabel, SpineAddress};
 
 type Rib = ZeroRange;
 
@@ -262,6 +258,109 @@ impl<'g> Skeleton<'g> {
                     .find(|line| line.offset == *offset)
             })
             .collect()
+    }
+
+    pub(crate) fn get_port_address(&self, port: PortIndex) -> Address {
+        let node = self.graph().port_node(port).expect("invalid pattern");
+        let offset = self.graph().port_offset(port).expect("invalid pattern");
+        let addr = self.get_node_addr(node);
+        let label = match self.graph().port_direction(port).expect("invalid pattern") {
+            Direction::Incoming => PortLabel::Incoming(offset.index()),
+            Direction::Outgoing => PortLabel::Outgoing(offset.index()),
+        };
+        let no_addr = self.get_no_addresses(node);
+        Address {
+            label,
+            addr,
+            no_addr,
+        }
+    }
+
+    pub(crate) fn get_no_addresses(&self, node: NodeIndex) -> Vec<NodeRange> {
+        if node == self.root {
+            return vec![];
+        }
+        let spine_inst = self.instantiate_spine(&self.spine);
+        let mut rev_inds: BTreeMap<_, Vec<_>> = Default::default();
+        for (i, lp) in spine_inst.iter().enumerate() {
+            if let Some(lp) = lp {
+                rev_inds.entry(lp.line_ind).or_default().push(i);
+            }
+        }
+        let mut all_addrs = Vec::new();
+        for line in self.node2line[node.index()].iter() {
+            for &spine_ind in rev_inds.get(&line.line_ind).unwrap_or(&Vec::new()) {
+                let spine = spine_inst[spine_ind].expect("By construction of in rev_inds");
+                let ind = line.ind - spine.ind;
+                all_addrs.push((spine_ind, ind))
+            }
+        }
+        // Lower spine indices come first, prioritising positive indices
+        all_addrs.sort_unstable_by_key(|addr| (addr.0, addr.1 < 0, addr.1.abs()));
+        let addr = all_addrs
+            .into_iter()
+            .next()
+            .expect("must have at least one address");
+        let mut ribs = self.get_ribs(&self.spine);
+        let mut spine = self.spine.clone();
+        match addr.1.cmp(&0) {
+            cmp::Ordering::Greater => {
+                spine.truncate(addr.0 + 1);
+                ribs.truncate(addr.0 + 1);
+                ribs[addr.0] = (0..=addr.1 - 1).try_into().unwrap();
+            }
+            cmp::Ordering::Less => {
+                spine.truncate(addr.0 + 1);
+                ribs.truncate(addr.0 + 1);
+                ribs[addr.0] = (addr.1 + 1..=ribs[addr.0].end()).try_into().unwrap();
+            }
+            cmp::Ordering::Equal => {
+                spine.truncate(addr.0);
+                ribs.truncate(addr.0);
+            }
+        }
+        spine
+            .into_iter()
+            .zip(ribs)
+            .map(|(spine, range)| NodeRange { spine, range })
+            .collect()
+    }
+
+    pub(crate) fn get_node_addr(&self, node: NodeIndex) -> NodeAddress {
+        if node == self.root {
+            return NodeAddress {
+                spine: SpineAddress {
+                    path: SmallVec::new(),
+                    offset: 0,
+                },
+                ind: 0,
+            };
+        }
+        let spine_inst = self.instantiate_spine(&self.spine);
+        let mut rev_inds: BTreeMap<_, Vec<_>> = Default::default();
+        for (i, lp) in spine_inst.iter().enumerate() {
+            if let Some(lp) = lp {
+                rev_inds.entry(lp.line_ind).or_default().push(i);
+            }
+        }
+        let mut all_addrs = Vec::new();
+        for line in self.node2line[node.index()].iter() {
+            for &spine_ind in rev_inds.get(&line.line_ind).unwrap_or(&Vec::new()) {
+                let spine = spine_inst[spine_ind].expect("By construction of in rev_inds");
+                let ind = line.ind - spine.ind;
+                all_addrs.push((spine_ind, ind))
+            }
+        }
+        // Lower spine indices come first, prioritising positive indices
+        all_addrs.sort_unstable_by_key(|addr| (addr.0, addr.1 < 0, addr.1.abs()));
+        let addr = all_addrs
+            .into_iter()
+            .next()
+            .expect("must have at least one address");
+        NodeAddress {
+            spine: self.spine[addr.0].clone(),
+            ind: addr.1,
+        }
     }
 }
 

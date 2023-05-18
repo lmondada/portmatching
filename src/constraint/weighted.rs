@@ -6,7 +6,7 @@ use portgraph::{NodeIndex, SecondaryMap};
 use crate::Constraint;
 
 use super::elementary::ElementaryConstraint;
-use super::{ConstraintVec, NodeAddress, NodeRange, PortAddress, PortLabel};
+use super::{Address, ConstraintVec, PortAddress};
 
 /// A state transition for a weighted graph trie.
 ///
@@ -26,18 +26,18 @@ impl<N: Clone + Eq> WeightedAdjConstraint<N> {
         Self::Dangling
     }
 
-    pub(crate) fn link(
-        label: PortLabel,
-        address: NodeAddress,
-        no_addresses: Vec<NodeRange>,
-        weight: N,
-    ) -> Self {
-        let constraints = no_addresses
+    pub(crate) fn link(addr: Address, weight: N) -> Self {
+        let Address {
+            addr,
+            label,
+            no_addr,
+        } = addr;
+        let constraints = no_addr
             .into_iter()
             .map(ElementaryConstraint::NoMatch)
             .chain([ElementaryConstraint::NodeWeight(weight)])
             .chain([ElementaryConstraint::PortLabel(label)])
-            .chain([ElementaryConstraint::Match(address)])
+            .chain([ElementaryConstraint::Match(addr)])
             .collect();
         Self::Link(constraints)
     }
