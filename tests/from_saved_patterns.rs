@@ -144,6 +144,7 @@ fn from_saved_patterns() {
         "44",
         "45",
         "46",
+        "47",
     ];
     for test_name in testcases {
         println!("{test_name}...");
