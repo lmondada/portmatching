@@ -167,7 +167,7 @@ impl<'g> PortAddress<Graph<'g>> for Address {
         if self
             .no_addr
             .iter()
-            .any(|range| range.verify_no_match(node, g, root))
+            .any(|range| !range.verify_no_match(node, g, root))
         {
             return vec![];
         }
