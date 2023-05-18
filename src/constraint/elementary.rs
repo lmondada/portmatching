@@ -86,7 +86,11 @@ fn verify_no_match(
     }
 
     let n_neg = -range.start() as usize;
-    let n_pos = range.end() as usize;
+    let n_pos = if range.end() >= 0 {
+        range.end() as usize
+    } else {
+        0
+    };
 
     // go in both directions from root
     for (port, n_jumps) in [
