@@ -6,7 +6,7 @@ use std::{
 use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 
 use crate::{
-    constraint::{unweighted, PortAddress},
+    constraint::{Address, PortAddress},
     graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
     pattern::{Edge, Pattern},
     Constraint, ManyPatternMatcher, Matcher, PatternID, Skeleton,
@@ -158,7 +158,7 @@ where
     }
 }
 
-impl<C: Clone + Ord + Constraint, G> ManyPatternMatcher<G> for TrieMatcher<C, unweighted::Address>
+impl<C: Clone + Ord + Constraint, G> ManyPatternMatcher<G> for TrieMatcher<C, Address>
 where
     Self: Matcher<G>,
 {
@@ -186,7 +186,7 @@ where
                 if self.add_non_det(first_edge) {
                     // The edge is added non-deterministically
                     current_states = self.trie.add_graph_edge_nondet(
-                        &skeleton.get_address(out_port),
+                        &skeleton.get_port_address(out_port),
                         current_states,
                         constraint,
                         // &mut clone_state,
@@ -194,7 +194,7 @@ where
                 } else {
                     // All other edges are deterministic
                     current_states = self.trie.add_graph_edge_det(
-                        &skeleton.get_address(out_port),
+                        &skeleton.get_port_address(out_port),
                         current_states,
                         constraint,
                         // &mut clone_state,
