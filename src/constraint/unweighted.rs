@@ -250,14 +250,18 @@ pub(super) fn simplify_constraints(
     }
 
     let mut matches = BTreeSet::new();
-    let mut no_matches = BTreeSet::new();
+    let mut no_matches = BTreeMap::new();
     let mut all_labels = Vec::new();
     for c in constraints {
         if let UnweightedConstraint::Adjacency { other_ports: ports } = c {
             let node = ports.addr;
             let addr = node.the_match;
             matches.insert(addr);
-            no_matches.extend(node.no_match.into_iter());
+            for (a, b, c) in node.no_match {
+                let curr = no_matches.entry((a, b)).or_insert(c);
+                curr[0] = curr[0].min(c[0]);
+                curr[1] = curr[1].max(c[1]);
+            }
             all_labels.push(ports.label);
         }
     }
@@ -268,6 +272,10 @@ pub(super) fn simplify_constraints(
             acc.map(|acc| acc.and(e)).unwrap_or(Some(e))
         })
     else { return None };
+    let no_matches = no_matches
+        .into_iter()
+        .map(|((a, b), c)| (a, b, c))
+        .collect::<Vec<_>>();
 
     for &(ref path, offset, ind) in matches.iter() {
         if no_matches

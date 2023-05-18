@@ -1,4 +1,4 @@
-use std::mem;
+use std::{fmt::Debug, fmt::Display, mem};
 
 use portgraph::{NodeIndex, PortOffset, SecondaryMap};
 
@@ -130,5 +130,39 @@ impl<N: Clone + Ord + Eq + 'static> Constraint for WeightedConstraint<N> {
 
         simplify_constraints(vec![self.to_unweighted(), other.to_unweighted()])
             .map(|c| c.to_weighted(target_weight))
+    }
+}
+
+impl<N: Debug> Display for WeightedConstraint<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WeightedConstraint::AllAdjacencies {
+                the_matches,
+                target_weight,
+                ..
+            } => {
+                write!(
+                    f,
+                    "{:?}, All({})",
+                    target_weight,
+                    the_matches
+                        .iter()
+                        .map(|(_, i, j)| format!("({i}, {j}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            WeightedConstraint::Adjacency {
+                other_ports,
+                target_weight,
+            } => {
+                write!(
+                    f,
+                    "{:?} Adjacency({:?}, {:?})",
+                    target_weight, other_ports.addr.the_match, other_ports.label
+                )
+            }
+            WeightedConstraint::Dangling => write!(f, "Dangling"),
+        }
     }
 }
