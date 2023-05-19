@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use portgraph::{NodeIndex, PortGraph};
 
-use super::{Address, Constraint, ConstraintVec, ElementaryConstraint, PortAddress};
+use super::{Address, Constraint, ConstraintVec, ElementaryConstraint, NodeRange, PortAddress};
 
 /// Adjacency constraint for unweighted graphs.
 ///
@@ -21,11 +21,11 @@ impl UnweightedAdjConstraint {
         Self::Dangling
     }
 
-    pub(crate) fn link(port_addr: Address) -> Self {
+    pub(crate) fn link(port_addr: Address, no_addr: Vec<NodeRange>) -> Self {
         let Address {
             addr,
             label,
-            no_addr,
+            // no_addr,
         } = port_addr;
         let constraints = no_addr
             .into_iter()

@@ -268,11 +268,11 @@ impl<'g> Skeleton<'g> {
             Direction::Incoming => PortLabel::Incoming(offset.index()),
             Direction::Outgoing => PortLabel::Outgoing(offset.index()),
         };
-        let no_addr = self.get_no_addresses(node);
+        // let no_addr = self.get_no_addresses(node);
         Address {
             label,
             addr,
-            no_addr,
+            // no_addr,
         }
     }
 

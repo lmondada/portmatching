@@ -138,10 +138,10 @@ impl NodeRange {
         ] {
             let Some(port) = port else { continue };
             if n_times(n_jumps)
-                .scan(port, |port, ()| {
-                    let next_port = g.port_link(*port)?;
+                .scan(Some(port), |port, ()| {
+                    let next_port = g.port_link((*port)?)?;
                     let node = g.port_node(next_port).expect("invalid port");
-                    *port = port_opposite(next_port, g)?;
+                    *port = port_opposite(next_port, g);
                     Some(node)
                 })
                 .any(|in_range| node == in_range)
@@ -157,20 +157,20 @@ impl NodeRange {
 pub struct Address {
     addr: NodeAddress,
     label: PortLabel,
-    no_addr: Vec<NodeRange>,
+    // no_addr: Vec<NodeRange>,
 }
 
 type Graph<'g> = (&'g PortGraph, NodeIndex);
 impl<'g> PortAddress<Graph<'g>> for Address {
     fn ports(&self, (g, root): Graph<'g>) -> Vec<PortIndex> {
         let Some(node) = self.addr.get_node(g, root) else { return vec![] };
-        if self
-            .no_addr
-            .iter()
-            .any(|range| !range.verify_no_match(node, g, root))
-        {
-            return vec![];
-        }
+        // if self
+        //     .no_addr
+        //     .iter()
+        //     .any(|range| !range.verify_no_match(node, g, root))
+        // {
+        //     return vec![];
+        // }
         let as_vec = |p: Option<_>| p.into_iter().collect();
         match self.label {
             PortLabel::Outgoing(out_p) => as_vec(g.output(node, out_p)),
