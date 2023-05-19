@@ -34,6 +34,7 @@ impl<N: Clone + Eq> Pattern for WeightedPattern<N> {
             let node = self.graph().port_node(in_port).expect("invalid port");
             WeightedAdjConstraint::link(
                 skeleton.get_port_address(in_port),
+                skeleton.get_no_addresses(node),
                 self.weights[node].clone(),
             )
         } else {
