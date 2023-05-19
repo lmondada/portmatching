@@ -99,6 +99,18 @@ fn perform_benches(c: &mut Criterion) {
         TrieMatcher::from_patterns,
     );
     bench_matching(
+        "Balanced Graph Trie (optimised)",
+        &mut group,
+        &patterns,
+        (0..=1000).step_by(100),
+        &graph,
+        |ps| {
+            let mut m = TrieMatcher::from_patterns(ps);
+            m.optimise();
+            m
+        },
+    );
+    bench_matching(
         "Non-deterministic Graph Trie",
         &mut group,
         &patterns,
@@ -139,6 +151,17 @@ fn perform_benches(c: &mut Criterion) {
         &patterns,
         (0..=300).step_by(30),
         TrieMatcher::from_patterns,
+    );
+    bench_trie_construction(
+        "Balanced Graph Trie (optimised)",
+        &mut group,
+        &patterns,
+        (0..=300).step_by(30),
+        |ps| {
+            let mut m = TrieMatcher::from_patterns(ps);
+            m.optimise();
+            m
+        },
     );
     bench_trie_construction(
         "Non-deterministic Graph Trie",
