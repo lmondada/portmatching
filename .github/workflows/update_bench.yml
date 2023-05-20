@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [main]
+    branches: [precompute]
 
 name: "Update origin/bench"
 
@@ -26,5 +26,5 @@ jobs:
       - name: Merge main into bench
         run: |
           git switch bench
-          git merge -Xtheirs -m "Merge branch main into bench" origin/main
+          git merge -Xtheirs -m "Merge branch main into bench" origin/precompute
           git push
