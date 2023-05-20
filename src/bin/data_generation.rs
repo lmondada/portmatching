@@ -1,5 +1,5 @@
 use clap::Parser;
-use portmatching::utils::is_connected;
+use portmatching::{utils::is_connected, ManyPatternMatcher, TrieMatcher, UnweightedPattern};
 use std::{cmp, fs};
 
 use portgraph::PortGraph;
@@ -44,6 +44,11 @@ struct Args {
     #[arg(default_value_t = 5)]
     d_small: usize,
 
+    // Whether to precompile trie
+    #[arg(long)]
+    #[arg(short = 'X')]
+    pre_compile: Option<String>,
+
     // Circuits location
     #[arg(short = 'o')]
     #[arg(default_value = "datasets")]
@@ -68,21 +73,49 @@ fn main() {
         }
     }
     // small circuits
-    {
+    let patterns = {
         fs::create_dir_all(format!("{dir}/small_circuits")).expect("could not create directory");
         let (n_circuits, n, q, d) = (args.n_small, args.v_small, args.q_small, args.d_small);
-        for i in 0..n_circuits {
-            println!("{}/{n_circuits} small circuits...", i + 1);
+        (0..n_circuits)
+            .map(|i| {
+                println!("{}/{n_circuits} small circuits...", i + 1);
+                let g = gen_circ(
+                    n,
+                    q,
+                    d,
+                    |c| is_connected(c) && exists_two_cx_gates(c),
+                    &mut rng,
+                );
+                let f = format!("{dir}/small_circuits/pattern_{i}.json");
+                fs::write(f, serde_json::to_vec(&g).unwrap()).expect("could not write to file");
+                UnweightedPattern::from_graph(g).unwrap()
+            })
+            .collect::<Vec<_>>()
+    };
 
-            let g = gen_circ(
-                n,
-                q,
-                d,
-                |c| is_connected(c) && exists_two_cx_gates(c),
-                &mut rng,
-            );
-            let f = format!("{dir}/small_circuits/pattern_{i}.json");
-            fs::write(f, serde_json::to_vec(&g).unwrap()).expect("could not write to file");
+    // Pre-compile tries if required
+    if let Some(sizes) = args.pre_compile {
+        fs::create_dir_all(format!("{dir}/tries")).expect("could not create directory");
+        let sizes = sizes
+            .split(',')
+            .map(|s| s.parse::<usize>().unwrap())
+            .collect::<Vec<_>>();
+        let n_sizes = sizes.len();
+        for (i, l) in sizes.into_iter().enumerate() {
+            let ps = patterns.iter().take(l).cloned().collect::<Vec<_>>();
+            let mut matcher = TrieMatcher::from_patterns(ps);
+            println!("Compiling size {l}... ({}/{n_sizes})", i + 1);
+            fs::write(
+                format!("{dir}/tries/balanced_{l}.json"),
+                serde_json::to_vec(&matcher).unwrap(),
+            )
+            .expect(&format!("could not write to {dir}/tries"));
+            matcher.optimise();
+            fs::write(
+                format!("{dir}/tries/optimised_{l}.json"),
+                serde_json::to_vec(&matcher).unwrap(),
+            )
+            .expect(&format!("could not write to {dir}/tries"));
         }
     }
 }

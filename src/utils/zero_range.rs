@@ -2,6 +2,7 @@ use std::{cmp, ops::RangeInclusive};
 
 /// A range around zero
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub(crate) enum ZeroRange {
     NonEmpty {
         // the negative of the start

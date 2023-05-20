@@ -11,6 +11,7 @@ use super::{Address, Constraint, ConstraintVec, ElementaryConstraint, NodeRange,
 /// Either the port exists and is connected to another port, or the port exist
 /// but is unlinked (it is "dangling"), or the port does not exist.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum UnweightedAdjConstraint {
     Dangling,
     Link(ConstraintVec<()>),

@@ -26,6 +26,7 @@ use super::{GraphTrie, StateID};
 /// transition Fail is the only one that should be followed. At write time,
 /// an unset field is seen as a license to assign whatever is most convenient.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct NodeWeight<A> {
     pub(crate) out_port: Option<A>,
     pub(crate) non_deterministic: bool,
@@ -99,6 +100,7 @@ type EdgeWeight<C> = Option<C>;
 /// forming the "trace" of the trie. This is used in [`Self::finalize`] to
 /// split states where necessary to keep avoid cross-talk, i.e. creating new
 /// disallowed state transitions as a by-product of the new transitions.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BaseGraphTrie<C, A> {
     pub(crate) graph: PortGraph,
     pub(crate) weights: Weights<NodeWeight<A>, EdgeWeight<C>>,

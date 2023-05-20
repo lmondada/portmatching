@@ -61,6 +61,7 @@ pub trait PortAddress<Graph>: Clone + PartialEq + Eq + PartialOrd + Ord {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SpineAddress {
     path: SmallVec<[PortOffset; 4]>,
     offset: usize,
@@ -74,6 +75,7 @@ impl SpineAddress {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NodeAddress {
     spine: SpineAddress,
     ind: isize,
@@ -103,6 +105,7 @@ impl NodeAddress {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NodeRange {
     spine: SpineAddress,
     range: ZeroRange,
@@ -154,6 +157,7 @@ impl NodeRange {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Address {
     addr: NodeAddress,
     label: PortLabel,
