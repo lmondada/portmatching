@@ -44,10 +44,13 @@ impl<'g, C> Matcher<Graph<'g>> for NaiveManyMatcher<C> {
     }
 }
 
-impl<'g, C> ManyPatternMatcher<Graph<'g>> for NaiveManyMatcher<C> {
+impl<'g, C, P> ManyPatternMatcher<Graph<'g>, P> for NaiveManyMatcher<C>
+where
+    P: Pattern<Constraint = C> + 'static,
+{
     type Constraint = C;
 
-    fn add_pattern(&mut self, pattern: impl Pattern<Constraint = C> + 'static) -> PatternID {
+    fn add_pattern(&mut self, pattern: P) -> PatternID {
         self.matchers
             .push(SinglePatternMatcher::from_pattern(Box::new(pattern)));
         PatternID(self.matchers.len() - 1)

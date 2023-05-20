@@ -4,6 +4,7 @@ use super::{NodeAddress, NodeRange};
 
 /// All constraints can be decomposed into a series of the following
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum ElementaryConstraint<N> {
     /// The port must have this label
     PortLabel(PortLabel),
@@ -41,6 +42,7 @@ impl<N: Eq> ElementaryConstraint<N> {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum PortLabel {
     Outgoing(usize),
     Incoming(usize),

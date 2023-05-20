@@ -64,7 +64,7 @@ impl fmt::Display for PatternID {
 /// implement this trait, as some matchers are obtained by converting
 /// previously constructed matchers and thus do not support adding patterns
 /// one-by-one.
-pub trait ManyPatternMatcher<G>: Default + Matcher<G> {
+pub trait ManyPatternMatcher<G, P>: Default + Matcher<G> {
     /// The constraint type used by the matcher.
     ///
     /// Defines the type of patterns that can be matched by the matcher.
@@ -74,13 +74,10 @@ pub trait ManyPatternMatcher<G>: Default + Matcher<G> {
     ///
     /// Patterns are assigned a unique ID, which is returned by this method. All
     /// patterns must be connected.
-    fn add_pattern(
-        &mut self,
-        pattern: impl Pattern<Constraint = Self::Constraint> + 'static,
-    ) -> PatternID;
+    fn add_pattern(&mut self, pattern: P) -> PatternID;
 
     /// Construct a pattern matcher from patterns.
-    fn from_patterns<P: 'static>(patterns: impl IntoIterator<Item = P> + 'static) -> Self
+    fn from_patterns(patterns: impl IntoIterator<Item = P>) -> Self
     where
         P: Pattern<Constraint = Self::Constraint>,
     {

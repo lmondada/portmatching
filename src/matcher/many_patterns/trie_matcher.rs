@@ -30,16 +30,18 @@ use super::PatternMatch;
 /// [`Deterministic`]: TrieConstruction::Deterministic
 /// [`NonDeterministic`]: TrieConstruction::NonDeterministic
 /// [`Balanced`]: TrieConstruction::Balanced
-pub struct TrieMatcher<C, A> {
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TrieMatcher<C, A, P> {
     strategy: TrieConstruction,
     trie: BaseGraphTrie<C, A>,
     match_states: BTreeMap<StateID, Vec<PatternID>>,
-    patterns: Vec<Box<dyn Pattern<Constraint = C>>>,
+    patterns: Vec<P>,
 }
 
 /// Trie construction strategy.
 ///
 /// See [`TrieMatcher`] for details on the different strategies.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieConstruction {
     /// Use only deterministic states.
     Deterministic,
@@ -49,13 +51,13 @@ pub enum TrieConstruction {
     Balanced,
 }
 
-impl<C: Clone + Ord + Constraint, A: Clone + Ord> Default for TrieMatcher<C, A> {
+impl<C: Clone + Ord + Constraint, A: Clone + Ord, P> Default for TrieMatcher<C, A, P> {
     fn default() -> Self {
         Self::new(TrieConstruction::Balanced)
     }
 }
 
-impl<C: Constraint + Clone + Ord, A: Clone + Ord> TrieMatcher<C, A> {
+impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
     /// Create a new matcher with the given trie construction strategy.
     pub fn new(strategy: TrieConstruction) -> Self {
         Self {
@@ -81,7 +83,7 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord> TrieMatcher<C, A> {
     }
 }
 
-impl<C: Display + Clone, A: Debug + Clone> TrieMatcher<C, A> {
+impl<C: Display + Clone, A: Debug + Clone, P> TrieMatcher<C, A, P> {
     /// A dotstring representation of the trie.
     pub fn dotstring(&self) -> String {
         let mut weights = self.trie.str_weights();
@@ -98,7 +100,7 @@ impl<C: Display + Clone, A: Debug + Clone> TrieMatcher<C, A> {
 
 type Graph<'g> = (&'g PortGraph, NodeIndex);
 
-impl<'g, C, A> Matcher<Graph<'g>> for TrieMatcher<C, A>
+impl<'g, C, A, P> Matcher<Graph<'g>> for TrieMatcher<C, A, P>
 where
     C: Clone + Constraint<Graph<'g> = Graph<'g>> + Ord,
     A: Clone + Ord + PortAddress<Graph<'g>>,
@@ -129,7 +131,7 @@ where
 
 type GraphBis<'g, W> = (&'g PortGraph, W, NodeIndex);
 
-impl<'g, C, A, W: Copy> Matcher<GraphBis<'g, W>> for TrieMatcher<C, A>
+impl<'g, C, A, W: Copy, P> Matcher<GraphBis<'g, W>> for TrieMatcher<C, A, P>
 where
     C: Clone + Constraint<Graph<'g> = GraphBis<'g, W>> + Ord,
     A: Clone + Ord + PortAddress<GraphBis<'g, W>>,
@@ -158,16 +160,17 @@ where
     }
 }
 
-impl<C: Clone + Ord + Constraint, G> ManyPatternMatcher<G> for TrieMatcher<C, Address>
+impl<C: Clone + Ord + Constraint, G, P> ManyPatternMatcher<G, P> for TrieMatcher<C, Address, P>
 where
     Self: Matcher<G>,
+    P: Pattern<Constraint = C>,
 {
     type Constraint = C;
 
-    fn add_pattern(&mut self, pattern: impl Pattern<Constraint = C> + 'static) -> PatternID {
+    fn add_pattern(&mut self, pattern: P) -> PatternID {
         // The pattern number of this pattern
         let pattern_id = PatternID(self.patterns.len());
-        self.patterns.push(Box::new(pattern));
+        self.patterns.push(pattern);
         let pattern = &self.patterns[pattern_id.0];
         let skeleton = Skeleton::new(pattern.graph(), pattern.root());
 

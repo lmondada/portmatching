@@ -11,6 +11,7 @@ use super::{ElementaryConstraint, NodeRange};
 
 /// A vector of constraints, with simplifying logic.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum ConstraintVec<N> {
     Vec(Vec<ElementaryConstraint<N>>),
     Impossible,

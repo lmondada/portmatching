@@ -21,7 +21,7 @@ clap = { version = "4.2.2", features = ["derive"], optional = true }
 smallvec = "1.10.0"
 
 [features]
-serde = ["dep:serde", "portgraph/serde"]
+serde = ["dep:serde", "portgraph/serde", "smallvec/serde"]
 datagen = ["dep:rand", "dep:serde_json", "dep:clap"]
 
 [dev-dependencies]
