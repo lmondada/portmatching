@@ -1,3 +1,5 @@
+// flagooooo
+
 use clap::Parser;
 use portmatching::{utils::is_connected, ManyPatternMatcher, TrieMatcher, UnweightedPattern};
 use std::{cmp, fs};
@@ -78,7 +80,9 @@ fn main() {
         let (n_circuits, n, q, d) = (args.n_small, args.v_small, args.q_small, args.d_small);
         (0..n_circuits)
             .map(|i| {
-                println!("{}/{n_circuits} small circuits...", i + 1);
+                if i % 100 == 99 {
+                    println!("{}/{n_circuits} small circuits...", i + 1);
+                }
                 let g = gen_circ(
                     n,
                     q,
