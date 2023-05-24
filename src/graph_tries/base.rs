@@ -644,11 +644,14 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
             if let Some(cons) = cons.as_mut() {
                 let all_cons = cons.to_elementary();
                 let Some((last, rest)) = all_cons.split_last() else {panic!("bla")};
-                for cons in rest.iter().cloned() {
+                for cons in rest {
                     let mut new_states = Vec::new();
                     for &state in &states {
-                        new_states
-                            .append(&mut self.insert_transitions(state, cons.clone(), &mut None).0);
+                        new_states.append(&mut self.insert_transitions(
+                            state,
+                            cons.clone(),
+                            &mut None,
+                        ));
                     }
                     states = new_states;
                     for &state in &states {
