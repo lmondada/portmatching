@@ -51,13 +51,13 @@ pub enum TrieConstruction {
     Balanced,
 }
 
-impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord, P> Default for TrieMatcher<C, A, P> {
+impl<C: Clone + Ord + Constraint, A: Clone + Ord, P> Default for TrieMatcher<C, A, P> {
     fn default() -> Self {
         Self::new(TrieConstruction::Balanced)
     }
 }
 
-impl<C: Constraint + Clone + Ord + Debug, A: Clone + Ord, P> TrieMatcher<C, A, P> {
+impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
     /// Create a new matcher with the given trie construction strategy.
     pub fn new(strategy: TrieConstruction) -> Self {
         Self {
@@ -160,8 +160,7 @@ where
     }
 }
 
-impl<C: Clone + Ord + Constraint + Debug, G, P> ManyPatternMatcher<G, P>
-    for TrieMatcher<C, Address, P>
+impl<C: Clone + Ord + Constraint, G, P> ManyPatternMatcher<G, P> for TrieMatcher<C, Address, P>
 where
     Self: Matcher<G>,
     P: Pattern<Constraint = C>,

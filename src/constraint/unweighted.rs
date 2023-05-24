@@ -10,7 +10,7 @@ use super::{Address, Constraint, ConstraintVec, ElementaryConstraint, NodeRange,
 /// This edge is given by one of the outgoing port at the current node.
 /// Either the port exists and is connected to another port, or the port exist
 /// but is unlinked (it is "dangling"), or the port does not exist.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum UnweightedAdjConstraint {
     Dangling,

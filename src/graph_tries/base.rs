@@ -1,4 +1,3 @@
-use core::panic;
 use std::{
     cell::RefCell,
     collections::{BTreeSet, VecDeque},
@@ -135,7 +134,7 @@ impl<C: Clone, A: Clone> Clone for BaseGraphTrie<C, A> {
     }
 }
 
-impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord> Default for BaseGraphTrie<C, A> {
+impl<C: Clone + Ord + Constraint, A: Clone + Ord> Default for BaseGraphTrie<C, A> {
     fn default() -> Self {
         let graph = Default::default();
         let weights = Default::default();
@@ -195,7 +194,7 @@ impl<C: Display + Clone, A: Debug + Clone> BaseGraphTrie<C, A> {
     }
 }
 
-impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord> BaseGraphTrie<C, A> {
+impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     /// An empty graph trie
     pub fn new() -> Self {
         Self::default()
@@ -407,7 +406,6 @@ impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord> BaseGraphTrie<C, A> {
         for state in start_states {
             next_states.extend(
                 self.insert_transitions(state, constraint.clone(), &mut new_state)
-                    .0
                     .into_iter(),
             );
         }
@@ -457,12 +455,7 @@ impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord> BaseGraphTrie<C, A> {
         state: NodeIndex,
         new_cond: C,
         new_state: &mut Option<NodeIndex>,
-    ) -> (Vec<NodeIndex>, String) {
-        let mut dbg = String::new();
-        dbg.push_str(&format!(
-            "Inserting new_cond = {:?} at {:?}\n",
-            new_cond, state
-        ));
+    ) -> Vec<NodeIndex> {
         // The states we are transitioning to, to be returned
         let mut next_states = Vec::new();
 
@@ -492,30 +485,20 @@ impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord> BaseGraphTrie<C, A> {
                 offset += 1;
                 continue
             };
-            dbg.push_str(&format!("merged_cond = {:?}\n", merged_cond));
-            dbg.push_str(&format!("curr_cond = {:?}\n", curr_cond));
-            dbg.push_str(&format!(
-                "non-det = {:?}\n",
-                self.weights[state].non_deterministic
-            ));
             if &merged_cond != curr_cond {
-                dbg.push_str(&format!("merged_cond != curr_cond\n"));
                 if !self.weights[state].non_deterministic {
                     // insert new condition before current one
                     if alread_inserted.insert(merged_cond.clone()) {
-                        dbg.push_str(&format!("Inserting merged cond\n"));
                         new_transitions.push((offset, merged_cond.clone()));
                     }
                 } else {
                     // Just insert the new condition and that's it
                     if alread_inserted.insert(new_cond.clone()) {
-                        dbg.push_str(&format!("Inserting new cond\n"));
                         new_transitions.push((offset, new_cond));
                     }
                     break;
                 }
             } else if !self.weights[state].non_deterministic || curr_cond == &new_cond {
-                dbg.push_str(&format!("curr_cond == new_cond (or det)\n"));
                 // use existing transition
                 let in_port = self
                     .graph
@@ -523,20 +506,13 @@ impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord> BaseGraphTrie<C, A> {
                     .expect("Disconnected transition");
                 self.trace[transition].0.push(self.edge_cnt);
                 self.trace[in_port].0.push(self.edge_cnt + 1);
-                dbg.push_str(&format!(
-                    "Using existing transition, pushing {:?}\n",
-                    self.graph.port_node(in_port).expect("invalid port")
-                ));
-                dbg.push_str(&format!("curr_cond = {:?}\n", curr_cond));
                 next_states.push(self.graph.port_node(in_port).expect("invalid port"));
                 alread_inserted.insert(curr_cond.clone());
             }
             if merged_cond == new_cond {
-                dbg.push_str(&format!("breaking cause introduced ==\n"));
                 // we've inserted the new condition, our job is done
                 break;
             }
-            dbg.push_str(&format!("incrementing offset\n"));
             offset += 1;
         }
 
@@ -587,8 +563,6 @@ impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord> BaseGraphTrie<C, A> {
                 let in_port = self.add_edge(new, next_state).expect("new port index");
                 self.trace[new].0.push(self.edge_cnt);
                 self.trace[in_port].0.push(self.edge_cnt + 1);
-                dbg.push_str(&format!("Inserting transition, pushing {:?}\n", next_state));
-                dbg.push_str(&format!("transition = {:?}\n", self.weights[new]));
                 next_states.push(next_state);
             }
             if offset == new_offset {
@@ -596,7 +570,7 @@ impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord> BaseGraphTrie<C, A> {
                 break;
             }
         }
-        (next_states, dbg)
+        next_states
     }
 
     /// Try to convert into a start state for `graph_edge`
