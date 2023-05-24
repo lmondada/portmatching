@@ -664,31 +664,50 @@ impl<C: Clone + Ord + Constraint + Debug, A: Clone + Ord> BaseGraphTrie<C, A> {
             .map(|p| mem::take(&mut self.weights[p]))
             .collect::<Vec<_>>();
         self.set_num_ports(node, self.graph.num_inputs(node), 0);
+        let mut links_to_add = Vec::new();
         for (mut cons, in_port) in constraints.into_iter().zip(transitions) {
-            let mut state = node;
+            let mut states = vec![node];
             if let Some(cons) = cons.as_mut() {
                 let all_cons = cons.to_elementary();
                 let Some((last, rest)) = all_cons.split_last() else {panic!("bla")};
                 for cons in rest.iter().cloned() {
-                    let (states, dbg) = self.insert_transitions(state, cons.clone(), &mut None);
-                    if states.len() != 1 {
-                        dbg!(states);
-                        dbg!(dbg);
-                        panic!("more than one state");
+                    let mut new_states = Vec::new();
+                    for &state in &states {
+                        new_states
+                            .append(&mut self.insert_transitions(state, cons.clone(), &mut None).0);
                     }
-                    state = states[0];
-                    self.weights[state] = self.weights[node].clone();
+                    states = new_states;
+                    for &state in &states {
+                        self.weights[state] = self.weights[node].clone();
+                    }
+                    self.edge_cnt += 1;
                 }
+                self.finalize(|_, _| {});
                 *cons = last.clone();
             }
-            self.set_num_ports(
-                state,
-                self.graph.num_inputs(state),
-                self.graph.num_outputs(state) + 1,
-            );
-            let out_port = self.graph.outputs(state).last().expect("just created");
-            self.weights[out_port] = cons;
-            self.graph.link_ports(out_port, in_port).unwrap();
+            for state in states {
+                self.set_num_ports(
+                    state,
+                    self.graph.num_inputs(state),
+                    self.graph.num_outputs(state) + 1,
+                );
+                let out_port = self.graph.outputs(state).last().expect("just created");
+                self.weights[out_port] = cons.clone();
+                if self.graph.port_link(in_port).is_none() {
+                    self.graph.link_ports(out_port, in_port).unwrap();
+                } else {
+                    let in_node = self.graph.port_node(in_port).expect("invalid port");
+                    // We dont add the new edges now but wait till end to not invalid other ports
+                    links_to_add.push(((state, self.graph.num_outputs(state) - 1), in_node));
+                }
+            }
+        }
+        for ((out_node, offset), in_node) in links_to_add {
+            let out_port = self
+                .graph
+                .output(out_node, offset)
+                .expect("added port above");
+            self.add_edge(out_port, in_node).unwrap();
         }
     }
 }
