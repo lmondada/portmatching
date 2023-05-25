@@ -105,7 +105,7 @@ fn main() {
             .map(|s| s.parse::<usize>().unwrap())
             .collect::<Vec<_>>();
         let n_sizes = sizes.len();
-        let last_size = 0;
+        let mut last_size = 0;
         let mut matcher = TrieMatcher::default();
         for (i, l) in sizes.into_iter().enumerate() {
             assert!(l > last_size);
@@ -126,6 +126,7 @@ fn main() {
                 rmp_serde::to_vec(&opt_matcher).unwrap(),
             )
             .expect(&format!("could not write to {dir}/tries"));
+            last_size = l;
         }
     }
 }
