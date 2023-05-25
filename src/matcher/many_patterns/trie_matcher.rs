@@ -232,8 +232,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use glob::glob;
+    use std::fs;
 
     use itertools::Itertools;
 
