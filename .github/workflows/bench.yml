@@ -28,7 +28,7 @@ jobs:
       
       - name: Generate benchmarks
         run: |
-          cargo bench
+          cargo bench --all-features
 
       - name: Push to repo
         run: |
