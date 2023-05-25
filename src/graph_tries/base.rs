@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeSet, VecDeque},
     fmt::{self, Debug, Display},
-    mem,
+    iter, mem,
 };
 
 use portgraph::{
@@ -277,12 +277,18 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         if out_node == in_node {
             panic!("adding cyclic edge");
         }
-        self.set_num_ports(
-            in_node,
-            self.graph.num_inputs(in_node) + 1,
-            self.graph.num_outputs(in_node),
-        );
-        let in_port = self.graph.inputs(in_node).last().expect("just created");
+        let unlinked_port = self
+            .graph
+            .inputs(in_node)
+            .find(|&p| self.graph.port_link(p).is_none());
+        let in_port = unlinked_port.unwrap_or_else(|| {
+            self.set_num_ports(
+                in_node,
+                self.graph.num_inputs(in_node) + 1,
+                self.graph.num_outputs(in_node),
+            );
+            self.graph.inputs(in_node).last().expect("just created")
+        });
         self.graph.link_ports(out_port, in_port)?;
         self.trace[out_port].1 = true;
         self.trace[in_port].1 = true;
@@ -630,7 +636,12 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         let transitions = self
             .graph
             .outputs(node)
-            .map(|p| self.graph.unlink_port(p).expect("unlinked transition"))
+            .map(|p| {
+                let in_port = self.graph.unlink_port(p).expect("unlinked transition");
+                // note: we are leaving dangling inputs, but we know they will
+                // be recycled by add_edge below
+                self.graph.port_node(in_port).expect("invalid port")
+            })
             .collect::<Vec<_>>();
         let constraints = self
             .graph
@@ -638,19 +649,18 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
             .map(|p| mem::take(&mut self.weights[p]))
             .collect::<Vec<_>>();
         self.set_num_ports(node, self.graph.num_inputs(node), 0);
-        let mut links_to_add = Vec::new();
-        for (mut cons, in_port) in constraints.into_iter().zip(transitions) {
+        for (mut cons, in_node) in constraints.into_iter().zip(transitions) {
             let mut states = vec![node];
             if let Some(cons) = cons.as_mut() {
                 let all_cons = cons.to_elementary();
-                let Some((last, rest)) = all_cons.split_last() else {panic!("bla")};
-                for cons in rest {
+                for (cons, is_last) in mark_last(all_cons) {
                     let mut new_states = Vec::new();
+                    let mut new_state = is_last.then_some(in_node);
                     for &state in &states {
                         new_states.append(&mut self.insert_transitions(
                             state,
                             cons.clone(),
-                            &mut None,
+                            &mut new_state,
                         ));
                     }
                     states = new_states;
@@ -660,31 +670,17 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                     self.edge_cnt += 1;
                 }
                 self.finalize(|_, _| {});
-                *cons = last.clone();
             }
-            for state in states {
-                self.set_num_ports(
-                    state,
-                    self.graph.num_inputs(state),
-                    self.graph.num_outputs(state) + 1,
-                );
-                let out_port = self.graph.outputs(state).last().expect("just created");
-                self.weights[out_port] = cons.clone();
-                if self.graph.port_link(in_port).is_none() {
-                    self.graph.link_ports(out_port, in_port).unwrap();
-                } else {
-                    let in_node = self.graph.port_node(in_port).expect("invalid port");
-                    // We dont add the new edges now but wait till end to not invalid other ports
-                    links_to_add.push(((state, self.graph.num_outputs(state) - 1), in_node));
-                }
-            }
-        }
-        for ((out_node, offset), in_node) in links_to_add {
-            let out_port = self
-                .graph
-                .output(out_node, offset)
-                .expect("added port above");
-            self.add_edge(out_port, in_node).unwrap();
         }
     }
+}
+
+fn mark_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Item, bool)> {
+    let mut all_cons = all_cons.into_iter().peekable();
+    iter::from_fn(move || {
+        all_cons.next().map(|cons| {
+            let last = all_cons.peek().is_none();
+            (cons, last)
+        })
+    })
 }
