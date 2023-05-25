@@ -1,4 +1,4 @@
-// flag
+// flago
 
 use clap::Parser;
 use portmatching::{utils::is_connected, ManyPatternMatcher, TrieMatcher, UnweightedPattern};
