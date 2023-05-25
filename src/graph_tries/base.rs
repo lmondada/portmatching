@@ -650,8 +650,8 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
             .collect::<Vec<_>>();
         self.set_num_ports(node, self.graph.num_inputs(node), 0);
         for (mut cons, in_node) in constraints.into_iter().zip(transitions) {
-            let mut states = vec![node];
             if let Some(cons) = cons.as_mut() {
+                let mut states = vec![node];
                 let all_cons = cons.to_elementary();
                 for (cons, is_last) in mark_last(all_cons) {
                     let mut new_states = Vec::new();
@@ -664,12 +664,16 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                         ));
                     }
                     states = new_states;
-                    for &state in &states {
-                        self.weights[state] = self.weights[node].clone();
+                    if !is_last {
+                        for &state in &states {
+                            self.weights[state] = self.weights[node].clone();
+                        }
                     }
                     self.edge_cnt += 1;
                 }
                 self.finalize(|_, _| {});
+            } else {
+                self.follow_fail(node, &mut Some(in_node));
             }
         }
     }
