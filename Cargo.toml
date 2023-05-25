@@ -13,16 +13,17 @@ bimap = "0.6.2"
 bitvec = "1.0.1"
 portgraph = "0.2.3"
 serde = { version = "1.0.152", features = ["derive"], optional = true }
+smallvec = "1.10.0"
 
 # these are for datagen only
 rand = { version = "0.8.5", optional = true }
 serde_json = { version = "1.0.96", optional = true }
 clap = { version = "4.2.2", features = ["derive"], optional = true }
-smallvec = "1.10.0"
+rmp-serde = { version = "1.1.1", optional = true }
 
 [features]
 serde = ["dep:serde", "portgraph/serde", "smallvec/serde"]
-datagen = ["dep:rand", "dep:serde_json", "dep:clap"]
+datagen = ["dep:rand", "dep:serde_json", "dep:clap", "dep:rmp-serde"]
 
 [dev-dependencies]
 itertools = "0.10.5"

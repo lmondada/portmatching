@@ -110,15 +110,15 @@ fn main() {
             let mut matcher = TrieMatcher::from_patterns(ps);
             println!("Compiling size {l}... ({}/{n_sizes})", i + 1);
             fs::write(
-                format!("{dir}/tries/balanced_{l}.json"),
-                serde_json::to_vec(&matcher).unwrap(),
+                format!("{dir}/tries/balanced_{l}.bin"),
+                rmp_serde::to_vec(&matcher).unwrap(),
             )
             .expect(&format!("could not write to {dir}/tries"));
             println!("Optimising size {l}... ({}/{n_sizes})", i + 1);
             matcher.optimise();
             fs::write(
-                format!("{dir}/tries/optimised_{l}.json"),
-                serde_json::to_vec(&matcher).unwrap(),
+                format!("{dir}/tries/optimised_{l}.bin"),
+                rmp_serde::to_vec(&matcher).unwrap(),
             )
             .expect(&format!("could not write to {dir}/tries"));
         }
