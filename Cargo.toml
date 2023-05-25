@@ -52,3 +52,4 @@ required-features = ["datagen", "serde"]
 [[bench]]
 name = "criterion"
 harness = false
+required-features = ["datagen", "serde"]
