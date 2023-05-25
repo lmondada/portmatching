@@ -1,13 +1,12 @@
 #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 
-mod constraint;
+pub mod constraint;
 pub mod graph_tries;
 pub mod matcher;
 pub mod pattern;
 pub mod utils;
 
-#[doc(inline)]
 pub use constraint::{Constraint, Skeleton};
 
 pub use matcher::{

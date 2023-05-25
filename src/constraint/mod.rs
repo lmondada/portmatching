@@ -1,19 +1,28 @@
+//! Constraints for graph trie transitions.
+//!
+//! To each transition in a graph trie corresponds a constraint. If a constraint
+//! We currently have weighted and unweighted constraints. Constraints
+//! can further be decomposed into ElementaryConstraints, so that a long list of
+//! constraints can be transformed into a tree of constraints for faster traversal.
+
 use std::iter::repeat;
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
 mod elementary;
 mod skeleton;
-pub mod unweighted;
+mod unweighted;
 mod vec;
-pub mod weighted;
+mod weighted;
 
 use elementary::{ElementaryConstraint, PortLabel};
 
 pub use skeleton::Skeleton;
 use smallvec::SmallVec;
-pub(crate) use unweighted::UnweightedAdjConstraint;
-pub(crate) use weighted::WeightedAdjConstraint;
+#[doc(inline)]
+pub use unweighted::UnweightedAdjConstraint;
+#[doc(inline)]
+pub use weighted::WeightedAdjConstraint;
 
 use crate::utils::{follow_path, port_opposite, ZeroRange};
 
@@ -51,15 +60,27 @@ where
     }
 }
 
+/// An addressing scheme for ports.
+///
+/// Port addresses are used to specify which ports a constraint applies to.
+/// Addressing schemes should be invariant under graph isomorphisms.
 pub trait PortAddress<Graph>: Clone + PartialEq + Eq + PartialOrd + Ord {
+    /// Ports the address applies to.
     fn ports(&self, g: Graph) -> Vec<PortIndex>;
 
+    /// Port the address applies to, if it applies to exactly one port.
     fn port(&self, g: Graph) -> Option<PortIndex> {
         let ports = self.ports(g);
         (ports.len() == 1).then_some(ports[0])
     }
 }
 
+/// An addressing scheme for nodes.
+///
+/// This corresponds to a path from root to node. This can be used for any node
+/// in theory. In practice, we only use this for `q` nodes (the number of qubits)
+/// for a circuit-like graph, and the other nodes are addressed by their distance
+/// from the `q` nodes.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SpineAddress {
@@ -74,6 +95,9 @@ impl SpineAddress {
     }
 }
 
+/// An addressing scheme for nodes.
+///
+/// This is used in conjunction to [`SpineAddress`] to address nodes.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NodeAddress {
@@ -104,6 +128,10 @@ impl NodeAddress {
     }
 }
 
+/// An interval of nodes in a graph.
+///
+/// By specifiying a spine address and a range, we can specify a range of nodes
+/// in a graph.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NodeRange {
@@ -156,6 +184,7 @@ impl NodeRange {
     }
 }
 
+/// An addressing scheme for ports.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Address {

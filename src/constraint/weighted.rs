@@ -18,7 +18,9 @@ use super::{Address, ConstraintVec, NodeRange, PortAddress};
 /// Furthermore, a constraint can include a condition on the target node weight
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WeightedAdjConstraint<N> {
+    /// The port is not linked.
     Dangling,
+    /// The port is linked to a node satisfying the constraints.
     Link(ConstraintVec<N>),
 }
 impl<N: Clone + Eq> WeightedAdjConstraint<N> {
