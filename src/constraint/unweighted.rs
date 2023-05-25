@@ -13,7 +13,9 @@ use super::{Address, Constraint, ConstraintVec, ElementaryConstraint, NodeRange,
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum UnweightedAdjConstraint {
+    /// The port is not linked.
     Dangling,
+    /// The port is linked to a node satisfying the constraints.
     Link(ConstraintVec<()>),
 }
 
