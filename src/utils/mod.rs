@@ -10,15 +10,13 @@ pub(crate) mod pre_order;
 pub(crate) mod zero_range;
 pub(crate) use zero_range::ZeroRange;
 
-use std::mem;
-
 pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
 
 #[cfg(test)]
 pub(crate) mod test_utils;
 
-use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap};
+use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
 
 /// Returns the port on the opposite side of the same node
 pub(crate) fn port_opposite(port: PortIndex, graph: &PortGraph) -> Option<PortIndex> {
@@ -44,15 +42,4 @@ pub(crate) fn follow_path(
         curr_node = graph.port_node(in_port)?;
     }
     Some(curr_node)
-}
-
-pub(crate) fn rekey_secmap<K: Into<usize> + Copy, V: Clone + Default>(
-    map: &mut SecondaryMap<K, V>,
-    old: K,
-    new: Option<K>,
-) {
-    let val = mem::take(&mut map[old]);
-    if let Some(new) = new {
-        map[new] = val;
-    }
 }

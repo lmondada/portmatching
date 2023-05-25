@@ -10,10 +10,7 @@ use portgraph::{
     Weights,
 };
 
-use crate::{
-    constraint::Constraint,
-    utils::{cover::untangle_threads, rekey_secmap},
-};
+use crate::{constraint::Constraint, utils::cover::untangle_threads};
 
 use super::{GraphTrie, StateID};
 
@@ -256,8 +253,8 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
             },
             |old, new| {
                 let mut weights = weights.borrow_mut();
-                rekey_secmap(&mut weights.ports, old, new);
-                rekey_secmap(&mut self.trace, old, new)
+                weights.ports.rekey(old, new);
+                self.trace.rekey(old, new)
             },
         )
     }
@@ -605,8 +602,8 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
         self.graph
             .set_num_ports(state, incoming, outgoing, |old, new| {
-                rekey_secmap(&mut self.trace, old, new);
-                rekey_secmap(&mut self.weights.ports, old, new);
+                self.trace.rekey(old, new);
+                self.weights.ports.rekey(old, new);
             });
     }
 
@@ -614,8 +611,8 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         if let Some(in_port) = self.graph.unlink_port(old) {
             self.graph.link_ports(new, in_port).unwrap();
         }
-        rekey_secmap(&mut self.trace, old, Some(new));
-        rekey_secmap(&mut self.weights.ports, old, Some(new));
+        self.trace.rekey(old, Some(new));
+        self.weights.ports.rekey(old, Some(new));
     }
 
     /// Turn nodes into multiple ones by only relying on elementary constraints
