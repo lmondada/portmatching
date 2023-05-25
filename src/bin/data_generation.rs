@@ -1,5 +1,3 @@
-// flago
-
 use clap::Parser;
 use portmatching::{utils::is_connected, ManyPatternMatcher, TrieMatcher, UnweightedPattern};
 use std::{cmp, fs};
@@ -112,6 +110,7 @@ fn main() {
                 serde_json::to_vec(&matcher).unwrap(),
             )
             .expect(&format!("could not write to {dir}/tries"));
+            println!("Optimising size {l}... ({}/{n_sizes})", i + 1);
             matcher.optimise();
             fs::write(
                 format!("{dir}/tries/optimised_{l}.json"),
