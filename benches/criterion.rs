@@ -1,3 +1,4 @@
+use std::fs;
 use std::fs::File;
 
 use criterion::criterion_group;
@@ -11,6 +12,8 @@ use itertools::Itertools;
 
 use portgraph::NodeIndex;
 use portgraph::PortGraph;
+use portmatching::constraint::Address;
+use portmatching::constraint::UnweightedAdjConstraint;
 use portmatching::matcher::many_patterns::{ManyPatternMatcher, NaiveManyMatcher, TrieMatcher};
 use portmatching::matcher::Matcher;
 use portmatching::pattern::UnweightedPattern;
@@ -32,6 +35,26 @@ fn bench_matching<'g, M: Matcher<Graph<'g>>>(
         group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
             let matcher = get_matcher(patterns);
+            b.iter(|| criterion::black_box(matcher.find_matches(graph)));
+        });
+    }
+}
+
+fn bench_matching_xxl(
+    name: &str,
+    group: &mut BenchmarkGroup<WallTime>,
+    prefix: &str,
+    sizes: impl Iterator<Item = usize>,
+    graph: &PortGraph,
+) {
+    group.sample_size(10);
+    for size in sizes {
+        group.throughput(Throughput::Elements(size as u64));
+        let file_name = format!("datasets/xxl/tries/{prefix}_{size}.bin");
+        let matcher: TrieMatcher<UnweightedAdjConstraint, Address, UnweightedPattern> =
+            rmp_serde::from_read(fs::File::open(file_name).unwrap())
+                .expect("could not deserialize trie");
+        group.bench_with_input(BenchmarkId::new(name, size), &size, |b, _| {
             b.iter(|| criterion::black_box(matcher.find_matches(graph)));
         });
     }
@@ -188,6 +211,23 @@ fn perform_benches(c: &mut Criterion) {
             }
             matcher
         },
+    );
+    group.finish();
+
+    let mut group = c.benchmark_group("Many Patterns Matching XXL");
+    bench_matching_xxl(
+        "Balanced Graph Trie",
+        &mut group,
+        "balanced",
+        (1000..=9000).step_by(1000),
+        &graph,
+    );
+    bench_matching_xxl(
+        "Balanced Graph Trie (optimised)",
+        &mut group,
+        "optimised",
+        (1000..=9000).step_by(1000),
+        &graph,
     );
     group.finish();
 }
