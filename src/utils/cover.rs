@@ -1,14 +1,11 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, VecDeque},
-    mem,
 };
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap};
 
 use crate::graph_tries::root_state;
-
-use super::rekey_secmap;
 
 /// Extract new threads into separate nodes.
 ///
@@ -51,6 +48,8 @@ where
         .collect();
     let mut visited: BTreeSet<_> = [root_state()].into();
 
+    // Used within loop, allocate once
+    let mut trace_next_in = BTreeMap::new();
     while let Some(node) = curr_nodes.pop_front() {
         if visited.contains(&node) {
             continue;
@@ -101,10 +100,13 @@ where
             .collect();
         if ins.len() > 1 {
             all_nodes.remove(&node);
-            let mut trace_next_in = SecondaryMap::new();
+            trace_next_in.clear();
             for out_port in graph.outputs(node) {
                 let in_port = graph.port_link(out_port).expect("Disconnected port");
-                trace_next_in[out_port] = mem::take(&mut trace[in_port]);
+                trace_next_in.insert(out_port, trace[in_port].clone());
+                if in_port.index() < trace.capacity() {
+                    trace[in_port] = Default::default();
+                }
             }
             let trace_mut = RefCell::new(&mut trace);
             let trace_curr_mut = RefCell::new(&mut trace_next_in);
@@ -117,8 +119,12 @@ where
                 for old_port in graph.all_ports(old) {
                     let offset = graph.port_offset(old_port).expect("invalid port");
                     let new_port = graph.port_index(new, offset).expect("invalid offset");
-                    trace[new_port] = trace[old_port].clone();
-                    trace_curr[new_port] = trace_curr[old_port].clone();
+                    if trace[old_port] != Default::default() {
+                        trace[new_port] = trace[old_port].clone();
+                    }
+                    if let Some(val) = trace_curr.get(&old_port).cloned() {
+                        trace_curr.insert(new_port, val);
+                    }
                 }
                 clone_state(old, new, graph)
             };
@@ -126,14 +132,22 @@ where
             let new_nodes = split_node(graph, node, &ins, &outs, clone_state, |old, new| {
                 let mut trace = trace_mut.borrow_mut();
                 let mut trace_curr = trace_curr_mut.borrow_mut();
-                rekey_secmap(&mut trace, old, new);
-                rekey_secmap(&mut trace_curr, old, new);
+                trace.rekey(old, new);
+                if let Some(val) = trace_curr.remove(&old) {
+                    if let Some(new) = new {
+                        trace_curr.insert(new, val);
+                    }
+                }
                 rekey(old, new)
             });
             // Restore trace for next inputs
             for out_port in new_nodes.iter().flat_map(|&n| graph.outputs(n)) {
                 let in_port = graph.port_link(out_port).expect("Disconnected port");
-                trace[in_port] = mem::take(&mut trace_next_in[out_port]);
+                if trace_next_in[&out_port] != Default::default()
+                    || in_port.index() < trace.capacity()
+                {
+                    trace[in_port] = trace_next_in.remove(&out_port).unwrap();
+                }
             }
             // Reduce the inds of the new nodes
             for (k, n) in keys.iter().zip(new_nodes) {
