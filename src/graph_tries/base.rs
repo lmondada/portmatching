@@ -620,7 +620,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
 
     /// Turn nodes into multiple ones by only relying on elementary constraints
     pub fn optimise(&mut self) {
-        let cutoff = 10;
+        let cutoff = 100;
         let nodes = self
             .graph
             .nodes_iter()
