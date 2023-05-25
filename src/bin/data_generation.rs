@@ -105,20 +105,25 @@ fn main() {
             .map(|s| s.parse::<usize>().unwrap())
             .collect::<Vec<_>>();
         let n_sizes = sizes.len();
+        let last_size = 0;
+        let mut matcher = TrieMatcher::default();
         for (i, l) in sizes.into_iter().enumerate() {
-            let ps = patterns.iter().take(l).cloned().collect::<Vec<_>>();
-            let mut matcher = TrieMatcher::from_patterns(ps);
+            assert!(l > last_size);
             println!("Compiling size {l}... ({}/{n_sizes})", i + 1);
+            for p in &patterns[last_size..l] {
+                matcher.add_pattern(p.clone());
+            }
             fs::write(
                 format!("{dir}/tries/balanced_{l}.bin"),
                 rmp_serde::to_vec(&matcher).unwrap(),
             )
             .expect(&format!("could not write to {dir}/tries"));
             println!("Optimising size {l}... ({}/{n_sizes})", i + 1);
-            matcher.optimise();
+            let mut opt_matcher = matcher.clone();
+            opt_matcher.optimise();
             fs::write(
                 format!("{dir}/tries/optimised_{l}.bin"),
-                rmp_serde::to_vec(&matcher).unwrap(),
+                rmp_serde::to_vec(&opt_matcher).unwrap(),
             )
             .expect(&format!("could not write to {dir}/tries"));
         }

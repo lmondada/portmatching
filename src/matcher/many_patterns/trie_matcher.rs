@@ -30,6 +30,7 @@ use super::PatternMatch;
 /// [`Deterministic`]: TrieConstruction::Deterministic
 /// [`NonDeterministic`]: TrieConstruction::NonDeterministic
 /// [`Balanced`]: TrieConstruction::Balanced
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieMatcher<C, A, P> {
     strategy: TrieConstruction,
@@ -41,6 +42,7 @@ pub struct TrieMatcher<C, A, P> {
 /// Trie construction strategy.
 ///
 /// See [`TrieMatcher`] for details on the different strategies.
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieConstruction {
     /// Use only deterministic states.
