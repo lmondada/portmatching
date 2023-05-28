@@ -34,7 +34,7 @@ jobs:
         run: |
           cargo run --bin=data_generation --all-features -- -k1000 -N2000 -D3 -d3 -n30 
           cargo run --bin=data_generation --all-features -- -K1 -k100 -N500 -Q20 -D10 -o examples/data
-          cargo run --bin=data_generation --all-features -- -K1 -k9000 -N2000 -D3 -d3 -n30 -X"1000,2000,3000,4000,5000,6000,7000" -o datasets/xxl
+          cargo run --bin=data_generation --all-features -- -K1 -k9000 -N2000 -D3 -d3 -n30 -X"8000,9000" -o datasets/xxl
 
       - name: Push to repo
         run: |

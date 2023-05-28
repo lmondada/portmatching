@@ -219,14 +219,14 @@ fn perform_benches(c: &mut Criterion) {
         "Balanced Graph Trie",
         &mut group,
         "balanced",
-        (1000..=7000).step_by(1000),
+        (1000..=9000).step_by(1000),
         &graph,
     );
     bench_matching_xxl(
         "Balanced Graph Trie (optimised)",
         &mut group,
         "optimised",
-        (1000..=7000).step_by(1000),
+        (1000..=9000).step_by(1000),
         &graph,
     );
     group.finish();
