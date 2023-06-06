@@ -80,12 +80,12 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
 
     /// Spread transitions across nodes to minimise the number of constraints
     /// to check
-    pub fn optimise(&mut self)
+    pub fn optimise(&mut self, cutoff: usize)
     where
         C: ConstraintType,
         C::CT: Ord,
     {
-        self.trie.optimise();
+        self.trie.optimise(cutoff);
     }
 }
 
@@ -593,7 +593,7 @@ mod tests {
                 .collect_vec();
             // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
             let mut matcher = TrieMatcher::from_patterns(patterns.clone());
-            matcher.optimise();
+            matcher.optimise(0);
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
                 .map(|i| {

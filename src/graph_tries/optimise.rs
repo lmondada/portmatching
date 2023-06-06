@@ -3,7 +3,7 @@ use std::{
     iter, mem,
 };
 
-use portgraph::{PortIndex};
+use portgraph::PortIndex;
 
 use crate::{constraint::ConstraintType, Constraint};
 
@@ -17,8 +17,7 @@ where
     A: Clone + Ord,
 {
     /// Turn nodes into multiple ones by only relying on elementary constraints
-    pub fn optimise(&mut self) {
-        let cutoff = 1;
+    pub fn optimise(&mut self, cutoff: usize) {
         let nodes = self
             .graph
             .nodes_iter()
@@ -249,8 +248,6 @@ fn mark_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Item, boo
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use portgraph::{PortGraph, SecondaryMap, Weights};
 
     use crate::{
@@ -305,7 +302,7 @@ mod tests {
             trace: SecondaryMap::new(),
         };
 
-        trie.optimise();
+        trie.optimise(1);
         assert_eq!(
             trie._dotstring(),
             r#"digraph {
