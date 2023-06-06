@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeSet, VecDeque},
     fmt::{self, Debug, Display},
-    iter, mem,
+    mem,
 };
 
 use portgraph::{
@@ -293,7 +293,11 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     }
 
     /// Follow FAIL transition, creating a new state if necessary.
-    fn follow_fail(&mut self, state: StateID, new_state: &mut Option<StateID>) -> PortIndex {
+    pub(super) fn follow_fail(
+        &mut self,
+        state: StateID,
+        new_state: &mut Option<StateID>,
+    ) -> PortIndex {
         let last_port = self.graph.outputs(state).last();
         let (out_port, in_port) = if let Some(out_port) = last_port {
             if self.weights[out_port].is_none() {
@@ -408,7 +412,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         let mut next_states = BTreeSet::new();
         for state in start_states {
             next_states.extend(
-                self.insert_transitions(state, constraint.clone(), &mut new_state)
+                self.insert_transitions(state, constraint.clone(), &mut new_state, true)
                     .into_iter(),
             );
         }
@@ -453,11 +457,12 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     ///
     /// It is important that `transitions` is ordered in the same order as
     /// the ports.
-    fn insert_transitions(
+    pub(super) fn insert_transitions(
         &mut self,
         state: NodeIndex,
         new_cond: C,
         new_state: &mut Option<NodeIndex>,
+        increase_cnt: bool,
     ) -> Vec<NodeIndex> {
         // The states we are transitioning to, to be returned
         let mut next_states = Vec::new();
@@ -507,8 +512,14 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                     .graph
                     .port_link(transition)
                     .expect("Disconnected transition");
-                self.trace[transition].0.push(self.edge_cnt);
-                self.trace[in_port].0.push(self.edge_cnt + 1);
+                if self.trace[transition].0.last() != Some(&self.edge_cnt) {
+                    self.trace[transition].0.push(self.edge_cnt);
+                    if increase_cnt {
+                        self.trace[in_port].0.push(self.edge_cnt + 1);
+                    } else {
+                        self.trace[in_port].0.push(self.edge_cnt);
+                    }
+                }
                 next_states.push(self.graph.port_node(in_port).expect("invalid port"));
                 alread_inserted.insert(curr_cond.clone());
             }
@@ -565,7 +576,11 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                 .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.add_state(false)));
                 let in_port = self.add_edge(new, next_state).expect("new port index");
                 self.trace[new].0.push(self.edge_cnt);
-                self.trace[in_port].0.push(self.edge_cnt + 1);
+                if increase_cnt {
+                    self.trace[in_port].0.push(self.edge_cnt + 1);
+                } else {
+                    self.trace[in_port].0.push(self.edge_cnt);
+                }
                 next_states.push(next_state);
             }
             if offset == new_offset {
@@ -599,7 +614,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         }
     }
 
-    fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
+    pub(super) fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
         self.graph
             .set_num_ports(state, incoming, outgoing, |old, new| {
                 self.trace.rekey(old, new);
@@ -614,77 +629,4 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         self.trace.rekey(old, Some(new));
         self.weights.ports.rekey(old, Some(new));
     }
-
-    /// Turn nodes into multiple ones by only relying on elementary constraints
-    pub fn optimise(&mut self) {
-        let cutoff = 20;
-        let nodes = self
-            .graph
-            .nodes_iter()
-            .filter(|&n| self.graph.num_outputs(n) > cutoff)
-            .collect::<Vec<_>>();
-
-        for node in nodes {
-            self.split_into_tree(node);
-        }
-    }
-
-    fn split_into_tree(&mut self, node: StateID) {
-        let transitions = self
-            .graph
-            .outputs(node)
-            .map(|p| {
-                let in_port = self.graph.unlink_port(p).expect("unlinked transition");
-                // note: we are leaving dangling inputs, but we know they will
-                // be recycled by add_edge below
-                self.graph.port_node(in_port).expect("invalid port")
-            })
-            .collect::<Vec<_>>();
-        let constraints = self
-            .graph
-            .outputs(node)
-            .map(|p| mem::take(&mut self.weights[p]))
-            .collect::<Vec<_>>();
-        self.set_num_ports(node, self.graph.num_inputs(node), 0);
-        // Use within loop, allocate once
-        let mut new_states = Vec::new();
-        for (mut cons, in_node) in constraints.into_iter().zip(transitions) {
-            if let Some(cons) = cons.as_mut() {
-                let mut states = vec![node];
-                let all_cons = cons.to_elementary();
-                for (cons, is_last) in mark_last(all_cons) {
-                    let mut new_state = is_last.then_some(in_node);
-                    new_states.clear();
-                    for &state in &states {
-                        new_states.append(&mut self.insert_transitions(
-                            state,
-                            cons.clone(),
-                            &mut new_state,
-                        ));
-                    }
-                    states.clear();
-                    states.append(&mut new_states);
-                    if !is_last {
-                        for &state in &states {
-                            self.weights[state] = self.weights[node].clone();
-                        }
-                    }
-                    self.edge_cnt += 1;
-                }
-                self.finalize(|_, _| {});
-            } else {
-                self.follow_fail(node, &mut Some(in_node));
-            }
-        }
-    }
-}
-
-fn mark_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Item, bool)> {
-    let mut all_cons = all_cons.into_iter().peekable();
-    iter::from_fn(move || {
-        all_cons.next().map(|cons| {
-            let last = all_cons.peek().is_none();
-            (cons, last)
-        })
-    })
 }

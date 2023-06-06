@@ -2,7 +2,10 @@ use std::fmt::{self, Display};
 
 use portgraph::{NodeIndex, PortGraph};
 
-use super::{Address, Constraint, ConstraintVec, ElementaryConstraint, NodeRange, PortAddress};
+use super::{
+    Address, Constraint, ConstraintType, ConstraintVec, ElementaryConstraint, NodeRange,
+    PortAddress, SpineAddress,
+};
 
 /// Adjacency constraint for unweighted graphs.
 ///
@@ -10,7 +13,7 @@ use super::{Address, Constraint, ConstraintVec, ElementaryConstraint, NodeRange,
 /// This edge is given by one of the outgoing port at the current node.
 /// Either the port exists and is connected to another port, or the port exist
 /// but is unlinked (it is "dangling"), or the port does not exist.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum UnweightedAdjConstraint {
     /// The port is not linked.
@@ -24,7 +27,7 @@ impl UnweightedAdjConstraint {
         Self::Dangling
     }
 
-    pub(crate) fn link(port_addr: Address, no_addr: Vec<NodeRange>) -> Self {
+    pub(crate) fn link(port_addr: Address, no_addr: impl IntoIterator<Item = NodeRange>) -> Self {
         let Address {
             addr,
             label,
@@ -88,6 +91,33 @@ impl Display for UnweightedAdjConstraint {
         match self {
             Self::Dangling => write!(f, "dangling"),
             Self::Link(c) => write!(f, "{:?}", c),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum UnweightedAdjConstraintType {
+    Dangling,
+    PortLabel,
+    Match,
+    NoMatch(SpineAddress),
+}
+
+impl ConstraintType for UnweightedAdjConstraint {
+    type CT = UnweightedAdjConstraintType;
+
+    fn constraint_type(&self) -> Self::CT {
+        match self {
+            Self::Dangling => UnweightedAdjConstraintType::Dangling,
+            Self::Link(ConstraintVec::Vec(c)) if c.len() == 1 => match &c[0] {
+                ElementaryConstraint::PortLabel(_) => UnweightedAdjConstraintType::PortLabel,
+                ElementaryConstraint::NoMatch(addr) => {
+                    UnweightedAdjConstraintType::NoMatch(addr.spine.clone())
+                }
+                ElementaryConstraint::Match(_) => UnweightedAdjConstraintType::Match,
+                _ => panic!("Not an elementary constraint"),
+            },
+            _ => panic!("Not an elementary constraint"),
         }
     }
 }

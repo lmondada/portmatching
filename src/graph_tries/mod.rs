@@ -6,6 +6,7 @@
 //! Traversing the trie from top to bottom along a path that is given
 //! by the input graph yields all matches of the pattern graphs.
 mod base;
+mod optimise;
 #[doc(inline)]
 pub use base::BaseGraphTrie;
 
