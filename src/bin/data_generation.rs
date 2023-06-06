@@ -61,6 +61,7 @@ fn main() {
     let args = Args::parse();
 
     let mut rng = StdRng::seed_from_u64(1234);
+    let optim_cutoff = 20;
 
     // large circuits
     let dir = args.directory;
@@ -120,7 +121,7 @@ fn main() {
             .expect(&format!("could not write to {dir}/tries"));
             println!("Optimising size {l}... ({}/{n_sizes})", i + 1);
             let mut opt_matcher = matcher.clone();
-            opt_matcher.optimise();
+            opt_matcher.optimise(optim_cutoff);
             fs::write(
                 format!("{dir}/tries/optimised_{l}.bin"),
                 rmp_serde::to_vec(&opt_matcher).unwrap(),
