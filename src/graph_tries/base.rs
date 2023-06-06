@@ -22,7 +22,7 @@ use super::{GraphTrie, StateID};
 /// `port_offset` and `address` can be unset (ie None), in which case the
 /// transition Fail is the only one that should be followed. At write time,
 /// an unset field is seen as a license to assign whatever is most convenient.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct NodeWeight<A> {
     pub(crate) out_port: Option<A>,

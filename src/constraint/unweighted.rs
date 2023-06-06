@@ -97,7 +97,6 @@ impl Display for UnweightedAdjConstraint {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum UnweightedAdjConstraintType {
-    Dangling,
     PortLabel,
     Match,
     NoMatch(SpineAddress),
@@ -108,7 +107,7 @@ impl ConstraintType for UnweightedAdjConstraint {
 
     fn constraint_type(&self) -> Self::CT {
         match self {
-            Self::Dangling => UnweightedAdjConstraintType::Dangling,
+            Self::Dangling => UnweightedAdjConstraintType::Match,
             Self::Link(ConstraintVec::Vec(c)) if c.len() == 1 => match &c[0] {
                 ElementaryConstraint::PortLabel(_) => UnweightedAdjConstraintType::PortLabel,
                 ElementaryConstraint::NoMatch(addr) => {
