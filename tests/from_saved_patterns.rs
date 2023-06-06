@@ -77,7 +77,7 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
 }
 
 fn test<'g, M: Matcher<(&'g PortGraph, NodeIndex), Match = PatternMatch>>(
-    matcher: M,
+    matcher: &M,
     graph: &'g PortGraph,
     exp: &[Vec<PatternMatch>],
     n_patterns: usize,
@@ -146,6 +146,7 @@ fn from_saved_patterns() {
         "46",
         "47",
         "48",
+        "49",
     ];
     for test_name in testcases {
         println!("{test_name}...");
@@ -154,12 +155,14 @@ fn from_saved_patterns() {
         let graph = load_graph(&path).unwrap();
         let exp = load_results(&path).unwrap();
 
-        let matcher = TrieMatcher::from_patterns(patterns.clone());
+        let mut matcher = TrieMatcher::from_patterns(patterns.clone());
         // {
         //     let mut path = path.clone();
         //     path.push("trie.gv");
         //     fs::write(path, matcher.dotstring()).unwrap();
         // }
-        test(matcher, &graph, &exp, patterns.len());
+        test(&matcher, &graph, &exp, patterns.len());
+        matcher.optimise(0);
+        test(&matcher, &graph, &exp, patterns.len());
     }
 }
