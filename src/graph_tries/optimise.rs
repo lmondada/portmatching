@@ -119,6 +119,7 @@ where
                         assert!(!is_last, "last transition should not be fail");
                         // This only works because we know node is non-det
                         let mut new_state = if is_first
+                            && fail_transition.is_some()
                             && (fail_node_weight.as_ref().unwrap().out_port.is_none()
                                 || &self.weights[node] == fail_node_weight.as_ref().unwrap())
                         {
