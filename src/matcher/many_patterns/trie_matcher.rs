@@ -6,7 +6,7 @@ use std::{
 use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 
 use crate::{
-    constraint::{Address, PortAddress},
+    constraint::{Address, ConstraintType, PortAddress},
     graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
     pattern::{Edge, Pattern},
     Constraint, ManyPatternMatcher, Matcher, PatternID, Skeleton,
@@ -80,7 +80,11 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
 
     /// Spread transitions across nodes to minimise the number of constraints
     /// to check
-    pub fn optimise(&mut self) {
+    pub fn optimise(&mut self)
+    where
+        C: ConstraintType,
+        C::CT: Ord,
+    {
         self.trie.optimise();
     }
 }

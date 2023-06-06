@@ -5,7 +5,7 @@
 //! can further be decomposed into ElementaryConstraints, so that a long list of
 //! constraints can be transformed into a tree of constraints for faster traversal.
 
-use std::iter::repeat;
+use std::{iter::repeat, ops::RangeInclusive};
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
@@ -14,8 +14,6 @@ mod skeleton;
 mod unweighted;
 mod vec;
 mod weighted;
-
-use elementary::{ElementaryConstraint, PortLabel};
 
 pub use skeleton::Skeleton;
 use smallvec::SmallVec;
@@ -26,7 +24,8 @@ pub use weighted::WeightedAdjConstraint;
 
 use crate::utils::{follow_path, port_opposite, ZeroRange};
 
-pub(self) use vec::ConstraintVec;
+pub(crate) use elementary::{ElementaryConstraint, PortLabel};
+pub(crate) use vec::ConstraintVec;
 
 /// Constraints for graph trie transitions.
 ///
@@ -89,6 +88,14 @@ pub struct SpineAddress {
 }
 
 impl SpineAddress {
+    /// Create a new spine address.
+    pub fn new(path: impl IntoIterator<Item = PortOffset>, offset: usize) -> Self {
+        Self {
+            path: path.into_iter().collect(),
+            offset,
+        }
+    }
+
     /// Node at the address
     fn get_node(&self, g: &PortGraph, root: NodeIndex) -> Option<NodeIndex> {
         follow_path(&self.path, root, g)
@@ -106,6 +113,11 @@ pub struct NodeAddress {
 }
 
 impl NodeAddress {
+    /// Create a new address for a node of a graph.
+    pub fn new(spine: SpineAddress, ind: isize) -> Self {
+        Self { spine, ind }
+    }
+
     /// Node at the address
     fn get_node(&self, g: &PortGraph, root: NodeIndex) -> Option<NodeIndex> {
         let root = self.spine.get_node(g, root)?;
@@ -140,6 +152,14 @@ pub struct NodeRange {
 }
 
 impl NodeRange {
+    /// Create a new node range.
+    pub fn new(spine: SpineAddress, range: RangeInclusive<isize>) -> Self {
+        Self {
+            spine,
+            range: range.try_into().expect("invalid range"),
+        }
+    }
+
     fn contains(&self, node: &NodeAddress) -> bool {
         self.spine == node.spine && self.range.contains(node.ind)
     }
@@ -193,6 +213,16 @@ pub struct Address {
     // no_addr: Vec<NodeRange>,
 }
 
+impl Address {
+    /// Create a new address for a port of a graph.
+    pub fn new(spine: SpineAddress, ind: isize, label: PortLabel) -> Self {
+        Self {
+            addr: NodeAddress::new(spine, ind),
+            label,
+        }
+    }
+}
+
 type Graph<'g> = (&'g PortGraph, NodeIndex);
 impl<'g> PortAddress<Graph<'g>> for Address {
     fn ports(&self, (g, root): Graph<'g>) -> Vec<PortIndex> {
@@ -226,4 +256,17 @@ impl<'g, V> PortAddress<GraphBis<'g, V>> for Address {
 
 fn n_times(n: usize) -> impl Iterator<Item = ()> {
     repeat(()).take(n)
+}
+
+/// Characterise a constraint by a type.
+/// 
+/// Useful to group elementary constraints into similar constraints for optimisation.
+pub trait ConstraintType: Constraint {
+    /// The type of the constraint
+    type CT;
+
+    /// Get the type of the constraint
+    /// 
+    /// May fail if the constraint is not elementary
+    fn constraint_type(&self) -> Self::CT;
 }

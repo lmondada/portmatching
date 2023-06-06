@@ -319,10 +319,6 @@ where
         graph.set_num_ports(node, ins.len(), outs.len(), &mut rekey);
     }
 
-    debug_assert!(graph
-        .ports_iter()
-        .all(|port| graph.port_link(port).is_some()));
-
     nodes
 }
 
