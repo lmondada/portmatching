@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeSet, VecDeque},
-    iter, mem,
+    iter,
 };
 
 use portgraph::PortIndex;
@@ -52,6 +52,7 @@ where
         let transitions = self
             .graph
             .outputs(node)
+            .filter(|&p| self.weights[p].is_some())
             .map(|p| {
                 let in_port = self.graph.unlink_port(p).expect("unlinked transition");
                 // note: we are leaving dangling inputs, but we know they will
@@ -59,22 +60,31 @@ where
                 self.graph.port_node(in_port).expect("invalid port")
             })
             .collect::<Vec<_>>();
+        let mut fail_transition = self
+            .graph
+            .outputs(node)
+            .find(|&p| self.weights[p].is_none())
+            .map(|p| {
+                let in_port = self.graph.unlink_port(p).expect("unlinked transition");
+                self.graph.port_node(in_port).expect("invalid port")
+            });
+        let fail_node_weight = fail_transition.map(|f| self.weight(f).clone());
         let constraints = self
             .graph
             .outputs(node)
-            .map(|p| mem::take(&mut self.weights[p]).map(|c| c.to_elementary()))
+            .filter_map(|p| self.weights[p].take())
+            .map(|c| c.to_elementary())
             .collect::<Vec<_>>();
         let all_constraint_types = constraints
             .iter()
-            .flatten()
             .flatten()
             .map(|c| c.constraint_type())
             .collect::<BTreeSet<_>>();
         let non_det = self.weight(node).non_deterministic;
         // If non-det we space out constraints so they all follow the same layout
         let constraints = constraints.into_iter().map(|c| {
-            let mut c = c?.into_iter().peekable();
-            Some(if non_det {
+            let mut c = c.into_iter().peekable();
+            if non_det {
                 let mut ret = Vec::new();
                 for ct in all_constraint_types.iter() {
                     let Some(next) = c.peek() else { break };
@@ -87,43 +97,56 @@ where
                 ret
             } else {
                 c.map(Some).collect()
-            })
+            }
         });
         self.set_num_ports(node, self.graph.num_inputs(node), 0);
         // Use within loop, allocate once
         let mut new_states = Vec::new();
         for (all_cons, in_node) in constraints.into_iter().zip(transitions) {
-            if let Some(all_cons) = all_cons.as_ref() {
-                let mut states = vec![node];
-                for (cons, is_last) in mark_last(all_cons) {
-                    let mut new_state = is_last.then_some(in_node);
-                    new_states.clear();
-                    for &state in &states {
-                        if let Some(cons) = cons {
-                            new_states.append(&mut self.insert_transitions(
-                                state,
-                                cons.clone(),
-                                &mut new_state,
-                                false,
-                            ));
+            let mut states = vec![node];
+            for (cons, is_first, is_last) in mark_first_last(&all_cons) {
+                new_states.clear();
+                for &state in &states {
+                    if let Some(cons) = cons {
+                        let mut new_state = is_last.then_some(in_node);
+                        new_states.append(&mut self.insert_transitions(
+                            state,
+                            cons.clone(),
+                            &mut new_state,
+                            false,
+                        ));
+                    } else {
+                        assert!(!is_last, "last transition should not be fail");
+                        // This only works because we know node is non-det
+                        let mut new_state = if is_first
+                            && (fail_node_weight.as_ref().unwrap().out_port.is_none()
+                                || &self.weights[node] == fail_node_weight.as_ref().unwrap())
+                        {
+                            fail_transition
                         } else {
-                            // This only works because we know node is non-det
-                            let next_p = self.follow_fail(state, &mut new_state);
-                            new_states.push(self.graph.port_node(next_p).unwrap());
-                        }
+                            None
+                        };
+                        let next_p = self.follow_fail(state, &mut new_state);
+                        new_states.push(self.graph.port_node(next_p).unwrap());
                     }
-                    states.clear();
-                    states.append(&mut new_states);
-                    if !is_last {
-                        for &state in &states {
-                            self.weights[state] = self.weights[node].clone();
-                        }
-                    }
-                    // self.edge_cnt += 1;
                 }
-                self.finalize(|_, _| {});
+                states.clear();
+                states.append(&mut new_states);
+                if !is_last {
+                    for &state in &states {
+                        self.weights[state] = self.weights[node].clone();
+                    }
+                }
+                // self.edge_cnt += 1;
+            }
+            self.finalize(|_, _| {});
+        }
+        if fail_transition.is_some() {
+            if let Some(out_port) = fail_node_weight.unwrap().out_port {
+                let next = self.valid_start_states(&out_port, node, false, &mut fail_transition);
+                debug_assert_eq!(next, vec![fail_transition.unwrap()])
             } else {
-                self.follow_fail(node, &mut Some(in_node));
+                self.follow_fail(node, &mut fail_transition);
             }
         }
     }
@@ -236,12 +259,15 @@ where
     true
 }
 
-fn mark_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Item, bool)> {
+fn mark_first_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Item, bool, bool)> {
     let mut all_cons = all_cons.into_iter().peekable();
+    let mut first_flag = true;
     iter::from_fn(move || {
         all_cons.next().map(|cons| {
             let last = all_cons.peek().is_none();
-            (cons, last)
+            let first = first_flag;
+            first_flag = false;
+            (cons, first, last)
         })
     })
 }
