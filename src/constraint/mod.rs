@@ -259,14 +259,14 @@ fn n_times(n: usize) -> impl Iterator<Item = ()> {
 }
 
 /// Characterise a constraint by a type.
-/// 
+///
 /// Useful to group elementary constraints into similar constraints for optimisation.
 pub trait ConstraintType: Constraint {
     /// The type of the constraint
     type CT;
 
     /// Get the type of the constraint
-    /// 
+    ///
     /// May fail if the constraint is not elementary
     fn constraint_type(&self) -> Self::CT;
 }

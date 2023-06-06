@@ -1,7 +1,8 @@
+use std::fmt::{self, Debug};
 use std::{cmp, ops::RangeInclusive};
 
 /// A range around zero
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub(crate) enum ZeroRange {
     NonEmpty {
@@ -10,6 +11,15 @@ pub(crate) enum ZeroRange {
         end: usize,
     },
     Empty,
+}
+
+impl Debug for ZeroRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NonEmpty { start, end } => write!(f, "{:?}..={:?}", -(*start as isize), end),
+            Self::Empty => write!(f, "∅"),
+        }
+    }
 }
 
 impl ZeroRange {

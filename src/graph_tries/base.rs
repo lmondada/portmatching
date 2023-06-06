@@ -341,7 +341,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         (last_port, in_port)
     }
 
-    fn valid_start_states(
+    pub(super) fn valid_start_states(
         &mut self,
         out_port: &A,
         trie_state: StateID,
