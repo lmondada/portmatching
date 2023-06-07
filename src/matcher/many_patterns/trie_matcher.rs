@@ -85,7 +85,21 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
         C: ConstraintType,
         C::CT: Ord,
     {
-        self.trie.optimise(cutoff);
+        // This callback is a bit different than the other `clone_state`
+        // Here states are never cloned, but existing states are reused
+        // so their matches must be merged
+        let clone_state = |old_state: StateID, new_state: StateID| {
+            let mut old = self
+                .match_states
+                .get(&old_state)
+                .cloned()
+                .unwrap_or_default();
+            self.match_states
+                .entry(new_state)
+                .or_default()
+                .append(&mut old);
+        };
+        self.trie.optimise(clone_state, cutoff);
     }
 }
 
@@ -198,7 +212,6 @@ where
                         &skeleton.get_port_address(out_port),
                         current_states,
                         constraint,
-                        // &mut clone_state,
                     );
                 } else {
                     // All other edges are deterministic
@@ -206,7 +219,6 @@ where
                         &skeleton.get_port_address(out_port),
                         current_states,
                         constraint,
-                        // &mut clone_state,
                     );
                 }
                 first_edge = false;
@@ -225,7 +237,7 @@ where
             );
         };
 
-        let current_states = self.trie.finalize(clone_state);
+        let current_states = self.trie.finalize(root_state(), clone_state);
 
         // Record matching pattern in final states
         for state in current_states {

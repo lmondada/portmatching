@@ -107,7 +107,7 @@ impl ConstraintType for UnweightedAdjConstraint {
 
     fn constraint_type(&self) -> Self::CT {
         match self {
-            Self::Dangling => UnweightedAdjConstraintType::Match,
+            Self::Dangling => UnweightedAdjConstraintType::PortLabel,
             Self::Link(ConstraintVec::Vec(c)) if c.len() == 1 => match &c[0] {
                 ElementaryConstraint::PortLabel(_) => UnweightedAdjConstraintType::PortLabel,
                 ElementaryConstraint::NoMatch(addr) => {

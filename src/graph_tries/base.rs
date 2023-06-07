@@ -12,7 +12,7 @@ use portgraph::{
 
 use crate::{constraint::Constraint, utils::cover::untangle_threads};
 
-use super::{GraphTrie, StateID};
+use super::{optimise::get_next_world_age, GraphTrie, StateID};
 
 /// A node in the GraphTrie.
 ///
@@ -104,7 +104,7 @@ pub struct BaseGraphTrie<C, A> {
 
     // The following are only useful during construction
     pub(super) trace: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
-    pub(super) edge_cnt: usize,
+    pub(super) world_age: usize,
 }
 
 impl<C, A> Debug for BaseGraphTrie<C, A>
@@ -126,7 +126,7 @@ impl<C: Clone, A: Clone> Clone for BaseGraphTrie<C, A> {
             graph: self.graph.clone(),
             weights: self.weights.clone(),
             trace: self.trace.clone(),
-            edge_cnt: self.edge_cnt,
+            world_age: self.world_age,
         }
     }
 }
@@ -140,7 +140,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> Default for BaseGraphTrie<C, A
             graph,
             weights,
             trace,
-            edge_cnt: 0,
+            world_age: 0,
         };
         ret.add_state(true);
         ret
@@ -226,12 +226,12 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     /// In the process, it might clone states. To keep track of the identity
     /// of the states, the caller should pass a callback function that will be
     /// called for each state that is cloned.
-    pub fn finalize<F>(&mut self, mut clone_state: F) -> BTreeSet<NodeIndex>
+    pub fn finalize<F>(&mut self, root: NodeIndex, mut clone_state: F) -> BTreeSet<NodeIndex>
     where
         F: FnMut(StateID, StateID),
     {
         // Reset all trackers
-        self.edge_cnt = 0;
+        self.world_age = 0;
         let trace = mem::take(&mut self.trace);
 
         let weights = RefCell::new(&mut self.weights);
@@ -239,6 +239,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         untangle_threads(
             &mut self.graph,
             trace,
+            root,
             |state, new_state, graph| {
                 let mut weights = weights.borrow_mut();
                 weights[new_state] = weights[state].clone();
@@ -297,6 +298,8 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         &mut self,
         state: StateID,
         new_state: &mut Option<StateID>,
+        from_world_age: usize,
+        to_world_age: usize,
     ) -> PortIndex {
         let last_port = self.graph.outputs(state).last();
         let (out_port, in_port) = if let Some(out_port) = last_port {
@@ -312,9 +315,9 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         } else {
             self.append_transition(state, new_state, None)
         };
-        if self.trace[out_port].0.last() != Some(&self.edge_cnt) {
-            self.trace[out_port].0.push(self.edge_cnt);
-            self.trace[in_port].0.push(self.edge_cnt);
+        if !self.trace[out_port].0.contains(&from_world_age) {
+            self.trace[out_port].0.push(from_world_age);
+            self.trace[in_port].0.push(to_world_age);
         }
         in_port
     }
@@ -347,6 +350,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         trie_state: StateID,
         deterministic: bool,
         new_start_state: &mut Option<StateID>,
+        world_age: usize,
     ) -> Vec<StateID> {
         let mut start_states = Vec::new();
         let mut curr_states: VecDeque<_> = [trie_state].into();
@@ -364,14 +368,14 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                         }
                         let in_port = self.graph.port_link(out_port).expect("Disconnected edge");
                         let node = self.graph.port_node(in_port).expect("invalid port");
-                        if self.trace[out_port].0.last() != Some(&self.edge_cnt) {
-                            self.trace[out_port].0.push(self.edge_cnt);
-                            self.trace[in_port].0.push(self.edge_cnt);
+                        if !self.trace[out_port].0.contains(&world_age) {
+                            self.trace[out_port].0.push(world_age);
+                            self.trace[in_port].0.push(world_age);
                             curr_states.push_back(node);
                         }
                     }
                 }
-                let in_port = self.follow_fail(state, new_start_state);
+                let in_port = self.follow_fail(state, new_start_state, world_age, world_age);
                 curr_states.push_back(self.graph.port_node(in_port).expect("invalid port"));
             }
         }
@@ -402,8 +406,14 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         let start_states = trie_states
             .into_iter()
             .flat_map(|state| {
-                self.valid_start_states(out_port, state, deterministic, &mut new_start_state)
-                    .into_iter()
+                self.valid_start_states(
+                    out_port,
+                    state,
+                    deterministic,
+                    &mut new_start_state,
+                    self.world_age,
+                )
+                .into_iter()
             })
             .collect::<BTreeSet<_>>();
 
@@ -412,13 +422,19 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         let mut next_states = BTreeSet::new();
         for state in start_states {
             next_states.extend(
-                self.insert_transitions(state, constraint.clone(), &mut new_state, true)
-                    .into_iter(),
+                self.insert_transitions(
+                    state,
+                    constraint.clone(),
+                    &mut new_state,
+                    self.world_age,
+                    self.world_age + 1,
+                )
+                .into_iter(),
             );
         }
 
         // Increase edge count for next state
-        self.edge_cnt += 1;
+        self.world_age += 1;
 
         next_states
     }
@@ -462,10 +478,55 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         state: NodeIndex,
         new_cond: C,
         new_state: &mut Option<NodeIndex>,
-        increase_cnt: bool,
+        from_world_age: usize,
+        to_world_age: usize,
     ) -> Vec<NodeIndex> {
+        self.insert_transitions_filtered(
+            state,
+            new_cond,
+            new_state,
+            |_| true,
+            from_world_age,
+            to_world_age,
+        )
+        .0
+    }
+
+    pub(super) fn insert_transitions_ages(
+        &mut self,
+        state: NodeIndex,
+        new_cond: C,
+        new_state: &mut Option<NodeIndex>,
+        from_world_age: usize,
+        to_world_age: usize,
+    ) -> (Vec<NodeIndex>, Vec<usize>) {
+        let (a, _, b) = self.insert_transitions_filtered(
+            state,
+            new_cond,
+            new_state,
+            |_| true,
+            from_world_age,
+            to_world_age,
+        );
+        (a, b)
+    }
+
+    pub(super) fn insert_transitions_filtered<F>(
+        &mut self,
+        state: NodeIndex,
+        new_cond: C,
+        new_state: &mut Option<NodeIndex>,
+        mut transition_filter: F,
+        from_world_age: usize,
+        to_world_age: usize,
+    ) -> (Vec<NodeIndex>, Vec<C>, Vec<usize>)
+    where
+        F: FnMut(&C) -> bool,
+    {
         // The states we are transitioning to, to be returned
         let mut next_states = Vec::new();
+        let mut used_transitions = Vec::new();
+        let mut next_world_ages = Vec::new();
 
         // The transitions, along with the index where they should be inserted
         let mut new_transitions = Vec::new();
@@ -488,6 +549,11 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                 }
                 break;
             };
+            if !transition_filter(curr_cond) {
+                // We ignore transitions that do not pass the filter
+                offset += 1;
+                continue;
+            }
             let Some(merged_cond) = curr_cond.and(&new_cond) else {
                 // We ignore conditions we cannot merge with
                 offset += 1;
@@ -512,15 +578,18 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                     .graph
                     .port_link(transition)
                     .expect("Disconnected transition");
-                if self.trace[transition].0.last() != Some(&self.edge_cnt) {
-                    self.trace[transition].0.push(self.edge_cnt);
-                    if increase_cnt {
-                        self.trace[in_port].0.push(self.edge_cnt + 1);
-                    } else {
-                        self.trace[in_port].0.push(self.edge_cnt);
-                    }
+                if !self.trace[transition].0.contains(&from_world_age) {
+                    self.trace[transition].0.push(from_world_age);
+                    self.trace[in_port].0.push(to_world_age);
                 }
                 next_states.push(self.graph.port_node(in_port).expect("invalid port"));
+                used_transitions.push(new_cond.clone());
+                next_world_ages.push(get_next_world_age(
+                    transition,
+                    in_port,
+                    &self.trace,
+                    from_world_age,
+                ));
                 alread_inserted.insert(curr_cond.clone());
             }
             if merged_cond == new_cond {
@@ -567,7 +636,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                     .graph
                     .port_index(state, PortOffset::new_outgoing(new_offset))
                     .expect("invalid offset");
-                self.weights[new] = Some(transition);
+                self.weights[new] = Some(transition.clone());
                 let next_state = if !self.weights[state].non_deterministic {
                     fallback
                 } else {
@@ -575,20 +644,18 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                 }
                 .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.add_state(false)));
                 let in_port = self.add_edge(new, next_state).expect("new port index");
-                self.trace[new].0.push(self.edge_cnt);
-                if increase_cnt {
-                    self.trace[in_port].0.push(self.edge_cnt + 1);
-                } else {
-                    self.trace[in_port].0.push(self.edge_cnt);
-                }
+                self.trace[new].0.push(from_world_age);
+                self.trace[in_port].0.push(to_world_age);
                 next_states.push(next_state);
+                used_transitions.push(transition);
+                next_world_ages.push(to_world_age)
             }
             if offset == new_offset {
                 // There are no more empty slots. We are done
                 break;
             }
         }
-        next_states
+        (next_states, used_transitions, next_world_ages)
     }
 
     /// Try to convert into a start state for `graph_edge`
