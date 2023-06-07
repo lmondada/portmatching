@@ -118,7 +118,7 @@ fn main() {
                 format!("{dir}/tries/balanced_{l}.bin"),
                 rmp_serde::to_vec(&matcher).unwrap(),
             )
-            .expect(&format!("could not write to {dir}/tries"));
+            .unwrap_or_else(|_| panic!("could not write to {dir}/tries"));
             println!("Optimising size {l}... ({}/{n_sizes})", i + 1);
             let mut opt_matcher = matcher.clone();
             opt_matcher.optimise(optim_cutoff);
@@ -126,7 +126,7 @@ fn main() {
                 format!("{dir}/tries/optimised_{l}.bin"),
                 rmp_serde::to_vec(&opt_matcher).unwrap(),
             )
-            .expect(&format!("could not write to {dir}/tries"));
+            .unwrap_or_else(|_| panic!("could not write to {dir}/tries"));
             last_size = l;
         }
     }
@@ -215,5 +215,5 @@ fn exists_two_cx_gates(circ: &PortGraph) -> bool {
         }
         return true;
     }
-    return false;
+    false
 }
