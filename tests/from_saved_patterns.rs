@@ -161,11 +161,16 @@ fn from_saved_patterns() {
         let mut matcher = TrieMatcher::from_patterns(patterns.clone());
         // {
         //     let mut path = path.clone();
-        //     path.push("trie.gv");
+        //     path.push("trie_bef.gv");
         //     fs::write(path, matcher.dotstring()).unwrap();
         // }
         test(&matcher, &graph, &exp, patterns.len());
         matcher.optimise(1);
+        // {
+        //     let mut path = path.clone();
+        //     path.push("trie_aft.gv");
+        //     fs::write(path, matcher.dotstring()).unwrap();
+        // }
         test(&matcher, &graph, &exp, patterns.len());
     }
 }

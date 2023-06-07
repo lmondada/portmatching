@@ -250,8 +250,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    // use glob::glob;
-    // use std::fs;
+    use glob::glob;
+    use std::fs;
 
     use itertools::Itertools;
 
@@ -627,16 +627,16 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
-            // for entry in glob("pattern_*.json").expect("glob pattern failed") {
-            //     match entry {
-            //         Ok(path) => fs::remove_file(path).expect("Removing file failed"),
-            //         Err(_) => {},
-            //     }
-            // }
-            // for (i, p) in patterns.iter().enumerate() {
-            //     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(p).unwrap()).unwrap();
-            // }
-            // fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            for entry in glob("pattern_*.json").expect("glob pattern failed") {
+                match entry {
+                    Ok(path) => fs::remove_file(path).expect("Removing file failed"),
+                    Err(_) => {},
+                }
+            }
+            for (i, p) in patterns.iter().enumerate() {
+                fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(p).unwrap()).unwrap();
+            }
+            fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
             let patterns = patterns
                 .into_iter()
                 .map(|p| UnweightedPattern::from_graph(p).unwrap())
@@ -659,7 +659,7 @@ mod tests {
                         .collect_vec()
                 })
                 .collect_vec();
-            // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
             let mut matcher = TrieMatcher::from_patterns(patterns.clone());
             matcher.optimise(1);
             let many_matches = matcher.find_matches(&g);

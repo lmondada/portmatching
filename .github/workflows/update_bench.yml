@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [main]
+    branches: [improve-optimise]
 
 name: "Update origin/bench"
 
@@ -23,8 +23,8 @@ jobs:
           git config user.name "GitHub Actions Bot"
           git config user.email "<>"
       
-      - name: Merge main into bench
+      - name: Merge improve-optimise into bench
         run: |
           git switch bench
-          git merge -Xtheirs -m "Merge branch main into bench" origin/main
+          git merge -Xtheirs -m "Merge branch improve-optimise into bench" origin/improve-optimise
           git push
