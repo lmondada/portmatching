@@ -6,7 +6,7 @@ use portgraph::{NodeIndex, SecondaryMap};
 use crate::Constraint;
 
 use super::elementary::ElementaryConstraint;
-use super::{Address, ConstraintVec, NodeRange, PortAddress};
+use super::{Address, ConstraintType, ConstraintVec, NodeRange, PortAddress, SpineAddress};
 
 /// A state transition for a weighted graph trie.
 ///
@@ -99,6 +99,35 @@ impl<N: Debug> Display for WeightedAdjConstraint<N> {
         match self {
             Self::Dangling => write!(f, "dangling"),
             Self::Link(c) => write!(f, "{:?}", c),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum WeightedAdjConstraintType<N> {
+    NodeWeight(N),
+    PortLabel,
+    Match,
+    NoMatch(SpineAddress),
+}
+
+impl<N: Clone + Ord + 'static> ConstraintType for WeightedAdjConstraint<N> {
+    type CT = WeightedAdjConstraintType<N>;
+
+    fn constraint_type(&self) -> Self::CT {
+        match self {
+            Self::Dangling => WeightedAdjConstraintType::PortLabel,
+            Self::Link(ConstraintVec::Vec(c)) if c.len() == 1 => match &c[0] {
+                ElementaryConstraint::NodeWeight(w) => {
+                    WeightedAdjConstraintType::NodeWeight(w.clone())
+                }
+                ElementaryConstraint::PortLabel(_) => WeightedAdjConstraintType::PortLabel,
+                ElementaryConstraint::NoMatch(addr) => {
+                    WeightedAdjConstraintType::NoMatch(addr.spine.clone())
+                }
+                ElementaryConstraint::Match(_) => WeightedAdjConstraintType::Match,
+            },
+            _ => panic!("Not an elementary constraint"),
         }
     }
 }
