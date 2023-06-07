@@ -571,6 +571,7 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
+            println!("test");
             // for entry in glob("pattern_*.json").expect("glob pattern failed") {
             //     match entry {
             //         Ok(path) => fs::remove_file(path).expect("Removing file failed"),
@@ -605,7 +606,64 @@ mod tests {
                 .collect_vec();
             // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
             let mut matcher = TrieMatcher::from_patterns(patterns.clone());
-            matcher.optimise(0);
+            matcher.optimise(10);
+            let many_matches = matcher.find_matches(&g);
+            let many_matches = (0..patterns.len())
+                .map(|i| {
+                    many_matches
+                        .iter()
+                        .filter(|m| m.id == PatternID(i))
+                        .cloned()
+                        .collect_vec()
+                })
+                .collect_vec();
+            prop_assert_eq!(many_matches, single_matches);
+        }
+    }
+
+    proptest! {
+        #[ignore = "a bit slow"]
+        #[test]
+        fn many_graphs_proptest_balanced_optimised_small(
+            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
+            g in gen_portgraph(30, 4, 60)
+        ) {
+            println!("test");
+            // for entry in glob("pattern_*.json").expect("glob pattern failed") {
+            //     match entry {
+            //         Ok(path) => fs::remove_file(path).expect("Removing file failed"),
+            //         Err(_) => {},
+            //     }
+            // }
+            // for (i, p) in patterns.iter().enumerate() {
+            //     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(p).unwrap()).unwrap();
+            // }
+            // fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            let patterns = patterns
+                .into_iter()
+                .map(|p| UnweightedPattern::from_graph(p).unwrap())
+                .collect_vec();
+            let single_matchers = patterns
+                .clone()
+                .into_iter()
+                .map(SinglePatternMatcher::from_pattern)
+                .collect_vec();
+            let single_matches = single_matchers
+                .into_iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    m.find_matches(&g)
+                        .into_iter()
+                        .map(|m| PatternMatch {
+                            id: PatternID(i),
+                            root: m[&patterns[i].root],
+                        })
+                        .collect_vec()
+                })
+                .collect_vec();
+            // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            let mut matcher = TrieMatcher::from_patterns(patterns.clone());
+            matcher.optimise(1);
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
                 .map(|i| {
