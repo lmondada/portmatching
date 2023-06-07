@@ -208,8 +208,9 @@ where
         self.trace[into].0.push(ages[&other_node]);
 
         let mut unmerged: VecDeque<_> = [(into_node, other_node, ages[&other_node])].into();
+        let mut clones = BTreeMap::<_, BTreeSet<_>>::new();
         while let Some((into, other, from_world_age)) = unmerged.pop_front() {
-            clone_state(other, into);
+            clones.entry(into).or_default().insert(other);
             let out_port = self.weights[other].out_port.clone();
             let start_states = if let Some(out_port) = out_port {
                 self.valid_start_states(&out_port, into, true, &mut Some(other), from_world_age)
@@ -229,7 +230,16 @@ where
                 );
             }
         }
-        self.finalize(root, clone_state);
+        for new in self.finalize(root, |old, new| {
+            if let Some(old) = clones.get(&old).cloned() {
+                clones.entry(new).or_default().extend(old);
+            }
+            clone_state(old, new)
+        }) {
+            for &old in clones.get(&new).into_iter().flatten() {
+                clone_state(old, new);
+            }
+        }
     }
 
     fn merge_non_det(
@@ -290,10 +300,12 @@ where
         from_world_age: usize,
     ) -> Vec<(StateID, StateID, usize)> {
         let mut unmerged = Vec::new();
-        let into_p = self.follow_fail(into, &mut Some(other), from_world_age, from_world_age);
-        let into = self.graph.port_node(into_p).expect("invalid port");
-        if into != other {
-            unmerged.push((into, other, from_world_age));
+        if self.graph.num_outputs(other) > 0 {
+            let into_p = self.follow_fail(into, &mut Some(other), from_world_age, from_world_age);
+            let into = self.graph.port_node(into_p).expect("invalid port");
+            if into != other {
+                unmerged.push((into, other, from_world_age));
+            }
         }
         unmerged
     }
