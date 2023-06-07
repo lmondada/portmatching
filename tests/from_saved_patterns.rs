@@ -164,7 +164,7 @@ fn from_saved_patterns() {
         //     fs::write(path, matcher.dotstring()).unwrap();
         // }
         test(&matcher, &graph, &exp, patterns.len());
-        matcher.optimise(0);
+        matcher.optimise(1);
         test(&matcher, &graph, &exp, patterns.len());
     }
 }
