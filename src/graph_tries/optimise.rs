@@ -1,13 +1,13 @@
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     iter,
 };
 
-use portgraph::PortIndex;
+use portgraph::{PortIndex, SecondaryMap};
 
-use crate::{constraint::ConstraintType, Constraint};
+use crate::{constraint::ConstraintType, utils::toposort, Constraint};
 
-use super::{BaseGraphTrie, StateID};
+use super::{root_state, BaseGraphTrie, StateID};
 
 // impl<A: Clone + Ord> BaseGraphTrie<C, A> {
 impl<C, A> BaseGraphTrie<C, A>
@@ -17,11 +17,15 @@ where
     A: Clone + Ord,
 {
     /// Turn nodes into multiple ones by only relying on elementary constraints
-    pub fn optimise(&mut self, cutoff: usize) {
+    pub fn optimise<F>(&mut self, mut clone_state: F, cutoff: usize)
+    where
+        F: FnMut(StateID, StateID),
+    {
         let nodes = self
             .graph
             .nodes_iter()
             .filter(|&n| self.graph.num_outputs(n) > cutoff)
+            .filter(|&n| self.weight(n).non_deterministic)
             .collect::<Vec<_>>();
 
         for node in nodes {
@@ -44,10 +48,11 @@ where
                 }
             })
         } {
-            self.make_deterministic(node);
+            self.make_deterministic(node, &mut clone_state);
         }
     }
 
+    /// Only do this for non-det!
     fn split_into_tree(&mut self, node: StateID) {
         let transitions = self
             .graph
@@ -80,24 +85,19 @@ where
             .flatten()
             .map(|c| c.constraint_type())
             .collect::<BTreeSet<_>>();
-        let non_det = self.weight(node).non_deterministic;
-        // If non-det we space out constraints so they all follow the same layout
+        // We space out constraints so they all follow the same layout
         let constraints = constraints.into_iter().map(|c| {
             let mut c = c.into_iter().peekable();
-            if non_det {
-                let mut ret = Vec::new();
-                for ct in all_constraint_types.iter() {
-                    let Some(next) = c.peek() else { break };
-                    if ct == &next.constraint_type() {
-                        ret.push(c.next());
-                    } else {
-                        ret.push(None);
-                    }
+            let mut ret = Vec::new();
+            for ct in all_constraint_types.iter() {
+                let Some(next) = c.peek() else { break };
+                if ct == &next.constraint_type() {
+                    ret.push(c.next());
+                } else {
+                    ret.push(None);
                 }
-                ret
-            } else {
-                c.map(Some).collect()
             }
+            ret
         });
         self.set_num_ports(node, self.graph.num_inputs(node), 0);
         // Use within loop, allocate once
@@ -113,7 +113,8 @@ where
                             state,
                             cons.clone(),
                             &mut new_state,
-                            false,
+                            0,
+                            0,
                         ));
                     } else {
                         assert!(!is_last, "last transition should not be fail");
@@ -127,7 +128,7 @@ where
                         } else {
                             None
                         };
-                        let next_p = self.follow_fail(state, &mut new_state);
+                        let next_p = self.follow_fail(state, &mut new_state, 0, 0);
                         new_states.push(self.graph.port_node(next_p).unwrap());
                     }
                 }
@@ -138,17 +139,18 @@ where
                         self.weights[state] = self.weights[node].clone();
                     }
                 }
-                // self.edge_cnt += 1;
             }
-            self.finalize(|_, _| {});
+            self.finalize(root_state(), |_, _| {});
         }
         if fail_transition.is_some() {
+            let in_p = self.follow_fail(node, &mut fail_transition, 0, 0);
+            let mut node = self.graph.port_node(in_p).expect("invalid port");
             if let Some(out_port) = fail_node_weight.unwrap().out_port {
-                let next = self.valid_start_states(&out_port, node, false, &mut fail_transition);
-                debug_assert_eq!(next, vec![fail_transition.unwrap()])
-            } else {
-                self.follow_fail(node, &mut fail_transition);
+                let next = self.valid_start_states(&out_port, node, false, &mut fail_transition, 0);
+                assert_eq!(next.len(), 1);
+                node = next[0];
             }
+            debug_assert_eq!(node, fail_transition.unwrap());
         }
     }
 
@@ -156,7 +158,10 @@ where
     ///
     /// Assumes all transitions are either totally ordered or mutually exclusive.
     /// Otherwise calling this is undefined behaviour.
-    fn make_deterministic(&mut self, state: StateID) {
+    fn make_deterministic<F>(&mut self, state: StateID, mut clone_state: F)
+    where
+        F: FnMut(StateID, StateID),
+    {
         if self.graph.num_outputs(state) < 2 {
             // nothing to do
             self.weights[state].non_deterministic = false;
@@ -178,56 +183,177 @@ where
             let Some(next_p) = self.graph.output(state, i+1) else { continue };
             // By assumption all transitions are totally ordered, so we can merge
             // next_p into p
-            self.merge_into(p, next_p);
+            self.merge_into(p, next_p, &mut clone_state);
         }
         self.weights[state].non_deterministic = false;
     }
 
-    fn merge_into(&mut self, into: PortIndex, other: PortIndex) {
+    fn merge_into<F>(&mut self, into: PortIndex, other: PortIndex, mut clone_state: F)
+    where
+        F: FnMut(StateID, StateID),
+    {
+        self.trace = Default::default();
+        let root = self.graph.port_node(other).expect("invalid port");
+        let ages: BTreeMap<_, _> = toposort(&self.graph, root).zip(0..).collect();
+
+        self.trace[other].0.push(ages[&root]);
+        self.trace[into].0.push(ages[&root]);
+
         let into = self.graph.port_link(into).expect("unlinked transition");
+        let into_node = self.graph.port_node(into).expect("invalid port");
         let other = self.graph.port_link(other).expect("unlinked transition");
-        let mut unmerged: VecDeque<_> = [(
-            self.graph.port_node(into).expect("invalid port"),
-            self.graph.port_node(other).expect("invalid port"),
-        )]
-        .into();
-        while let Some((into, other)) = unmerged.pop_front() {
-            for p in self.graph.outputs(other) {
-                let next_p = self.graph.port_link(p).expect("unlinked transition");
-                let next_other = self.graph.port_node(next_p).expect("invalid port");
-                if let Some(cons) = self.weights[p].clone() {
-                    let out_port = self.weights[other]
-                        .out_port
-                        .clone()
-                        .expect("A node with transitions must have out_port");
-                    let start_states =
-                        self.valid_start_states(&out_port, into, true, &mut Some(other));
-                    let mut next_states = BTreeSet::new();
-                    for state in start_states {
-                        next_states.extend(
-                            self.insert_transitions(
-                                state,
-                                cons.clone(),
-                                &mut Some(next_other),
-                                true,
-                            )
-                            .into_iter(),
-                        );
-                    }
-                    for next_into in next_states {
-                        if next_into != next_other {
-                            unmerged.push_back((next_into, next_other));
-                        }
-                    }
-                } else {
-                    let into_p = self.follow_fail(into, &mut Some(next_other));
-                    let next_into = self.graph.port_node(into_p).expect("invalid port");
+        let other_node = self.graph.port_node(other).expect("invalid port");
+
+        self.trace[other].0.push(ages[&other_node]);
+        self.trace[into].0.push(ages[&other_node]);
+
+        let mut unmerged: VecDeque<_> = [(into_node, other_node, ages[&other_node])].into();
+        while let Some((into, other, from_world_age)) = unmerged.pop_front() {
+            clone_state(other, into);
+            let out_port = self.weights[other].out_port.clone();
+            let start_states = if let Some(out_port) = out_port {
+                self.valid_start_states(&out_port, into, true, &mut Some(other), from_world_age)
+            } else {
+                vec![into]
+            };
+            for into in start_states {
+                unmerged.extend(
+                    match (
+                        self.weights[into].non_deterministic,
+                        self.weights[other].non_deterministic,
+                    ) {
+                        (_, true) => self.merge_non_det(into, other, from_world_age, &ages),
+                        (true, false) => self.merge_non_det_det(into, other, from_world_age),
+                        (false, false) => self.merge_det(into, other, from_world_age, &ages),
+                    },
+                );
+            }
+        }
+        self.finalize(root, clone_state);
+    }
+
+    fn merge_non_det(
+        &mut self,
+        into: StateID,
+        other: StateID,
+        from_world_age: usize,
+        ages: &BTreeMap<StateID, usize>,
+    ) -> Vec<(StateID, StateID, usize)> {
+        let mut unmerged = Vec::new();
+        for o in 0..self.graph.num_outputs(other) {
+            let p = self.graph.output(other, o).expect("invalid port");
+            let next_p = self.graph.port_link(p).expect("unlinked transition");
+            let next_other = self.graph.port_node(next_p).expect("invalid port");
+            // Mark the trace
+            if !self.trace[p].0.contains(&from_world_age) {
+                self.trace[p].0.push(from_world_age);
+                self.trace[next_p].0.push(ages[&next_other]);
+            }
+            if let Some(cons) = self.weights[p].clone() {
+                let (next_states, ages) = self.insert_transitions_ages(
+                    into,
+                    cons.clone(),
+                    &mut Some(next_other),
+                    from_world_age,
+                    ages[&next_other],
+                );
+                for (next_into, to_world_age) in next_states.into_iter().zip(ages) {
                     if next_into != next_other {
-                        unmerged.push_back((next_into, next_other));
+                        unmerged.push((next_into, next_other, to_world_age));
                     }
+                }
+            } else if self.weights[into].non_deterministic {
+                let into_p = self.follow_fail(
+                    into,
+                    &mut Some(next_other),
+                    from_world_age,
+                    ages[&next_other],
+                );
+                let from = self.graph.port_link(into_p).expect("unlinked transition");
+                let to_world_age = get_next_world_age(from, into_p, &self.trace, from_world_age);
+                let next_into = self.graph.port_node(into_p).expect("invalid port");
+                if next_into != next_other {
+                    unmerged.push((next_into, next_other, to_world_age));
+                }
+            } else {
+                // Delay world age
+                unmerged.push((into, next_other, from_world_age));
+            }
+        }
+        unmerged
+    }
+
+    fn merge_non_det_det(
+        &mut self,
+        into: StateID,
+        other: StateID,
+        from_world_age: usize,
+    ) -> Vec<(StateID, StateID, usize)> {
+        let mut unmerged = Vec::new();
+        let into_p = self.follow_fail(into, &mut Some(other), from_world_age, from_world_age);
+        let into = self.graph.port_node(into_p).expect("invalid port");
+        if into != other {
+            unmerged.push((into, other, from_world_age));
+        }
+        unmerged
+    }
+
+    fn merge_det(
+        &mut self,
+        into: StateID,
+        other: StateID,
+        from_world_age: usize,
+        ages: &BTreeMap<StateID, usize>,
+    ) -> Vec<(StateID, StateID, usize)> {
+        let mut unmerged = Vec::new();
+        let mut used_constraints = BTreeSet::new();
+        for o in 0..self.graph.num_outputs(other) {
+            let p = self.graph.output(other, o).expect("invalid port");
+            let next_p = self.graph.port_link(p).expect("unlinked transition");
+            let next_other = self.graph.port_node(next_p).expect("invalid port");
+            // Mark the trace
+            if !self.trace[p].0.contains(&from_world_age) {
+                self.trace[p].0.push(from_world_age);
+                self.trace[next_p].0.push(ages[&next_other]);
+            }
+            if let Some(cons) = self.weights[p].clone() {
+                let (next_states, new_used, next_ages) = self.insert_transitions_filtered(
+                    into,
+                    cons.clone(),
+                    &mut Some(next_other),
+                    |t| !used_constraints.contains(t),
+                    from_world_age,
+                    ages[&next_other],
+                );
+                used_constraints.extend(new_used);
+                for (next_into, to_world_age) in next_states.into_iter().zip(next_ages) {
+                    if next_into != next_other {
+                        unmerged.push((next_into, next_other, to_world_age));
+                    }
+                }
+            } else {
+                for transition in self.graph.outputs(into) {
+                    if self.weights[transition].is_some()
+                        && used_constraints.contains(self.weights[transition].as_ref().unwrap())
+                    {
+                        continue;
+                    }
+                    let next_into = self
+                        .graph
+                        .port_link(transition)
+                        .expect("invalid transition");
+                    if !self.trace[transition].0.contains(&from_world_age) {
+                        self.trace[transition].0.push(from_world_age);
+                        self.trace[next_into].0.push(ages[&next_other]);
+                    }
+                    let to_world_age =
+                        get_next_world_age(transition, next_into, &self.trace, from_world_age);
+                    let next_into = self.graph.port_node(next_into).expect("invalid port");
+                    unmerged.push((next_into, next_other, to_world_age));
                 }
             }
         }
+        unmerged
     }
 }
 
@@ -258,6 +384,20 @@ where
         }
     }
     true
+}
+
+pub(super) fn get_next_world_age(
+    from: PortIndex,
+    to: PortIndex,
+    trace: &SecondaryMap<PortIndex, (Vec<usize>, bool)>,
+    from_world_age: usize,
+) -> usize {
+    let pos = trace[from]
+        .0
+        .iter()
+        .position(|&x| x == from_world_age)
+        .unwrap();
+    trace[to].0[pos]
 }
 
 fn mark_first_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Item, bool, bool)> {
@@ -325,20 +465,21 @@ mod tests {
             graph: g,
             weights: weights,
             // these don't matter
-            edge_cnt: 0,
+            world_age: 0,
             trace: SecondaryMap::new(),
         };
 
-        trie.optimise(1);
+        trie.optimise(|_, _| {}, 1);
         assert_eq!(
             trie._dotstring(),
             r#"digraph {
 0 [shape=plain label=<<table border="1"><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([PortLabel(Outgoing(0))])</td></tr></table>>]
 0:out0 -> 5:in0 [style=""]
-1 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"></td></tr></table>>]
+1 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=2 })])</td></tr></table>>]
+1:out0 -> 13:in0 [style=""]
 2 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=2 })])</td></tr></table>>]
 2:out0 -> 3:in1 [style=""]
-3 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td><td port="in1" align="text" colspan="1" cellpadding="1">1</td><td port="in2" align="text" colspan="1" cellpadding="1">2</td></tr><tr><td align="text" border="0" colspan="3"></td></tr></table>>]
+3 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td><td port="in1" align="text" colspan="1" cellpadding="1">1</td></tr><tr><td align="text" border="0" colspan="2"></td></tr></table>>]
 4 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"></td></tr></table>>]
 5 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="2"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([Match(NodeAddress { spine: SpineAddress { path: [], offset: 2 }, ind: 2 })])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: Vec([Match(NodeAddress { spine: SpineAddress { path: [], offset: 0 }, ind: 4 })])</td></tr></table>>]
 5:out0 -> 9:in0 [style=""]
@@ -347,9 +488,9 @@ mod tests {
 6:out0 -> 7:in0 [style=""]
 6:out1 -> 2:in0 [style=""]
 6:out2 -> 8:in0 [style=""]
-7 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="2">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=3 })])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=2 })])</td></tr></table>>]
+7 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="2">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=3 })])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: FAIL</td></tr></table>>]
 7:out0 -> 1:in0 [style=""]
-7:out1 -> 3:in2 [style=""]
+7:out1 -> 12:in0 [style=""]
 8 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=2 })])</td></tr></table>>]
 8:out0 -> 3:in0 [style=""]
 9 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: FAIL</td></tr></table>>]
@@ -358,6 +499,9 @@ mod tests {
 10:out0 -> 11:in0 [style=""]
 11 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 2 }, range: -2..=1 })])</td></tr></table>>]
 11:out0 -> 4:in0 [style=""]
+12 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=2 })])</td></tr></table>>]
+12:out0 -> 13:in1 [style=""]
+13 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td><td port="in1" align="text" colspan="1" cellpadding="1">1</td></tr><tr><td align="text" border="0" colspan="2"></td></tr></table>>]
 }
 "#
         );

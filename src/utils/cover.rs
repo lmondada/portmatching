@@ -5,8 +5,6 @@ use std::{
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap};
 
-use crate::graph_tries::root_state;
-
 /// Extract new threads into separate nodes.
 ///
 /// Threads are paths from the root to leaves of the trie.
@@ -20,6 +18,7 @@ use crate::graph_tries::root_state;
 pub fn untangle_threads<F, G>(
     graph: &mut PortGraph,
     mut trace: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
+    root: NodeIndex,
     mut clone_state: G,
     mut rekey: F,
 ) -> BTreeSet<NodeIndex>
@@ -38,15 +37,15 @@ where
         })
         .collect::<BTreeSet<_>>();
     if all_nodes.is_empty() {
-        return [root_state()].into();
+        return [root].into();
     }
 
     let mut curr_nodes: VecDeque<_> = graph
-        .output_links(root_state())
+        .output_links(root)
         .flatten()
         .map(|p| graph.port_node(p).expect("Invalid port"))
         .collect();
-    let mut visited: BTreeSet<_> = [root_state()].into();
+    let mut visited: BTreeSet<_> = [root].into();
 
     // Used within loop, allocate once
     let mut trace_next_in = BTreeMap::new();
@@ -328,6 +327,8 @@ mod tests {
 
     use portgraph::{PortGraph, PortOffset, SecondaryMap};
 
+    use crate::graph_tries::root_state;
+
     use super::untangle_threads;
 
     #[test]
@@ -379,6 +380,7 @@ mod tests {
         untangle_threads(
             &mut g,
             trace,
+            root_state(),
             |old_n, new_n, _| {
                 new_nodes.insert(old_n, new_n);
             },

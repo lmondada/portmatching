@@ -13,6 +13,9 @@ pub(crate) use zero_range::ZeroRange;
 pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
 
+pub(crate) mod toposort;
+pub(crate) use toposort::toposort;
+
 #[cfg(test)]
 pub(crate) mod test_utils;
 

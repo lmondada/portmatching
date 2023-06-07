@@ -4,7 +4,7 @@ use std::{
 };
 
 use itertools::Itertools;
-// use portgraph::dot::dot_string;
+use portgraph::dot::dot_string;
 use portgraph::{NodeIndex, PortGraph};
 use portmatching::{
     matcher::{
@@ -31,11 +31,11 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<UnweightedPattern>> {
     all_patterns.sort_unstable();
     for path in all_patterns {
         let p: PortGraph = serde_json::from_reader(fs::File::open(&path)?).unwrap();
-        // {
-        //     let mut path = path;
-        //     path.set_extension("gv");
-        //     fs::write(path, dot_string(&p)).unwrap();
-        // }
+        {
+            let mut path = path;
+            path.set_extension("gv");
+            fs::write(path, dot_string(&p)).unwrap();
+        }
         patterns.push(UnweightedPattern::from_graph(p).unwrap());
     }
 
@@ -49,11 +49,11 @@ fn load_graph(dir: &Path) -> io::Result<PortGraph> {
         let path = entry.path();
         if valid_json_file(&file_name, "graph") {
             let graph: PortGraph = serde_json::from_reader(fs::File::open(&path)?).unwrap();
-            // {
-            //     let mut path = path;
-            //     path.set_extension("gv");
-            //     fs::write(path, dot_string(&graph)).unwrap();
-            // }
+            {
+                let mut path = path;
+                path.set_extension("gv");
+                fs::write(path, dot_string(&graph)).unwrap();
+            }
             return Ok(graph);
         }
     }
