@@ -453,17 +453,17 @@ mod tests {
             vec![NodeRange::new(spine0.clone(), -2..=2)],
         ));
         weights[ports[2]] = Some(UnweightedAdjConstraint::link(
-            Address::new(spine0.clone(), 4, PortLabel::Outgoing(0)),
-            vec![NodeRange::new(spine1.clone(), -2..=2)],
+            Address::new(spine0, 4, PortLabel::Outgoing(0)),
+            vec![NodeRange::new(spine1, -2..=2)],
         ));
         weights[ports[3]] = Some(UnweightedAdjConstraint::link(
             Address::new(spine2.clone(), 2, PortLabel::Outgoing(0)),
-            vec![NodeRange::new(spine2.clone(), -2..=1)],
+            vec![NodeRange::new(spine2, -2..=1)],
         ));
 
         let mut trie = BaseGraphTrie {
             graph: g,
-            weights: weights,
+            weights,
             // these don't matter
             world_age: 0,
             trace: SecondaryMap::new(),
