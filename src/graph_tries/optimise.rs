@@ -3,7 +3,6 @@ use std::{
     fmt, iter,
 };
 
-
 use portgraph::{PortIndex, SecondaryMap};
 
 use crate::{constraint::ConstraintType, utils::toposort, Constraint};
@@ -444,18 +443,22 @@ where
     true
 }
 
-pub(super) fn get_next_world_age(
+pub(super) fn get_next_world_age<Map>(
     from: PortIndex,
     to: PortIndex,
-    trace: &SecondaryMap<PortIndex, (Vec<usize>, bool)>,
+    trace: &Map,
     from_world_age: usize,
-) -> usize {
-    let pos = trace[from]
+) -> usize
+where
+    Map: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
+{
+    let pos = trace
+        .get(from)
         .0
         .iter()
         .position(|&x| x == from_world_age)
         .unwrap();
-    trace[to].0[pos]
+    trace.get(to).0[pos]
 }
 
 fn mark_first_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Item, bool, bool)> {

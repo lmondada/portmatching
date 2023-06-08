@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use portgraph::{algorithms as pg, Direction, NodeIndex, PortGraph};
+use portgraph::{algorithms as pg, Direction, NodeIndex, PortGraph, UnmanagedDenseMap};
 
 /// Topological sorting of the graph
 ///
@@ -15,5 +15,11 @@ pub(crate) fn toposort(g: &PortGraph, root: NodeIndex) -> impl Iterator<Item = N
         let Some(link) = g.port_link(p) else { return true };
         desc.contains(&g.port_node(link).expect("invalid port"))
     };
-    pg::toposort_filtered(g, [root], Direction::Outgoing, |_| true, port_filter)
+    pg::toposort_filtered::<UnmanagedDenseMap<_, _>>(
+        g,
+        [root],
+        Direction::Outgoing,
+        |_| true,
+        port_filter,
+    )
 }

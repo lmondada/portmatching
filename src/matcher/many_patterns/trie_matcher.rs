@@ -257,7 +257,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset, SecondaryMap};
+    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset, UnmanagedDenseMap};
 
     use proptest::prelude::*;
 
@@ -460,7 +460,7 @@ mod tests {
         let n0 = p1.add_node(2, 1);
         let n1 = p1.add_node(1, 0);
         link(&mut p1, (n0, 0), (n1, 0));
-        let mut w1 = SecondaryMap::new();
+        let mut w1 = UnmanagedDenseMap::new();
         w1[n0] = 2;
         w1[n1] = 1;
         let mut p2 = PortGraph::new();
@@ -468,14 +468,14 @@ mod tests {
         let n1 = p2.add_node(0, 2);
         link(&mut p2, (n1, 0), (n0, 1));
         link(&mut p2, (n1, 1), (n0, 0));
-        let mut w2 = SecondaryMap::new();
+        let mut w2 = UnmanagedDenseMap::new();
         w2[n0] = 3;
         w2[n1] = 4;
         let mut matcher = TrieMatcher::new(TrieConstruction::Balanced);
         matcher.add_pattern(WeightedPattern::from_weighted_graph(p1, w1).unwrap());
         matcher.add_pattern(WeightedPattern::from_weighted_graph(p2, w2).unwrap());
         let mut g = PortGraph::new();
-        let mut w = SecondaryMap::new();
+        let mut w = UnmanagedDenseMap::new();
         let n0 = g.add_node(0, 2);
         let n1 = g.add_node(2, 1);
         let n2 = g.add_node(2, 1);
