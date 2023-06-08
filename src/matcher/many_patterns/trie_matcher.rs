@@ -84,6 +84,8 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
     where
         C: ConstraintType,
         C::CT: Ord,
+        C: Display,
+        A: Debug,
     {
         // This callback is a bit different than the other `clone_state`
         // Here states are never cloned, but existing states are reused
@@ -628,9 +630,8 @@ mod tests {
             g in gen_portgraph(30, 4, 60)
         ) {
             for entry in glob("pattern_*.json").expect("glob pattern failed") {
-                match entry {
-                    Ok(path) => fs::remove_file(path).expect("Removing file failed"),
-                    Err(_) => {},
+                if let Ok(path) = entry {
+                    fs::remove_file(path).expect("Removing file failed");
                 }
             }
             for (i, p) in patterns.iter().enumerate() {
