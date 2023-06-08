@@ -1,7 +1,7 @@
 use std::fmt;
 use std::{fmt::Debug, fmt::Display};
 
-use portgraph::{NodeIndex, SecondaryMap};
+use portgraph::{NodeIndex, UnmanagedDenseMap};
 
 use crate::Constraint;
 
@@ -48,7 +48,7 @@ impl<N: Clone + Eq> WeightedAdjConstraint<N> {
 impl<N: Clone + Ord + Eq + 'static> Constraint for WeightedAdjConstraint<N> {
     type Graph<'g> = (
         &'g portgraph::PortGraph,
-        &'g SecondaryMap<NodeIndex, N>,
+        &'g UnmanagedDenseMap<NodeIndex, N>,
         NodeIndex,
     );
 

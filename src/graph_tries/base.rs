@@ -6,8 +6,8 @@ use std::{
 };
 
 use portgraph::{
-    dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap,
-    Weights,
+    dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex,
+    PortOffset, UnmanagedDenseMap, Weights,
 };
 
 use crate::{constraint::Constraint, utils::cover::untangle_threads};
@@ -103,7 +103,7 @@ pub struct BaseGraphTrie<C, A> {
     pub(crate) weights: Weights<NodeWeight<A>, EdgeWeight<C>>,
 
     // The following are only useful during construction
-    pub(super) trace: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
+    pub(super) trace: UnmanagedDenseMap<PortIndex, (Vec<usize>, bool)>,
     pub(super) world_age: usize,
 }
 
@@ -688,8 +688,17 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     }
 
     pub(super) fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
+        if state == NodeIndex::new(2) {
+            println!(
+                "N4: ({}, {}) => ({incoming}, {outgoing})",
+                self.graph.num_inputs(state),
+                self.graph.num_outputs(state)
+            );
+        }
         self.graph
             .set_num_ports(state, incoming, outgoing, |old, new| {
+                println!("{old:?} => {new:?}");
+                let new = new.new_index();
                 self.trace.rekey(old, new);
                 self.weights.ports.rekey(old, new);
             });
