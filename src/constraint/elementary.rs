@@ -1,4 +1,5 @@
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
+use std::fmt::Debug;
 
 use super::{NodeAddress, NodeRange};
 
@@ -41,7 +42,7 @@ impl<N: Eq> ElementaryConstraint<N> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum PortLabel {
     Outgoing(usize),
@@ -65,6 +66,15 @@ impl PortLabel {
             Some(self)
         } else {
             None
+        }
+    }
+}
+
+impl Debug for PortLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Outgoing(arg0) => f.write_str(&format!("out({:?})", arg0)),
+            Self::Incoming(arg0) => f.write_str(&format!("in({:?})", arg0)),
         }
     }
 }

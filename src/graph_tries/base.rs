@@ -301,17 +301,16 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         from_world_age: usize,
         to_world_age: usize,
     ) -> PortIndex {
-        let last_port = self.graph.outputs(state).last();
-        let (out_port, in_port) = if let Some(out_port) = last_port {
-            if self.weights[out_port].is_none() {
-                let in_port = self
-                    .graph
-                    .port_link(out_port)
-                    .expect("Disconnected transition");
-                (out_port, in_port)
-            } else {
-                self.append_transition(state, new_state, None)
-            }
+        let fail_port = self.graph.outputs(state).find(|&p| {
+            self.weights[p].is_none()
+                && (!self.trace[p].1 || self.trace[p].0.contains(&from_world_age))
+        });
+        let (out_port, in_port) = if let Some(out_port) = fail_port {
+            let in_port = self
+                .graph
+                .port_link(out_port)
+                .expect("Disconnected transition");
+            (out_port, in_port)
         } else {
             self.append_transition(state, new_state, None)
         };
@@ -572,7 +571,9 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                     }
                     break;
                 }
-            } else if !self.weights[state].non_deterministic || curr_cond == &new_cond {
+            } else if (!self.weights[state].non_deterministic || curr_cond == &new_cond)
+                && (!self.trace[transition].1 || self.trace[transition].0.contains(&from_world_age))
+            {
                 // use existing transition
                 let in_port = self
                     .graph
@@ -591,6 +592,11 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                     from_world_age,
                 ));
                 alread_inserted.insert(curr_cond.clone());
+            } else if !self.weights[state].non_deterministic || curr_cond == &new_cond {
+                // Copy existing transition
+                if alread_inserted.insert(merged_cond.clone()) {
+                    new_transitions.push((offset, merged_cond.clone()));
+                }
             }
             if merged_cond == new_cond {
                 // we've inserted the new condition, our job is done

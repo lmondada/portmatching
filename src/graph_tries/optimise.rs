@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    iter,
+    fmt, iter,
 };
+
 
 use portgraph::{PortIndex, SecondaryMap};
 
@@ -15,6 +16,8 @@ where
     C: ConstraintType + Clone + Ord,
     C::CT: Ord,
     A: Clone + Ord,
+    C: fmt::Display,
+    A: fmt::Debug,
 {
     /// Turn nodes into multiple ones by only relying on elementary constraints
     pub fn optimise<F>(&mut self, mut clone_state: F, cutoff: usize)
@@ -29,7 +32,7 @@ where
             .collect::<Vec<_>>();
 
         for node in nodes {
-            self.split_into_tree(node);
+            self.split_into_tree(node, &mut clone_state);
         }
 
         // Now turn non-deterministic states into deterministic if number of
@@ -53,7 +56,7 @@ where
     }
 
     /// Only do this for non-det!
-    fn split_into_tree(&mut self, node: StateID) {
+    fn split_into_tree<F: FnMut(StateID, StateID)>(&mut self, node: StateID, mut clone_state: F) {
         let transitions = self
             .graph
             .outputs(node)
@@ -140,7 +143,7 @@ where
                     }
                 }
             }
-            self.finalize(root_state(), |_, _| {});
+            self.finalize(root_state(), &mut clone_state);
         }
         if fail_transition.is_some() {
             let in_p = self.follow_fail(node, &mut fail_transition, 0, 0);
@@ -204,13 +207,19 @@ where
         let other = self.graph.port_link(other).expect("unlinked transition");
         let other_node = self.graph.port_node(other).expect("invalid port");
 
+        if into_node == other_node {
+            return;
+        }
+
         self.trace[other].0.push(ages[&other_node]);
         self.trace[into].0.push(ages[&other_node]);
 
         let mut unmerged: VecDeque<_> = [(into_node, other_node, ages[&other_node])].into();
         let mut clones = BTreeMap::<_, BTreeSet<_>>::new();
+        let mut all_ogs = BTreeSet::new();
         while let Some((into, other, from_world_age)) = unmerged.pop_front() {
             clones.entry(into).or_default().insert(other);
+            all_ogs.insert(other);
             let out_port = self.weights[other].out_port.clone();
             let start_states = if let Some(out_port) = out_port {
                 self.valid_start_states(&out_port, into, true, &mut Some(other), from_world_age)
@@ -230,6 +239,30 @@ where
                 );
             }
         }
+
+        // little trick to avoid breaking up OG state in `finalize`
+        for &og in &all_ogs {
+            for p in self.graph.inputs(og) {
+                let v = &mut self.trace[p].0;
+                if v.is_empty() {
+                    v.push(ages[&og]);
+                }
+                debug_assert_eq!(*v, vec![ages[&og]]);
+            }
+        }
+        // let mut weights = Weights::<String, _>::new();
+        // for p in self.graph.ports_iter() {
+        //     weights[p] = format!(
+        //         "{} [{:?}]",
+        //         self.weights[p]
+        //             .as_ref()
+        //             .map(|c| c.to_string())
+        //             .unwrap_or_default(),
+        //         self.trace[p]
+        //     );
+        // }
+        // fs::write(format!("trie_mid_{into:?}.gv"), dot_string_weighted(&self.graph, &weights)).unwrap();
+
         for new in self.finalize(root, |old, new| {
             if let Some(old) = clones.get(&old).cloned() {
                 clones.entry(new).or_default().extend(old);
@@ -249,6 +282,9 @@ where
         from_world_age: usize,
         ages: &BTreeMap<StateID, usize>,
     ) -> Vec<(StateID, StateID, usize)> {
+        if other == into {
+            return vec![];
+        }
         let mut unmerged = Vec::new();
         for o in 0..self.graph.num_outputs(other) {
             let p = self.graph.output(other, o).expect("invalid port");
@@ -287,7 +323,9 @@ where
                 }
             } else {
                 // Delay world age
-                unmerged.push((into, next_other, from_world_age));
+                if into != next_other {
+                    unmerged.push((into, next_other, from_world_age));
+                }
             }
         }
         unmerged
@@ -299,6 +337,9 @@ where
         other: StateID,
         from_world_age: usize,
     ) -> Vec<(StateID, StateID, usize)> {
+        if other == into {
+            return vec![];
+        }
         let mut unmerged = Vec::new();
         if self.graph.num_outputs(other) > 0 {
             let into_p = self.follow_fail(into, &mut Some(other), from_world_age, from_world_age);
@@ -317,6 +358,9 @@ where
         from_world_age: usize,
         ages: &BTreeMap<StateID, usize>,
     ) -> Vec<(StateID, StateID, usize)> {
+        if into == other {
+            return vec![];
+        }
         let mut unmerged = Vec::new();
         let mut used_constraints = BTreeSet::new();
         for o in 0..self.graph.num_outputs(other) {
@@ -361,7 +405,9 @@ where
                     let to_world_age =
                         get_next_world_age(transition, next_into, &self.trace, from_world_age);
                     let next_into = self.graph.port_node(next_into).expect("invalid port");
-                    unmerged.push((next_into, next_other, to_world_age));
+                    if next_into != next_other {
+                        unmerged.push((next_into, next_other, to_world_age));
+                    }
                 }
             }
         }

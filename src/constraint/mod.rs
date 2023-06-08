@@ -5,7 +5,7 @@
 //! can further be decomposed into ElementaryConstraints, so that a long list of
 //! constraints can be transformed into a tree of constraints for faster traversal.
 
-use std::{iter::repeat, ops::RangeInclusive};
+use std::{fmt::Debug, iter::repeat, ops::RangeInclusive};
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
@@ -80,7 +80,7 @@ pub trait PortAddress<Graph>: Clone + PartialEq + Eq + PartialOrd + Ord {
 /// in theory. In practice, we only use this for `q` nodes (the number of qubits)
 /// for a circuit-like graph, and the other nodes are addressed by their distance
 /// from the `q` nodes.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SpineAddress {
     path: SmallVec<[PortOffset; 4]>,
@@ -102,10 +102,16 @@ impl SpineAddress {
     }
 }
 
+impl Debug for SpineAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("({:?}, {})", self.path, self.offset))
+    }
+}
+
 /// An addressing scheme for nodes.
 ///
 /// This is used in conjunction to [`SpineAddress`] to address nodes.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NodeAddress {
     spine: SpineAddress,
@@ -140,15 +146,27 @@ impl NodeAddress {
     }
 }
 
+impl Debug for NodeAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{:?}: {})", self.spine, self.ind))
+    }
+}
+
 /// An interval of nodes in a graph.
 ///
 /// By specifiying a spine address and a range, we can specify a range of nodes
 /// in a graph.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NodeRange {
     spine: SpineAddress,
     range: ZeroRange,
+}
+
+impl Debug for NodeRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{:?} for {:?}", self.range, self.spine,))
+    }
 }
 
 impl NodeRange {
@@ -205,7 +223,7 @@ impl NodeRange {
 }
 
 /// An addressing scheme for ports.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Address {
     addr: NodeAddress,
@@ -220,6 +238,12 @@ impl Address {
             addr: NodeAddress::new(spine, ind),
             label,
         }
+    }
+}
+
+impl Debug for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{:?} [{:?}]", self.addr, self.label))
     }
 }
 

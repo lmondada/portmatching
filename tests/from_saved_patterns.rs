@@ -4,7 +4,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use portgraph::dot::dot_string;
+
 use portgraph::{NodeIndex, PortGraph};
 use portmatching::{
     matcher::{
@@ -31,11 +31,11 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<UnweightedPattern>> {
     all_patterns.sort_unstable();
     for path in all_patterns {
         let p: PortGraph = serde_json::from_reader(fs::File::open(&path)?).unwrap();
-        {
-            let mut path = path;
-            path.set_extension("gv");
-            fs::write(path, dot_string(&p)).unwrap();
-        }
+        // {
+        //     let mut path = path;
+        //     path.set_extension("gv");
+        //     fs::write(path, dot_string(&p)).unwrap();
+        // }
         patterns.push(UnweightedPattern::from_graph(p).unwrap());
     }
 
@@ -48,12 +48,12 @@ fn load_graph(dir: &Path) -> io::Result<PortGraph> {
         let file_name = entry.file_name().to_str().unwrap().to_string();
         let path = entry.path();
         if valid_json_file(&file_name, "graph") {
-            let graph: PortGraph = serde_json::from_reader(fs::File::open(&path)?).unwrap();
-            {
-                let mut path = path;
-                path.set_extension("gv");
-                fs::write(path, dot_string(&graph)).unwrap();
-            }
+            let graph: PortGraph = serde_json::from_reader(fs::File::open(path)?).unwrap();
+            // {
+            //     let mut path = path;
+            //     path.set_extension("gv");
+            //     fs::write(path, dot_string(&graph)).unwrap();
+            // }
             return Ok(graph);
         }
     }
@@ -68,7 +68,7 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
         let path = entry.path();
         if valid_json_file(&file_name, "results") {
             let res: Vec<Vec<PatternMatch>> =
-                serde_json::from_reader(fs::File::open(&path)?).unwrap();
+                serde_json::from_reader(fs::File::open(path)?).unwrap();
             return Ok(res);
         }
     }
@@ -82,7 +82,7 @@ fn test<'g, M: Matcher<(&'g PortGraph, NodeIndex), Match = PatternMatch>>(
     exp: &[Vec<PatternMatch>],
     n_patterns: usize,
 ) {
-    let many_matches = matcher.find_matches(&graph);
+    let many_matches = matcher.find_matches(graph);
     let many_matches = (0..n_patterns)
         .map(|i| {
             many_matches
