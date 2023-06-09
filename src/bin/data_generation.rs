@@ -61,7 +61,7 @@ fn main() {
     let args = Args::parse();
 
     let mut rng = StdRng::seed_from_u64(1234);
-    let optim_cutoff = 20;
+    let optim_cutoff = 10;
 
     // large circuits
     let dir = args.directory;
