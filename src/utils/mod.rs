@@ -14,7 +14,8 @@ pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
 
 pub(crate) mod toposort;
-pub(crate) use toposort::toposort;
+
+pub(crate) mod age;
 
 #[cfg(test)]
 pub(crate) mod test_utils;

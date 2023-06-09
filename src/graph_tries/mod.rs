@@ -7,8 +7,13 @@
 //! by the input graph yields all matches of the pattern graphs.
 mod base;
 mod optimise;
+mod build;
 #[doc(inline)]
 pub use base::BaseGraphTrie;
+
+use base::{EdgeWeight, NodeWeight};
+use build::GraphTrieBuilder;
+use optimise::get_next_world_age;
 
 use portgraph::{NodeIndex, PortGraph, PortIndex};
 

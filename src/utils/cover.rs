@@ -17,7 +17,7 @@ use portgraph::{
 ///
 /// This function extracts the new threads into separate nodes, so that such
 /// crossovers are removed.
-pub fn untangle_threads<F, G, Map>(
+pub fn untangle_threads<F, G, Map, Age>(
     graph: &mut PortGraph,
     mut trace: Map,
     root: NodeIndex,
@@ -27,7 +27,8 @@ pub fn untangle_threads<F, G, Map>(
 where
     F: FnMut(PortIndex, Option<PortIndex>),
     G: FnMut(NodeIndex, NodeIndex, &PortGraph),
-    Map: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
+    Map: SecondaryMap<PortIndex, (Vec<Age>, bool)>,
+    Age: Ord + Clone
 {
     // All nodes that are traversed by at least one thread
     let mut all_nodes = graph
@@ -72,14 +73,14 @@ where
         for p in graph.inputs(node) {
             let vec = trace.get(p).0.as_slice();
             assert!(vec.len() <= 1);
-            let k = vec.first().copied();
+            let k = vec.first().cloned();
             ins.entry(k).or_insert_with(Vec::new).push(p);
         }
-        let keys: Vec<_> = ins.keys().copied().collect();
+        let keys: Vec<_> = ins.keys().cloned().collect();
         let ins: Vec<_> = ins.into_values().collect();
         let outs: Vec<_> = keys
             .iter()
-            .map(|&l| {
+            .map(|l| {
                 graph
                     .outputs(node)
                     .filter(|&p| {
@@ -157,14 +158,14 @@ where
                 for out_port in graph.outputs(n) {
                     let in_port = graph.port_link(out_port).expect("Disconnected port");
                     let (out_trace, out_flag) = trace.get(out_port);
-                    let pos = k.and_then(|k| out_trace.iter().position(|&x| x == k));
+                    let pos = k.as_ref().and_then(|k| out_trace.iter().position(|x| x == k));
                     let new_out = (
-                        pos.map(|pos| vec![out_trace[pos]]).unwrap_or_default(),
+                        pos.map(|pos| vec![out_trace[pos].clone()]).unwrap_or_default(),
                         *out_flag,
                     );
                     let (in_trace, in_flag) = trace.get(in_port);
                     let new_in = (
-                        pos.map(|pos| vec![in_trace[pos]]).unwrap_or_default(),
+                        pos.map(|pos| vec![in_trace[pos].clone()]).unwrap_or_default(),
                         *in_flag,
                     );
                     trace.set(out_port, new_out);

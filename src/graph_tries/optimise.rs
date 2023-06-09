@@ -1,13 +1,13 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    fmt, iter,
+    fmt, fs, iter, mem,
 };
 
-use portgraph::{PortIndex, SecondaryMap};
+use portgraph::{dot::dot_string_weighted, PortIndex, SecondaryMap, Weights};
 
-use crate::{constraint::ConstraintType, utils::toposort, Constraint};
+use crate::{constraint::ConstraintType, utils::age, Constraint};
 
-use super::{root_state, BaseGraphTrie, StateID};
+use super::{root_state, BaseGraphTrie, GraphTrieBuilder, StateID};
 
 // impl<A: Clone + Ord> BaseGraphTrie<C, A> {
 impl<C, A> BaseGraphTrie<C, A>
@@ -105,18 +105,19 @@ where
         // Use within loop, allocate once
         let mut new_states = Vec::new();
         for (all_cons, in_node) in constraints.into_iter().zip(transitions) {
+            let mut trie = mem::take(self).as_builder();
             let mut states = vec![node];
             for (cons, is_first, is_last) in mark_first_last(&all_cons) {
                 new_states.clear();
                 for &state in &states {
                     if let Some(cons) = cons {
                         let mut new_state = is_last.then_some(in_node);
-                        new_states.append(&mut self.insert_transitions(
+                        new_states.append(&mut trie.insert_transitions(
                             state,
                             cons.clone(),
                             &mut new_state,
-                            0,
-                            0,
+                            &0,
+                            &0,
                         ));
                     } else {
                         assert!(!is_last, "last transition should not be fail");
@@ -124,34 +125,38 @@ where
                         let mut new_state = if is_first
                             && fail_transition.is_some()
                             && (fail_node_weight.as_ref().unwrap().out_port.is_none()
-                                || &self.weights[node] == fail_node_weight.as_ref().unwrap())
+                                || &trie.trie.weights[node] == fail_node_weight.as_ref().unwrap())
                         {
                             fail_transition
                         } else {
                             None
                         };
-                        let next_p = self.follow_fail(state, &mut new_state, 0, 0);
-                        new_states.push(self.graph.port_node(next_p).unwrap());
+                        let next_p = trie.follow_fail(state, &mut new_state, &0, &0);
+                        new_states.push(trie.trie.graph.port_node(next_p).unwrap());
                     }
                 }
                 states.clear();
                 states.append(&mut new_states);
                 if !is_last {
                     for &state in &states {
-                        self.weights[state] = self.weights[node].clone();
+                        trie.trie.weights[state] = trie.trie.weights[node].clone();
                     }
                 }
             }
-            self.finalize(root_state(), &mut clone_state);
+            let (trie, _) = trie.finalize(root_state(), &mut clone_state);
+            *self = trie;
         }
         if fail_transition.is_some() {
-            let in_p = self.follow_fail(node, &mut fail_transition, 0, 0);
-            let mut node = self.graph.port_node(in_p).expect("invalid port");
+            let mut trie = mem::take(self).as_builder();
+            let in_p = trie.follow_fail(node, &mut fail_transition, &0, &0);
+            let mut node = trie.trie.graph.port_node(in_p).expect("invalid port");
             if let Some(out_port) = fail_node_weight.unwrap().out_port {
-                let next = self.valid_start_states(&out_port, node, false, &mut fail_transition, 0);
+                let (next, _) =
+                    trie.valid_start_states(&out_port, node, false, &mut fail_transition, &0, &0);
                 assert_eq!(next.len(), 1);
                 node = next[0];
             }
+            *self = trie.skip_finalize();
             debug_assert_eq!(node, fail_transition.unwrap());
         }
     }
@@ -194,62 +199,92 @@ where
     where
         F: FnMut(StateID, StateID),
     {
-        self.trace = Default::default();
         let root = self.graph.port_node(other).expect("invalid port");
-        let ages: BTreeMap<_, _> = toposort(&self.graph, root).zip(0..).collect();
+        let mut ages = BTreeMap::new();
+        let mut max_age = 0;
+        let mut get_or_insert = move |ages: &mut BTreeMap<_, _>, n| {
+            ages.entry(n)
+                .or_insert_with(|| {
+                    max_age += 1;
+                    vec![max_age]
+                })
+                .clone()
+        };
+        let root_age = get_or_insert(&mut ages, root);
 
-        self.trace[other].0.push(ages[&root]);
-        self.trace[into].0.push(ages[&root]);
+        let mut builder = mem::take(self).as_builder();
 
-        let into = self.graph.port_link(into).expect("unlinked transition");
-        let into_node = self.graph.port_node(into).expect("invalid port");
-        let other = self.graph.port_link(other).expect("unlinked transition");
-        let other_node = self.graph.port_node(other).expect("invalid port");
+        builder.trace[other].0.push(root_age.clone());
+        builder.trace[into].0.push(root_age.clone());
+
+        let into = builder
+            .trie
+            .graph
+            .port_link(into)
+            .expect("unlinked transition");
+        let into_node = builder.trie.graph.port_node(into).expect("invalid port");
+        let other = builder
+            .trie
+            .graph
+            .port_link(other)
+            .expect("unlinked transition");
+        let other_node = builder.trie.graph.port_node(other).expect("invalid port");
 
         if into_node == other_node {
             return;
         }
 
-        self.trace[other].0.push(ages[&other_node]);
-        self.trace[into].0.push(ages[&other_node]);
+        let other_age = get_or_insert(&mut ages, other_node);
+        builder.trace[other].0.push(other_age.clone());
+        builder.trace[into].0.push(other_age.clone());
 
-        let mut unmerged: VecDeque<_> = [(into_node, other_node, ages[&other_node])].into();
+        let mut unmerged: VecDeque<_> = [(into_node, other_node, other_age.clone())].into();
         let mut clones = BTreeMap::<_, BTreeSet<_>>::new();
-        let mut all_ogs = BTreeSet::new();
-        while let Some((into, other, from_world_age)) = unmerged.pop_front() {
+        while let Some((into, other, world_age)) = unmerged.pop_front() {
+            println!("Node {:?} -> {into:?} @ {world_age:?}", ages[&other]);
+            if ages.contains_key(&into) {
+                println!("into is other {:?}", ages[&into]);
+            }
             clones.entry(into).or_default().insert(other);
-            all_ogs.insert(other);
-            let out_port = self.weights[other].out_port.clone();
-            let start_states = if let Some(out_port) = out_port {
-                self.valid_start_states(&out_port, into, true, &mut Some(other), from_world_age)
+            for next in builder
+                .trie
+                .graph
+                .output_links(other)
+                .flatten()
+                .map(|p| builder.trie.graph.port_node(p).unwrap())
+            {
+                get_or_insert(&mut ages, next);
+            }
+            let out_port = builder.trie.weights[other].out_port.clone();
+            let (start_states, start_ages) = if let Some(out_port) = out_port {
+                builder.valid_start_states(
+                    &out_port,
+                    into,
+                    true,
+                    &mut Some(other),
+                    &world_age,
+                    &ages[&other],
+                )
             } else {
-                vec![into]
+                (vec![into], vec![world_age])
             };
-            for into in start_states {
+            for (into, world_age) in start_states.into_iter().zip(start_ages) {
                 unmerged.extend(
                     match (
-                        self.weights[into].non_deterministic,
-                        self.weights[other].non_deterministic,
+                        builder.trie.weights[into].non_deterministic,
+                        builder.trie.weights[other].non_deterministic,
                     ) {
-                        (_, true) => self.merge_non_det(into, other, from_world_age, &ages),
-                        (true, false) => self.merge_non_det_det(into, other, from_world_age),
-                        (false, false) => self.merge_det(into, other, from_world_age, &ages),
+                        (_, true) => builder.merge_non_det(into, other, &world_age, &ages),
+                        (true, false) => builder.merge_non_det_det(into, other, &world_age),
+                        (false, false) => builder.merge_det(into, other, &world_age, &ages),
                     },
                 );
             }
         }
-
-        // little trick to avoid breaking up OG state in `finalize`
-        for &og in &all_ogs {
-            for p in self.graph.inputs(og) {
-                let v = &mut self.trace[p].0;
-                if v.is_empty() {
-                    v.push(ages[&og]);
-                }
-                debug_assert_eq!(*v, vec![ages[&og]]);
-            }
-        }
         // let mut weights = Weights::<String, _>::new();
+        // for (&n, &age) in ages.iter() {
+        //     weights[n] = age.to_string();
+        // }
         // for p in self.graph.ports_iter() {
         //     weights[p] = format!(
         //         "{} [{:?}]",
@@ -260,70 +295,96 @@ where
         //         self.trace[p]
         //     );
         // }
-        // fs::write(format!("trie_mid_{into:?}.gv"), dot_string_weighted(&self.graph, &weights)).unwrap();
+        // fs::write("trie_mid.gv", dot_string_weighted(&self.graph, &weights)).unwrap();
 
-        for new in self.finalize(root, |old, new| {
+        // little trick to avoid breaking up OG state in `finalize`
+        for &other in ages.keys() {
+            for p in builder.trie.graph.inputs(other) {
+                let v = &mut builder.trace[p].0;
+                if v.is_empty() {
+                    v.push(ages[&other].clone());
+                }
+                debug_assert_eq!(*v, vec![ages[&other].clone()]);
+            }
+        }
+
+        let (trie, nodes) = builder.finalize(root, |old, new| {
             if let Some(old) = clones.get(&old).cloned() {
                 clones.entry(new).or_default().extend(old);
             }
             clone_state(old, new)
-        }) {
+        });
+        for new in nodes {
             for &old in clones.get(&new).into_iter().flatten() {
                 clone_state(old, new);
             }
         }
+        *self = trie;
     }
+}
 
+type Age = Vec<usize>;
+
+impl<C, A> GraphTrieBuilder<C, A, Age>
+where
+    C: ConstraintType + Clone + Ord,
+    C::CT: Ord,
+    A: Clone + Ord,
+    C: fmt::Display,
+    A: fmt::Debug,
+{
     fn merge_non_det(
         &mut self,
         into: StateID,
         other: StateID,
-        from_world_age: usize,
-        ages: &BTreeMap<StateID, usize>,
-    ) -> Vec<(StateID, StateID, usize)> {
+        world_age: &Age,
+        ages: &BTreeMap<StateID, Age>,
+    ) -> Vec<(StateID, StateID, Age)> {
+        println!("merge_non_det: {other:?} -> {into:?}");
         if other == into {
             return vec![];
         }
         let mut unmerged = Vec::new();
-        for o in 0..self.graph.num_outputs(other) {
-            let p = self.graph.output(other, o).expect("invalid port");
-            let next_p = self.graph.port_link(p).expect("unlinked transition");
-            let next_other = self.graph.port_node(next_p).expect("invalid port");
+        for o in 0..self.trie.graph.num_outputs(other) {
+            let p = self.trie.graph.output(other, o).expect("invalid port");
+            let next_p = self.trie.graph.port_link(p).expect("unlinked transition");
+            let next_other = self.trie.graph.port_node(next_p).expect("invalid port");
             // Mark the trace
-            if !self.trace[p].0.contains(&from_world_age) {
-                self.trace[p].0.push(from_world_age);
-                self.trace[next_p].0.push(ages[&next_other]);
+            if !self.trace[p].0.contains(&world_age) {
+                self.trace[p].0.push(world_age.clone());
+                self.trace[next_p].0.push(ages[&next_other].clone());
             }
-            if let Some(cons) = self.weights[p].clone() {
+            if let Some(cons) = self.trie.weights[p].clone() {
                 let (next_states, ages) = self.insert_transitions_ages(
                     into,
                     cons.clone(),
                     &mut Some(next_other),
-                    from_world_age,
-                    ages[&next_other],
+                    world_age,
+                    &ages[&next_other],
                 );
-                for (next_into, to_world_age) in next_states.into_iter().zip(ages) {
+                for (next_into, next_world_age) in next_states.into_iter().zip(ages) {
                     if next_into != next_other {
-                        unmerged.push((next_into, next_other, to_world_age));
+                        unmerged.push((next_into, next_other, next_world_age));
                     }
                 }
-            } else if self.weights[into].non_deterministic {
-                let into_p = self.follow_fail(
-                    into,
-                    &mut Some(next_other),
-                    from_world_age,
-                    ages[&next_other],
-                );
-                let from = self.graph.port_link(into_p).expect("unlinked transition");
-                let to_world_age = get_next_world_age(from, into_p, &self.trace, from_world_age);
-                let next_into = self.graph.port_node(into_p).expect("invalid port");
+            } else if self.trie.weights[into].non_deterministic {
+                let into_p =
+                    self.follow_fail(into, &mut Some(next_other), world_age, &ages[&next_other]);
+                let from = self
+                    .trie
+                    .graph
+                    .port_link(into_p)
+                    .expect("unlinked transition");
+                let next_world_age =
+                    get_next_world_age(from, into_p, &self.trace, &world_age).clone();
+                let next_into = self.trie.graph.port_node(into_p).expect("invalid port");
                 if next_into != next_other {
-                    unmerged.push((next_into, next_other, to_world_age));
+                    unmerged.push((next_into, next_other, next_world_age));
                 }
             } else {
                 // Delay world age
                 if into != next_other {
-                    unmerged.push((into, next_other, from_world_age));
+                    unmerged.push((into, next_other, world_age.clone()));
                 }
             }
         }
@@ -334,17 +395,18 @@ where
         &mut self,
         into: StateID,
         other: StateID,
-        from_world_age: usize,
-    ) -> Vec<(StateID, StateID, usize)> {
+        world_age: &Age,
+    ) -> Vec<(StateID, StateID, Age)> {
+        println!("merge_non_det_det: {other:?} -> {into:?}");
         if other == into {
             return vec![];
         }
         let mut unmerged = Vec::new();
-        if self.graph.num_outputs(other) > 0 {
-            let into_p = self.follow_fail(into, &mut Some(other), from_world_age, from_world_age);
-            let into = self.graph.port_node(into_p).expect("invalid port");
+        if self.trie.graph.num_outputs(other) > 0 {
+            let into_p = self.follow_fail(into, &mut Some(other), world_age, world_age);
+            let into = self.trie.graph.port_node(into_p).expect("invalid port");
             if into != other {
-                unmerged.push((into, other, from_world_age));
+                unmerged.push((into, other, world_age.clone()));
             }
         }
         unmerged
@@ -354,58 +416,61 @@ where
         &mut self,
         into: StateID,
         other: StateID,
-        from_world_age: usize,
-        ages: &BTreeMap<StateID, usize>,
-    ) -> Vec<(StateID, StateID, usize)> {
+        world_age: &Age,
+        ages: &BTreeMap<StateID, Age>,
+    ) -> Vec<(StateID, StateID, Age)> {
+        println!("merge_det: {other:?} -> {into:?}");
         if into == other {
             return vec![];
         }
         let mut unmerged = Vec::new();
         let mut used_constraints = BTreeSet::new();
-        for o in 0..self.graph.num_outputs(other) {
-            let p = self.graph.output(other, o).expect("invalid port");
-            let next_p = self.graph.port_link(p).expect("unlinked transition");
-            let next_other = self.graph.port_node(next_p).expect("invalid port");
+        for o in 0..self.trie.graph.num_outputs(other) {
+            let p = self.trie.graph.output(other, o).expect("invalid port");
+            let next_p = self.trie.graph.port_link(p).expect("unlinked transition");
+            let next_other = self.trie.graph.port_node(next_p).expect("invalid port");
             // Mark the trace
-            if !self.trace[p].0.contains(&from_world_age) {
-                self.trace[p].0.push(from_world_age);
-                self.trace[next_p].0.push(ages[&next_other]);
+            if !self.trace[p].0.contains(world_age) {
+                self.trace[p].0.push(world_age.clone());
+                self.trace[next_p].0.push(ages[&next_other].clone());
             }
-            if let Some(cons) = self.weights[p].clone() {
+            if let Some(cons) = self.trie.weights[p].clone() {
                 let (next_states, new_used, next_ages) = self.insert_transitions_filtered(
                     into,
                     cons.clone(),
                     &mut Some(next_other),
                     |t| !used_constraints.contains(t),
-                    from_world_age,
-                    ages[&next_other],
+                    world_age,
+                    &ages[&next_other],
                 );
                 used_constraints.extend(new_used);
-                for (next_into, to_world_age) in next_states.into_iter().zip(next_ages) {
+                for (next_into, next_world_age) in next_states.into_iter().zip(next_ages) {
                     if next_into != next_other {
-                        unmerged.push((next_into, next_other, to_world_age));
+                        unmerged.push((next_into, next_other, next_world_age));
                     }
                 }
             } else {
-                for transition in self.graph.outputs(into) {
-                    if self.weights[transition].is_some()
-                        && used_constraints.contains(self.weights[transition].as_ref().unwrap())
+                for transition in self.trie.graph.outputs(into) {
+                    if self.trie.weights[transition].is_some()
+                        && used_constraints
+                            .contains(self.trie.weights[transition].as_ref().unwrap())
                     {
                         continue;
                     }
                     let next_into = self
+                        .trie
                         .graph
                         .port_link(transition)
                         .expect("invalid transition");
-                    if !self.trace[transition].0.contains(&from_world_age) {
-                        self.trace[transition].0.push(from_world_age);
-                        self.trace[next_into].0.push(ages[&next_other]);
+                    if !self.trace[transition].0.contains(&world_age) {
+                        self.trace[transition].0.push(world_age.clone());
+                        self.trace[next_into].0.push(ages[&next_other].clone());
                     }
-                    let to_world_age =
-                        get_next_world_age(transition, next_into, &self.trace, from_world_age);
-                    let next_into = self.graph.port_node(next_into).expect("invalid port");
+                    let next_world_age =
+                        get_next_world_age(transition, next_into, &self.trace, &world_age).clone();
+                    let next_into = self.trie.graph.port_node(next_into).expect("invalid port");
                     if next_into != next_other {
-                        unmerged.push((next_into, next_other, to_world_age));
+                        unmerged.push((next_into, next_other, next_world_age));
                     }
                 }
             }
@@ -443,22 +508,23 @@ where
     true
 }
 
-pub(super) fn get_next_world_age<Map>(
+pub(super) fn get_next_world_age<'a, Map, Age>(
     from: PortIndex,
     to: PortIndex,
-    trace: &Map,
-    from_world_age: usize,
-) -> usize
+    trace: &'a Map,
+    world_age: &Age,
+) -> &'a Age
 where
-    Map: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
+    Map: SecondaryMap<PortIndex, (Vec<Age>, bool)>,
+    Age: Eq,
 {
     let pos = trace
         .get(from)
         .0
         .iter()
-        .position(|&x| x == from_world_age)
+        .position(|x| x == world_age)
         .unwrap();
-    trace.get(to).0[pos]
+    &trace.get(to).0[pos]
 }
 
 fn mark_first_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Item, bool, bool)> {
@@ -522,13 +588,7 @@ mod tests {
             vec![NodeRange::new(spine2, -2..=1)],
         ));
 
-        let mut trie = BaseGraphTrie {
-            graph: g,
-            weights,
-            // these don't matter
-            world_age: 0,
-            trace: SecondaryMap::new(),
-        };
+        let mut trie = BaseGraphTrie { graph: g, weights };
 
         trie.optimise(|_, _| {}, 1);
         assert_eq!(

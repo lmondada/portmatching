@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt::{Debug, Display},
+    fmt::{Debug, Display}, mem,
 };
 
 use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
@@ -203,6 +203,8 @@ where
         // Decompose a pattern into "lines", which are paths in the pattern
         let all_lines = pattern.all_lines();
 
+        let mut trie = mem::take(&mut self.trie).as_builder::<usize>();
+
         for line in all_lines {
             // Traverse the line
             let mut first_edge = true;
@@ -210,14 +212,14 @@ where
                 let constraint = pattern.to_constraint(e);
                 if self.add_non_det(first_edge) {
                     // The edge is added non-deterministically
-                    current_states = self.trie.add_graph_edge_nondet(
+                    current_states = trie.add_graph_edge_nondet(
                         &skeleton.get_port_address(out_port),
                         current_states,
                         constraint,
                     );
                 } else {
                     // All other edges are deterministic
-                    current_states = self.trie.add_graph_edge_det(
+                    current_states = trie.add_graph_edge_det(
                         &skeleton.get_port_address(out_port),
                         current_states,
                         constraint,
@@ -239,7 +241,9 @@ where
             );
         };
 
-        let current_states = self.trie.finalize(root_state(), clone_state);
+        let (trie, current_states) = trie.finalize(root_state(), clone_state);
+
+        self.trie = trie;
 
         // Record matching pattern in final states
         for state in current_states {
