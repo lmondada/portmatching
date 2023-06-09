@@ -486,6 +486,10 @@ where
                         unmerged.push((next_into, next_other, next_age.clone()));
                     }
                 }
+                let last_port = self.trie.graph.outputs(into).last();
+                if last_port.is_none() || self.trie.weights[last_port.unwrap()].is_some() {
+                    self.follow_fail(into, &mut Some(next_other), world_age, &ages[&next_other]);
+                }
             }
         }
         unmerged
