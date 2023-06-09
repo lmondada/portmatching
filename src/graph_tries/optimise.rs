@@ -1,11 +1,13 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    fmt, fs, iter, mem,
+    fmt, iter, mem,
 };
 
-use portgraph::{dot::dot_string_weighted, PortIndex, SecondaryMap, Weights};
+use bitvec::vec::BitVec;
+use itertools::Itertools;
+use portgraph::{algorithms::toposort, Direction, PortIndex, SecondaryMap};
 
-use crate::{constraint::ConstraintType, utils::age, Constraint};
+use crate::{constraint::ConstraintType, graph_tries::trace_insert, Constraint};
 
 use super::{root_state, BaseGraphTrie, GraphTrieBuilder, StateID};
 
@@ -206,45 +208,33 @@ where
             ages.entry(n)
                 .or_insert_with(|| {
                     max_age += 1;
-                    vec![max_age]
+                    Age::from([max_age])
                 })
                 .clone()
         };
-        let root_age = get_or_insert(&mut ages, root);
 
-        let mut builder = mem::take(self).as_builder();
+        let into_link = self.graph.port_link(into).expect("unlinked transition");
+        let other_link = self.graph.port_link(other).expect("unlinked transition");
 
-        builder.trace[other].0.push(root_age.clone());
-        builder.trace[into].0.push(root_age.clone());
+        let next_into = self.graph.port_node(into_link).expect("invalid port");
+        let next_other = self.graph.port_node(other_link).expect("invalid port");
 
-        let into = builder
-            .trie
-            .graph
-            .port_link(into)
-            .expect("unlinked transition");
-        let into_node = builder.trie.graph.port_node(into).expect("invalid port");
-        let other = builder
-            .trie
-            .graph
-            .port_link(other)
-            .expect("unlinked transition");
-        let other_node = builder.trie.graph.port_node(other).expect("invalid port");
-
-        if into_node == other_node {
+        if next_into == next_other {
             return;
         }
 
-        let other_age = get_or_insert(&mut ages, other_node);
-        builder.trace[other].0.push(other_age.clone());
-        builder.trace[into].0.push(other_age.clone());
+        let root_age = get_or_insert(&mut ages, root);
+        let next_age = get_or_insert(&mut ages, next_other);
 
-        let mut unmerged: VecDeque<_> = [(into_node, other_node, other_age.clone())].into();
+        let mut builder = mem::take(self).as_builder();
+        builder.trace[other].0.push(root_age.clone());
+        builder.trace[into].0.push(root_age);
+        builder.trace[other_link].0.push(next_age.clone());
+        builder.trace[into_link].0.push(next_age.clone());
+
+        let mut unmerged: VecDeque<_> = [(next_into, next_other, next_age)].into();
         let mut clones = BTreeMap::<_, BTreeSet<_>>::new();
         while let Some((into, other, world_age)) = unmerged.pop_front() {
-            println!("Node {:?} -> {into:?} @ {world_age:?}", ages[&other]);
-            if ages.contains_key(&into) {
-                println!("into is other {:?}", ages[&into]);
-            }
             clones.entry(into).or_default().insert(other);
             for next in builder
                 .trie
@@ -281,49 +271,78 @@ where
                 );
             }
         }
-        // let mut weights = Weights::<String, _>::new();
-        // for (&n, &age) in ages.iter() {
-        //     weights[n] = age.to_string();
-        // }
-        // for p in self.graph.ports_iter() {
-        //     weights[p] = format!(
-        //         "{} [{:?}]",
-        //         self.weights[p]
-        //             .as_ref()
-        //             .map(|c| c.to_string())
-        //             .unwrap_or_default(),
-        //         self.trace[p]
-        //     );
-        // }
-        // fs::write("trie_mid.gv", dot_string_weighted(&self.graph, &weights)).unwrap();
 
-        // little trick to avoid breaking up OG state in `finalize`
-        for &other in ages.keys() {
-            for p in builder.trie.graph.inputs(other) {
-                let v = &mut builder.trace[p].0;
-                if v.is_empty() {
-                    v.push(ages[&other].clone());
+        // sanitise before `finalize`
+        for state in toposort::<BitVec>(&builder.trie.graph, [root_state()], Direction::Outgoing) {
+            if ages.contains_key(&state) {
+                for p in builder.trie.graph.inputs(state) {
+                    if builder.trace[p].0.is_empty() {
+                        builder.trace[p].0 = vec![ages[&state].clone()];
+                    }
                 }
-                debug_assert_eq!(*v, vec![ages[&other].clone()]);
+            }
+            let valid_ages = builder
+                .trie
+                .graph
+                .inputs(state)
+                .flat_map(|p| builder.trace[p].0.iter())
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            if valid_ages.is_empty() {
+                continue;
+            }
+            for p in builder.trie.graph.outputs(state) {
+                let next_p = builder.trie.graph.port_link(p).expect("invalid link");
+                let [t1, t2] = builder
+                    .trace
+                    .get_disjoint_mut([p, next_p])
+                    .expect("link to itself");
+                sanitize_ages(&mut t1.0, &mut t2.0, &valid_ages);
             }
         }
-
-        let (trie, nodes) = builder.finalize(root, |old, new| {
-            if let Some(old) = clones.get(&old).cloned() {
-                clones.entry(new).or_default().extend(old);
-            }
-            clone_state(old, new)
-        });
-        for new in nodes {
-            for &old in clones.get(&new).into_iter().flatten() {
-                clone_state(old, new);
+        let (trie, new_nodes) = builder.finalize(root, &mut clone_state);
+        for (into, new_nodes) in new_nodes {
+            for (new, age) in new_nodes.into_iter() {
+                let Some(age) = age else { continue };
+                for &old in clones.get(&into).into_iter().flatten() {
+                    if !age.is_superset(&ages[&old]) {
+                        continue;
+                    }
+                    clone_state(old, new);
+                }
             }
         }
         *self = trie;
     }
 }
 
-type Age = Vec<usize>;
+fn sanitize_ages(
+    out_ages: &mut Vec<BTreeSet<usize>>,
+    in_ages: &mut Vec<BTreeSet<usize>>,
+    valid_ages: &BTreeSet<BTreeSet<usize>>,
+) {
+    let new_out_ages = out_ages
+        .iter()
+        .flat_map(|age| valid_ages.iter().filter(|v| v.is_superset(age)).cloned())
+        .unique()
+        .collect_vec();
+    let new_in_ages = new_out_ages
+        .iter()
+        .map(|age| {
+            let mut new_in = BTreeSet::<usize>::new();
+            for (old_out_age, old_in_age) in out_ages.iter().zip(in_ages.iter()) {
+                if old_out_age.is_subset(age) {
+                    new_in.extend(old_in_age);
+                }
+            }
+            new_in
+        })
+        .collect_vec();
+    *out_ages = new_out_ages;
+    *in_ages = new_in_ages;
+}
+
+type Age = BTreeSet<usize>;
 
 impl<C, A> GraphTrieBuilder<C, A, Age>
 where
@@ -340,7 +359,6 @@ where
         world_age: &Age,
         ages: &BTreeMap<StateID, Age>,
     ) -> Vec<(StateID, StateID, Age)> {
-        println!("merge_non_det: {other:?} -> {into:?}");
         if other == into {
             return vec![];
         }
@@ -350,10 +368,7 @@ where
             let next_p = self.trie.graph.port_link(p).expect("unlinked transition");
             let next_other = self.trie.graph.port_node(next_p).expect("invalid port");
             // Mark the trace
-            if !self.trace[p].0.contains(&world_age) {
-                self.trace[p].0.push(world_age.clone());
-                self.trace[next_p].0.push(ages[&next_other].clone());
-            }
+            trace_insert(&mut self.trace, p, next_p, world_age, &ages[&next_other]);
             if let Some(cons) = self.trie.weights[p].clone() {
                 let (next_states, ages) = self.insert_transitions_ages(
                     into,
@@ -376,7 +391,7 @@ where
                     .port_link(into_p)
                     .expect("unlinked transition");
                 let next_world_age =
-                    get_next_world_age(from, into_p, &self.trace, &world_age).clone();
+                    get_next_world_age(from, into_p, &self.trace, world_age).clone();
                 let next_into = self.trie.graph.port_node(into_p).expect("invalid port");
                 if next_into != next_other {
                     unmerged.push((next_into, next_other, next_world_age));
@@ -397,7 +412,6 @@ where
         other: StateID,
         world_age: &Age,
     ) -> Vec<(StateID, StateID, Age)> {
-        println!("merge_non_det_det: {other:?} -> {into:?}");
         if other == into {
             return vec![];
         }
@@ -419,7 +433,6 @@ where
         world_age: &Age,
         ages: &BTreeMap<StateID, Age>,
     ) -> Vec<(StateID, StateID, Age)> {
-        println!("merge_det: {other:?} -> {into:?}");
         if into == other {
             return vec![];
         }
@@ -430,10 +443,8 @@ where
             let next_p = self.trie.graph.port_link(p).expect("unlinked transition");
             let next_other = self.trie.graph.port_node(next_p).expect("invalid port");
             // Mark the trace
-            if !self.trace[p].0.contains(world_age) {
-                self.trace[p].0.push(world_age.clone());
-                self.trace[next_p].0.push(ages[&next_other].clone());
-            }
+            let next_age = trace_insert(&mut self.trace, p, next_p, world_age, &ages[&next_other]);
+            debug_assert_eq!(next_age, &ages[&next_other]);
             if let Some(cons) = self.trie.weights[p].clone() {
                 let (next_states, new_used, next_ages) = self.insert_transitions_filtered(
                     into,
@@ -462,15 +473,17 @@ where
                         .graph
                         .port_link(transition)
                         .expect("invalid transition");
-                    if !self.trace[transition].0.contains(&world_age) {
-                        self.trace[transition].0.push(world_age.clone());
-                        self.trace[next_into].0.push(ages[&next_other].clone());
-                    }
-                    let next_world_age =
-                        get_next_world_age(transition, next_into, &self.trace, &world_age).clone();
+                    let next_age = trace_insert(
+                        &mut self.trace,
+                        transition,
+                        next_into,
+                        world_age,
+                        &ages[&next_other],
+                    )
+                    .clone();
                     let next_into = self.trie.graph.port_node(next_into).expect("invalid port");
                     if next_into != next_other {
-                        unmerged.push((next_into, next_other, next_world_age));
+                        unmerged.push((next_into, next_other, next_age.clone()));
                     }
                 }
             }
@@ -542,7 +555,7 @@ fn mark_first_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Ite
 
 #[cfg(test)]
 mod tests {
-    use portgraph::{PortGraph, SecondaryMap, Weights};
+    use portgraph::{PortGraph, Weights};
 
     use crate::{
         constraint::{Address, NodeRange, PortLabel, SpineAddress, UnweightedAdjConstraint},
@@ -594,35 +607,32 @@ mod tests {
         assert_eq!(
             trie._dotstring(),
             r#"digraph {
-0 [shape=plain label=<<table border="1"><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([PortLabel(Outgoing(0))])</td></tr></table>>]
+0 [shape=plain label=<<table border="1"><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([PortLabel(out(0))])</td></tr></table>>]
 0:out0 -> 5:in0 [style=""]
-1 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=2 })])</td></tr></table>>]
-1:out0 -> 13:in0 [style=""]
-2 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=2 })])</td></tr></table>>]
+1 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=2 for ([], 1))])</td></tr></table>>]
+1:out0 -> 3:in2 [style=""]
+2 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td><td port="in1" align="text" colspan="1" cellpadding="1">1</td></tr><tr><td align="text" border="0" colspan="2">[()]</td></tr><tr><td port="out0" align="text" colspan="2" cellpadding="1">0: Vec([NoMatch(-2..=2 for ([], 1))])</td></tr></table>>]
 2:out0 -> 3:in1 [style=""]
-3 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td><td port="in1" align="text" colspan="1" cellpadding="1">1</td></tr><tr><td align="text" border="0" colspan="2"></td></tr></table>>]
+3 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td><td port="in1" align="text" colspan="1" cellpadding="1">1</td><td port="in2" align="text" colspan="1" cellpadding="1">2</td></tr><tr><td align="text" border="0" colspan="3"></td></tr></table>>]
 4 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"></td></tr></table>>]
-5 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="2"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([Match(NodeAddress { spine: SpineAddress { path: [], offset: 2 }, ind: 2 })])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: Vec([Match(NodeAddress { spine: SpineAddress { path: [], offset: 0 }, ind: 4 })])</td></tr></table>>]
+5 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="2"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([Match(([], 2): 2))])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: Vec([Match(([], 0): 4))])</td></tr></table>>]
 5:out0 -> 9:in0 [style=""]
 5:out1 -> 6:in0 [style=""]
-6 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="3" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="3">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 0 }, range: -2..=3 })])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 0 }, range: -2..=2 })])</td><td port="out2" align="text" colspan="1" cellpadding="1">2: FAIL</td></tr></table>>]
+6 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="3" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="3">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=3 for ([], 0))])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: Vec([NoMatch(-2..=2 for ([], 0))])</td><td port="out2" align="text" colspan="1" cellpadding="1">2: FAIL</td></tr></table>>]
 6:out0 -> 7:in0 [style=""]
 6:out1 -> 2:in0 [style=""]
 6:out2 -> 8:in0 [style=""]
-7 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="2">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=3 })])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: FAIL</td></tr></table>>]
+7 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="2">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=3 for ([], 1))])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: FAIL</td></tr></table>>]
 7:out0 -> 1:in0 [style=""]
-7:out1 -> 12:in0 [style=""]
-8 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=2 })])</td></tr></table>>]
+7:out1 -> 2:in1 [style=""]
+8 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=2 for ([], 1))])</td></tr></table>>]
 8:out0 -> 3:in0 [style=""]
 9 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: FAIL</td></tr></table>>]
 9:out0 -> 10:in0 [style=""]
 10 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: FAIL</td></tr></table>>]
 10:out0 -> 11:in0 [style=""]
-11 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 2 }, range: -2..=1 })])</td></tr></table>>]
+11 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=1 for ([], 2))])</td></tr></table>>]
 11:out0 -> 4:in0 [style=""]
-12 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(NodeRange { spine: SpineAddress { path: [], offset: 1 }, range: -2..=2 })])</td></tr></table>>]
-12:out0 -> 13:in1 [style=""]
-13 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td><td port="in1" align="text" colspan="1" cellpadding="1">1</td></tr><tr><td align="text" border="0" colspan="2"></td></tr></table>>]
 }
 "#
         );

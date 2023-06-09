@@ -7,11 +7,16 @@ use std::{
 };
 
 use portgraph::{
-    dot::dot_string_weighted, Direction, NodeIndex, PortIndex, PortOffset, UnmanagedDenseMap,
-    Weights,
+    dot::dot_string_weighted, NodeIndex, PortIndex, PortOffset, UnmanagedDenseMap, Weights,
 };
 
-use crate::{utils::{age, cover::untangle_threads}, Constraint};
+use crate::{
+    utils::{
+        age,
+        cover::{untangle_threads, SplitNodesMap},
+    },
+    Constraint,
+};
 
 use super::{get_next_world_age, BaseGraphTrie, EdgeWeight, StateID};
 
@@ -29,10 +34,14 @@ impl<C, A, Age: Default + Clone> GraphTrieBuilder<C, A, Age> {
             world_age: Default::default(),
         }
     }
+
+    pub fn age(&self) -> &Age {
+        &self.world_age
+    }
 }
 
 impl<C: Display + Clone, A: Debug + Clone, Age: Debug + Clone> GraphTrieBuilder<C, A, Age> {
-    pub(crate) fn str_weights(&self) -> Weights<String, String> {
+    fn str_weights(&self) -> Weights<String, String> {
         let mut str_weights = self.trie.str_weights();
         for p in self.trie.graph.ports_iter() {
             str_weights[p] += &format!(" [{:?}]", self.trace[p]);
@@ -40,7 +49,7 @@ impl<C: Display + Clone, A: Debug + Clone, Age: Debug + Clone> GraphTrieBuilder<
         str_weights
     }
 
-    pub(crate) fn _dotstring(&self) -> String {
+    pub fn dotstring(&self) -> String {
         dot_string_weighted(&self.trie.graph, &self.str_weights())
     }
 }
@@ -49,7 +58,7 @@ impl<C, A, Age: Default> GraphTrieBuilder<C, A, Age>
 where
     A: Clone + Ord,
     C: Clone + Ord + Constraint,
-    Age: Clone
+    Age: Clone,
 {
     /// Reorganise trie after having added transitions.
     ///
@@ -64,21 +73,19 @@ where
         self,
         root: NodeIndex,
         mut clone_state: F,
-    ) -> (BaseGraphTrie<C, A>, BTreeSet<NodeIndex>)
+    ) -> (BaseGraphTrie<C, A>, SplitNodesMap<Age>)
     where
         F: FnMut(StateID, StateID),
         Age: Ord,
     {
         // Reset all trackers
         let GraphTrieBuilder {
-            mut trie,
-            mut trace,
-            ..
+            mut trie, trace, ..
         } = self;
 
         let weights = RefCell::new(&mut trie.weights);
 
-        let nodes = untangle_threads(
+        let new_nodes = untangle_threads(
             &mut trie.graph,
             trace,
             root,
@@ -99,7 +106,7 @@ where
                 weights.ports.rekey(old, new);
             },
         );
-        (trie, nodes)
+        (trie, new_nodes)
     }
 
     pub(super) fn skip_finalize(self) -> BaseGraphTrie<C, A> {
@@ -115,11 +122,11 @@ where
         to_world_age: &Age,
     ) -> PortIndex
     where
-        Age: Eq,
+        Age: Eq + age::Age,
     {
         let fail_port = self.trie.graph.outputs(state).find(|&p| {
             self.trie.weights[p].is_none()
-                && (!self.trace[p].1 || self.trace[p].0.contains(&from_world_age))
+                && (!self.trace[p].1 || self.trace[p].0.contains(from_world_age))
         });
         let (out_port, in_port) = if let Some(out_port) = fail_port {
             let in_port = self
@@ -131,10 +138,13 @@ where
         } else {
             self.append_transition(state, new_state, None)
         };
-        if !self.trace[out_port].0.contains(&from_world_age) {
-            self.trace[out_port].0.push(from_world_age.clone());
-            self.trace[in_port].0.push(to_world_age.clone());
-        }
+        trace_insert(
+            &mut self.trace,
+            out_port,
+            in_port,
+            from_world_age,
+            to_world_age,
+        );
         in_port
     }
 
@@ -148,7 +158,7 @@ where
             panic!("adding cyclic edge");
         }
         let unlinked_port = self
-        .trie
+            .trie
             .graph
             .inputs(in_node)
             .find(|&p| self.trie.graph.port_link(p).is_none());
@@ -158,7 +168,11 @@ where
                 self.trie.graph.num_inputs(in_node) + 1,
                 self.trie.graph.num_outputs(in_node),
             );
-            self.trie.graph.inputs(in_node).last().expect("just created")
+            self.trie
+                .graph
+                .inputs(in_node)
+                .last()
+                .expect("just created")
         });
         self.trie.graph.link_ports(out_port, in_port)?;
         self.trace[out_port].1 = true;
@@ -198,7 +212,7 @@ where
         to_world_age: &Age,
     ) -> (Vec<StateID>, Vec<Age>)
     where
-        Age: Eq,
+        Age: Eq + age::Age,
     {
         let mut start_states = Vec::new();
         let mut start_world_ages = Vec::new();
@@ -217,22 +231,28 @@ where
                             // Filter out FAIL as we add it below anyway
                             continue;
                         }
-                        let in_port = self.trie.graph.port_link(out_port).expect("Disconnected edge");
+                        let in_port = self
+                            .trie
+                            .graph
+                            .port_link(out_port)
+                            .expect("Disconnected edge");
                         let node = self.trie.graph.port_node(in_port).expect("invalid port");
-                        if !self.trace[out_port].0.contains(&world_age) {
-                            self.trace[out_port].0.push(world_age.clone());
-                            self.trace[in_port].0.push(to_world_age.clone());
-                            curr_states.push_back((node, to_world_age.clone()));
-                        }
+                        let next_world_age = trace_insert(
+                            &mut self.trace,
+                            out_port,
+                            in_port,
+                            &world_age,
+                            to_world_age,
+                        );
+                        curr_states.push_back((node, next_world_age.clone()));
                     }
                 }
-                let in_port = self.follow_fail(
-                    state,
-                    new_start_state,
-                    &world_age,
-                    &to_world_age,
-                );
-                let out_port = self.trie.graph.port_link(in_port).expect("Disconnected edge");
+                let in_port = self.follow_fail(state, new_start_state, &world_age, to_world_age);
+                let out_port = self
+                    .trie
+                    .graph
+                    .port_link(in_port)
+                    .expect("Disconnected edge");
                 let world_age = get_next_world_age(out_port, in_port, &self.trace, &world_age);
                 curr_states.push_back((
                     self.trie.graph.port_node(in_port).expect("invalid port"),
@@ -355,7 +375,7 @@ where
         to_world_age: &Age,
     ) -> Vec<NodeIndex>
     where
-        Age: Eq,
+        Age: Eq + age::Age,
     {
         self.insert_transitions_filtered(
             state,
@@ -377,7 +397,7 @@ where
         to_world_age: &Age,
     ) -> (Vec<NodeIndex>, Vec<Age>)
     where
-        Age: Eq,
+        Age: Eq + age::Age,
     {
         let (a, _, b) = self.insert_transitions_filtered(
             state,
@@ -401,7 +421,7 @@ where
     ) -> (Vec<NodeIndex>, Vec<C>, Vec<Age>)
     where
         F: FnMut(&C) -> bool,
-        Age: Eq,
+        Age: Eq + age::Age,
     {
         // The states we are transitioning to, to be returned
         let mut next_states = Vec::new();
@@ -453,26 +473,24 @@ where
                     break;
                 }
             } else if (!self.trie.weights[state].non_deterministic || curr_cond == &new_cond)
-                && (!self.trace[transition].1 || self.trace[transition].0.contains(&from_world_age))
+                && (!self.trace[transition].1 || self.trace[transition].0.contains(from_world_age))
             {
                 // use existing transition
                 let in_port = self
-                .trie
+                    .trie
                     .graph
                     .port_link(transition)
                     .expect("Disconnected transition");
-                if !self.trace[transition].0.contains(from_world_age) {
-                    self.trace[transition].0.push(from_world_age.clone());
-                    self.trace[in_port].0.push(to_world_age.clone());
-                }
-                next_states.push(self.trie.graph.port_node(in_port).expect("invalid port"));
-                used_transitions.push(new_cond.clone());
-                next_world_ages.push(get_next_world_age(
+                let next_age = trace_insert(
+                    &mut self.trace,
                     transition,
                     in_port,
-                    &self.trace,
-                    &from_world_age,
-                ).clone());
+                    from_world_age,
+                    to_world_age,
+                );
+                next_states.push(self.trie.graph.port_node(in_port).expect("invalid port"));
+                used_transitions.push(new_cond.clone());
+                next_world_ages.push(next_age.clone());
                 alread_inserted.insert(curr_cond.clone());
             } else if !self.trie.weights[state].non_deterministic || curr_cond == &new_cond {
                 // Copy existing transition
@@ -502,17 +520,18 @@ where
             let fallback = if offset < n_ports {
                 new_offset -= 1;
                 let old = self
-                .trie
+                    .trie
                     .graph
                     .port_index(state, PortOffset::new_outgoing(offset))
                     .expect("invalid offset");
                 let new = self
-                .trie
+                    .trie
                     .graph
                     .port_index(state, PortOffset::new_outgoing(new_offset))
                     .expect("invalid offset");
                 self.move_out_port(old, new);
-                self.trie.graph
+                self.trie
+                    .graph
                     .port_link(new)
                     .map(|p| self.trie.graph.port_node(p).expect("invalid port"))
             } else {
@@ -552,7 +571,8 @@ where
     pub(super) fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
         // if state == NodeIndex::new(2) {
         // }
-        self.trie.graph
+        self.trie
+            .graph
             .set_num_ports(state, incoming, outgoing, |old, new| {
                 let new = new.new_index();
                 self.trace.rekey(old, new);
@@ -566,5 +586,25 @@ where
         }
         self.trace.rekey(old, Some(new));
         self.trie.weights.ports.rekey(old, Some(new));
+    }
+}
+
+pub(super) fn trace_insert<'a, Age: age::Age + Clone + Eq>(
+    trace: &'a mut UnmanagedDenseMap<PortIndex, (Vec<Age>, bool)>,
+    from: PortIndex,
+    to: PortIndex,
+    from_age: &Age,
+    to_age: &Age,
+) -> &'a Age {
+    let pos = trace[from].0.iter().position(|x| x == from_age);
+    if let Some(pos) = pos {
+        let other = &trace[to].0[pos];
+        let merged = to_age.merge(other);
+        trace[to].0[pos] = merged;
+        &trace[to].0[pos]
+    } else {
+        trace[from].0.push(from_age.clone());
+        trace[to].0.push(to_age.clone());
+        trace[to].0.last().expect("just added")
     }
 }

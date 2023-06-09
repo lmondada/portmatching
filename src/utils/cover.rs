@@ -7,6 +7,8 @@ use portgraph::{
     portgraph::PortOperation, NodeIndex, PortGraph, PortIndex, PortOffset, SecondaryMap,
 };
 
+pub type SplitNodesMap<Age> = BTreeMap<NodeIndex, Vec<(NodeIndex, Option<Age>)>>;
+
 /// Extract new threads into separate nodes.
 ///
 /// Threads are paths from the root to leaves of the trie.
@@ -23,12 +25,12 @@ pub fn untangle_threads<F, G, Map, Age>(
     root: NodeIndex,
     mut clone_state: G,
     mut rekey: F,
-) -> BTreeSet<NodeIndex>
+) -> SplitNodesMap<Age>
 where
     F: FnMut(PortIndex, Option<PortIndex>),
     G: FnMut(NodeIndex, NodeIndex, &PortGraph),
     Map: SecondaryMap<PortIndex, (Vec<Age>, bool)>,
-    Age: Ord + Clone
+    Age: Ord + Clone,
 {
     // All nodes that are traversed by at least one thread
     let mut all_nodes = graph
@@ -41,8 +43,10 @@ where
         })
         .collect::<BTreeSet<_>>();
     if all_nodes.is_empty() {
-        return [root].into();
+        return BTreeMap::new();
     }
+
+    let mut old2new = BTreeMap::<_, Vec<_>>::new();
 
     let mut curr_nodes: VecDeque<_> = graph
         .output_links(root)
@@ -90,7 +94,7 @@ where
                             return true;
                         }
                         let Some(l) = l else { return false };
-                        vec.contains(&l)
+                        vec.contains(l)
                     })
                     .collect::<Vec<_>>()
             })
@@ -119,8 +123,8 @@ where
                 for old_port in graph.all_ports(old) {
                     let offset = graph.port_offset(old_port).expect("invalid port");
                     let new_port = graph.port_index(new, offset).expect("invalid offset");
-                    let old_val = trace.take(old_port);
-                    if old_val != Default::default() {
+                    if trace.get(old_port) != &Default::default() {
+                        let old_val = trace.get(old_port).clone();
                         trace.set(new_port, old_val);
                     }
                     if let Some(val) = trace_curr.get(&old_port).cloned() {
@@ -155,36 +159,34 @@ where
                 if k.is_some() {
                     all_nodes.insert(n);
                 }
+                old2new.entry(node).or_default().push((n, k.clone()));
                 for out_port in graph.outputs(n) {
                     let in_port = graph.port_link(out_port).expect("Disconnected port");
                     let (out_trace, out_flag) = trace.get(out_port);
-                    let pos = k.as_ref().and_then(|k| out_trace.iter().position(|x| x == k));
+                    let pos = k
+                        .as_ref()
+                        .and_then(|k| out_trace.iter().position(|x| x == k));
                     let new_out = (
-                        pos.map(|pos| vec![out_trace[pos].clone()]).unwrap_or_default(),
+                        pos.map(|pos| vec![out_trace[pos].clone()])
+                            .unwrap_or_default(),
                         *out_flag,
                     );
                     let (in_trace, in_flag) = trace.get(in_port);
                     let new_in = (
-                        pos.map(|pos| vec![in_trace[pos].clone()]).unwrap_or_default(),
+                        pos.map(|pos| vec![in_trace[pos].clone()])
+                            .unwrap_or_default(),
                         *in_flag,
                     );
                     trace.set(out_port, new_out);
                     trace.set(in_port, new_in);
                 }
             }
+        } else if keys.len() == 1 {
+            old2new.insert(node, vec![(node, keys[0].clone())]);
         }
         curr_nodes.append(&mut next_nodes);
     }
-    all_nodes
-        .iter()
-        .copied()
-        .filter(|&n| {
-            graph
-                .output_links(n)
-                .flatten()
-                .all(|p| trace.get(p).0.is_empty())
-        })
-        .collect()
+    old2new
 }
 
 /// Splits `old_node` into multiple nodes according to ins/outs partition
@@ -334,8 +336,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use portgraph::{PortGraph, PortOffset, UnmanagedDenseMap};
 
     use crate::graph_tries::root_state;
@@ -375,7 +375,6 @@ mod tests {
             g.link_ports(out_p, in_p).unwrap();
         }
 
-        let mut new_nodes = BTreeMap::new();
         let mut trace: UnmanagedDenseMap<_, _> = Default::default();
         let thread_inds = [
             (vec![0], vec![1]),
@@ -388,15 +387,7 @@ mod tests {
             trace[in_port] = (in_ind, false);
             trace[out_port] = (out_ind, false);
         }
-        untangle_threads(
-            &mut g,
-            trace,
-            root_state(),
-            |old_n, new_n, _| {
-                new_nodes.insert(old_n, new_n);
-            },
-            |_, _| {},
-        );
+        untangle_threads(&mut g, trace, root_state(), |_, _, _| {}, |_, _| {});
 
         assert_eq!(g.node_count(), 11);
     }

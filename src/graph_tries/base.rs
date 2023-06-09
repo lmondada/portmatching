@@ -1,18 +1,10 @@
-use std::{
-    cell::RefCell,
-    collections::{BTreeSet, VecDeque},
-    fmt::{self, Debug, Display},
-    mem,
-};
+use std::fmt::{self, Debug, Display};
 
-use portgraph::{
-    dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex,
-    PortOffset, UnmanagedDenseMap, Weights,
-};
+use portgraph::{dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex, Weights};
 
-use crate::{constraint::Constraint, utils::{cover::untangle_threads, age}};
+use crate::constraint::Constraint;
 
-use super::{optimise::get_next_world_age, GraphTrie, StateID, GraphTrieBuilder};
+use super::{GraphTrie, GraphTrieBuilder, StateID};
 
 /// A node in the GraphTrie.
 ///
@@ -129,10 +121,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> Default for BaseGraphTrie<C, A
     fn default() -> Self {
         let graph = Default::default();
         let weights = Default::default();
-        let mut ret = Self {
-            graph,
-            weights,
-        };
+        let mut ret = Self { graph, weights };
         ret.add_state(true);
         ret
     }
@@ -208,6 +197,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         &self.weights[state]
     }
 
+    /// View the trie as a builder, for constructions
     pub fn as_builder<Age: Default + Clone>(self) -> GraphTrieBuilder<C, A, Age> {
         GraphTrieBuilder::new(self)
     }
@@ -220,7 +210,12 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
 
     /// Try to convert into a start state for `graph_edge`
     #[allow(clippy::wrong_self_convention)]
-    pub(super) fn into_start_state(&mut self, trie_state: StateID, out_port: &A, deterministic: bool) -> bool {
+    pub(super) fn into_start_state(
+        &mut self,
+        trie_state: StateID,
+        out_port: &A,
+        deterministic: bool,
+    ) -> bool {
         // let start_node = graph.port_node(graph_edge).expect("invalid port");
         // let start_offset = graph.port_offset(graph_edge).expect("invalid port");
 

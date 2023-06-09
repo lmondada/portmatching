@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 pub trait Age {
     fn merge(&self, other: &Self) -> Self;
     fn next(&self) -> Self;
@@ -16,7 +18,7 @@ impl Age for usize {
     }
 }
 
-impl Age for Vec<usize> {
+impl Age for BTreeSet<usize> {
     fn merge(&self, other: &Self) -> Self {
         self.iter().chain(other.iter()).copied().collect()
     }
@@ -25,6 +27,6 @@ impl Age for Vec<usize> {
         if self.len() != 1 {
             panic!("Cannot increment age {:?}", self);
         }
-        vec![self[0] + 1]
+        [self.first().unwrap() + 1].into()
     }
 }

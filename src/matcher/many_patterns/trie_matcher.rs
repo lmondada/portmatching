@@ -1,8 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt::{Debug, Display}, mem,
+    fmt::{Debug, Display},
+    mem,
 };
 
+use itertools::Itertools;
 use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 
 use crate::{
@@ -241,7 +243,21 @@ where
             );
         };
 
-        let (trie, current_states) = trie.finalize(root_state(), clone_state);
+        let final_age = *trie.age();
+        let (trie, new_nodes) = trie.finalize(root_state(), clone_state);
+        current_states = current_states
+            .into_iter()
+            .flat_map(|s| {
+                if let Some(new_nodes) = new_nodes.get(&s) {
+                    new_nodes
+                        .iter()
+                        .filter_map(|&(n, age)| (age == Some(final_age)).then_some(n))
+                        .collect_vec()
+                } else {
+                    vec![s]
+                }
+            })
+            .collect();
 
         self.trie = trie;
 
@@ -633,10 +649,8 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
-            for entry in glob("pattern_*.json").expect("glob pattern failed") {
-                if let Ok(path) = entry {
-                    fs::remove_file(path).expect("Removing file failed");
-                }
+            for path in glob("pattern_*.json").expect("glob pattern failed").flatten() {
+                fs::remove_file(path).expect("Removing file failed");
             }
             for (i, p) in patterns.iter().enumerate() {
                 fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(p).unwrap()).unwrap();
