@@ -13,9 +13,12 @@ pub(crate) use zero_range::ZeroRange;
 pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
 
-// pub(crate) mod toposort;
+pub(crate) mod toposort;
+pub(crate) use toposort::toposort;
 
 pub(crate) mod age;
+
+pub(crate) mod causal;
 
 #[cfg(test)]
 pub(crate) mod test_utils;

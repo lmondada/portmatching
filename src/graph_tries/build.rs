@@ -7,7 +7,7 @@ use std::{
 };
 
 use portgraph::{
-    dot::dot_string_weighted, NodeIndex, PortIndex, PortOffset, UnmanagedDenseMap, Weights,
+    dot::dot_string_weighted, NodeIndex, PortIndex, PortOffset, UnmanagedDenseMap, Weights, PortGraph,
 };
 
 use crate::{
@@ -202,12 +202,13 @@ where
         (last_port, in_port)
     }
 
-    pub(super) fn valid_start_states(
+    pub(super) fn valid_start_states<F: FnMut(StateID, StateID, &PortGraph) -> bool> (
         &mut self,
         out_port: &A,
         trie_state: StateID,
         deterministic: bool,
         new_start_state: &mut Option<StateID>,
+        mut use_state: F,
         from_world_age: &Age,
         to_world_age: &Age,
     ) -> (Vec<StateID>, Vec<Age>)
@@ -246,6 +247,9 @@ where
                         );
                         curr_states.push_back((node, next_world_age.clone()));
                     }
+                }
+                if new_start_state.is_some() && !use_state(state, new_start_state.unwrap(), &self.trie.graph) {
+                    *new_start_state = None;
                 }
                 let in_port = self.follow_fail(state, new_start_state, &world_age, to_world_age);
                 let out_port = self
@@ -296,6 +300,7 @@ where
                     state,
                     deterministic,
                     &mut new_start_state,
+                    |_, _, _| true,
                     &world_age,
                     &world_age,
                 )
