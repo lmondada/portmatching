@@ -60,7 +60,7 @@ impl<T> SetsOfSets<T> {
 impl<T: Debug> Debug for SetsOfSets<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for set in self.sets.values() {
-            write!(f, "{:?}\n", set)?
+            writeln!(f, "{:?}", set)?
         }
         Ok(())
     }

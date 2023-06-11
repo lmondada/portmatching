@@ -7,8 +7,7 @@ use std::{
 };
 
 use portgraph::{
-    dot::dot_string_weighted, NodeIndex, PortIndex, PortOffset, UnmanagedDenseMap,
-    Weights,
+    dot::dot_string_weighted, NodeIndex, PortIndex, PortOffset, UnmanagedDenseMap, Weights,
 };
 
 use crate::{

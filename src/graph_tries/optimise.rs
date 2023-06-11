@@ -250,17 +250,17 @@ where
 
         let mut unmerged: VecDeque<_> = [(next_into, ages[next_other])].into();
         let mut clones = BTreeMap::<_, BTreeSet<_>>::new();
-        let mut loop_cnt = 0;
+        // let mut loop_cnt = 0;
         let mut visited = BTreeSet::new();
         while let Some((into, world_age)) = unmerged.pop_front() {
             if visited.contains(&(into, world_age)) {
                 continue;
             }
             let model = ages_inv[&world_age];
-            loop_cnt += 1;
-            if loop_cnt > 1000 {
-                panic!("inf loop in merge_into");
-            }
+            // loop_cnt += 1;
+            // if loop_cnt > 1000 {
+            //     panic!("inf loop in merge_into");
+            // }
             clones.entry(into).or_default().insert(model);
             let out_port = builder.trie.weights[model].out_port.clone();
             let start_states = if let Some(out_port) = out_port {
@@ -721,6 +721,8 @@ fn mark_first_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Ite
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use portgraph::{PortGraph, Weights};
 
     use crate::{
@@ -770,14 +772,14 @@ mod tests {
         let mut trie = BaseGraphTrie { graph: g, weights };
 
         trie.optimise(|_, _| {}, 1);
+        fs::write("test_optimise.dot", trie._dotstring()).unwrap();
         assert_eq!(
             trie._dotstring(),
             r#"digraph {
 0 [shape=plain label=<<table border="1"><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([PortLabel(out(0))])</td></tr></table>>]
 0:out0 -> 5:in0 [style=""]
-1 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=2 for ([], 1))])</td></tr></table>>]
-1:out0 -> 3:in2 [style=""]
-2 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td><td port="in1" align="text" colspan="1" cellpadding="1">1</td></tr><tr><td align="text" border="0" colspan="2">[()]</td></tr><tr><td port="out0" align="text" colspan="2" cellpadding="1">0: Vec([NoMatch(-2..=2 for ([], 1))])</td></tr></table>>]
+1 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"></td></tr></table>>]
+2 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=2 for ([], 1))])</td></tr></table>>]
 2:out0 -> 3:in1 [style=""]
 3 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td><td port="in1" align="text" colspan="1" cellpadding="1">1</td><td port="in2" align="text" colspan="1" cellpadding="1">2</td></tr><tr><td align="text" border="0" colspan="3"></td></tr></table>>]
 4 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"></td></tr></table>>]
@@ -788,9 +790,9 @@ mod tests {
 6:out0 -> 7:in0 [style=""]
 6:out1 -> 2:in0 [style=""]
 6:out2 -> 8:in0 [style=""]
-7 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="2">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=3 for ([], 1))])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: FAIL</td></tr></table>>]
+7 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="2">[()]</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=3 for ([], 1))])</td><td port="out1" align="text" colspan="1" cellpadding="1">1: Vec([NoMatch(-2..=2 for ([], 1))])</td></tr></table>>]
 7:out0 -> 1:in0 [style=""]
-7:out1 -> 2:in1 [style=""]
+7:out1 -> 3:in2 [style=""]
 8 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: Vec([NoMatch(-2..=2 for ([], 1))])</td></tr></table>>]
 8:out0 -> 3:in0 [style=""]
 9 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1">0</td></tr><tr><td align="text" border="0" colspan="1"><font color="red">[()]</font></td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1">0: FAIL</td></tr></table>>]
