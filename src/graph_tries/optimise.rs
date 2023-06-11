@@ -32,6 +32,7 @@ where
     where
         F: FnMut(StateID, StateID),
     {
+        let depth_cutoff = 5;
         let nodes = self
             .graph
             .nodes_iter()
@@ -50,14 +51,17 @@ where
             // In these cases it's easy (and sensible) to turn non-deterministic
             // states into deterministic
             self.graph.nodes_iter().find(|&n| {
-                self.graph.num_outputs(n) > cutoff && self.weight(n).non_deterministic && {
-                    let constraints = self
-                        .graph
-                        .outputs(n)
-                        .map(|p| self.weights[p].as_ref())
-                        .collect();
-                    totally_ordered(&constraints) || mutually_exclusive(&constraints)
-                }
+                self.graph.num_outputs(n) > cutoff
+                    && self.weight(n).non_deterministic
+                    && depth(n, &self.graph) <= depth_cutoff
+                    && {
+                        let constraints = self
+                            .graph
+                            .outputs(n)
+                            .map(|p| self.weights[p].as_ref())
+                            .collect();
+                        totally_ordered(&constraints) || mutually_exclusive(&constraints)
+                    }
             })
         } {
             self.make_deterministic(node, &mut clone_state, &mut node_copies);
@@ -370,6 +374,24 @@ where
         }
         *self = trie;
     }
+}
+
+fn depth(n: NodeIndex, graph: &PortGraph) -> usize {
+    let mut d = 1;
+    let mut layer = BTreeSet::from_iter([n]);
+    while !layer.contains(&root_state()) {
+        d += 1;
+        layer = layer
+            .into_iter()
+            .flat_map(|n| {
+                graph
+                    .input_links(n)
+                    .flatten()
+                    .map(|p| graph.port_node(p).unwrap())
+            })
+            .collect();
+    }
+    d
 }
 
 fn sanitize_ages(
