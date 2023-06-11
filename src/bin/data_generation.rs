@@ -9,8 +9,6 @@ use std::{
 use portgraph::PortGraph;
 use rand::{distributions::Uniform, prelude::Distribution, rngs::StdRng, Rng, SeedableRng};
 
-//flag
-
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -124,6 +122,7 @@ fn main() {
 }
 
 fn precompile(patterns: &[UnweightedPattern], sizes: &[usize], dir: &str) {
+    fs::create_dir_all(format!("dir/tries")).expect("could not create directory");
     let optim_cutoff = 10;
 
     let n_sizes = sizes.len();
