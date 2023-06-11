@@ -6,8 +6,14 @@
 //! Traversing the trie from top to bottom along a path that is given
 //! by the input graph yields all matches of the pattern graphs.
 mod base;
+mod build;
+mod optimise;
 #[doc(inline)]
 pub use base::BaseGraphTrie;
+
+use base::EdgeWeight;
+use build::{trace_insert, GraphTrieBuilder};
+use optimise::get_next_world_age;
 
 use portgraph::{NodeIndex, PortGraph, PortIndex};
 

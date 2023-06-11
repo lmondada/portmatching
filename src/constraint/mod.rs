@@ -5,7 +5,7 @@
 //! can further be decomposed into ElementaryConstraints, so that a long list of
 //! constraints can be transformed into a tree of constraints for faster traversal.
 
-use std::iter::repeat;
+use std::{fmt::Debug, iter::repeat, ops::RangeInclusive};
 
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
 
@@ -14,8 +14,6 @@ mod skeleton;
 mod unweighted;
 mod vec;
 mod weighted;
-
-use elementary::{ElementaryConstraint, PortLabel};
 
 pub use skeleton::Skeleton;
 use smallvec::SmallVec;
@@ -26,7 +24,8 @@ pub use weighted::WeightedAdjConstraint;
 
 use crate::utils::{follow_path, port_opposite, ZeroRange};
 
-pub(self) use vec::ConstraintVec;
+pub(crate) use elementary::{ElementaryConstraint, PortLabel};
+pub(crate) use vec::ConstraintVec;
 
 /// Constraints for graph trie transitions.
 ///
@@ -81,7 +80,7 @@ pub trait PortAddress<Graph>: Clone + PartialEq + Eq + PartialOrd + Ord {
 /// in theory. In practice, we only use this for `q` nodes (the number of qubits)
 /// for a circuit-like graph, and the other nodes are addressed by their distance
 /// from the `q` nodes.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SpineAddress {
     path: SmallVec<[PortOffset; 4]>,
@@ -89,16 +88,30 @@ pub struct SpineAddress {
 }
 
 impl SpineAddress {
+    /// Create a new spine address.
+    pub fn new(path: impl IntoIterator<Item = PortOffset>, offset: usize) -> Self {
+        Self {
+            path: path.into_iter().collect(),
+            offset,
+        }
+    }
+
     /// Node at the address
     fn get_node(&self, g: &PortGraph, root: NodeIndex) -> Option<NodeIndex> {
         follow_path(&self.path, root, g)
     }
 }
 
+impl Debug for SpineAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("({:?}, {})", self.path, self.offset))
+    }
+}
+
 /// An addressing scheme for nodes.
 ///
 /// This is used in conjunction to [`SpineAddress`] to address nodes.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NodeAddress {
     spine: SpineAddress,
@@ -106,6 +119,11 @@ pub struct NodeAddress {
 }
 
 impl NodeAddress {
+    /// Create a new address for a node of a graph.
+    pub fn new(spine: SpineAddress, ind: isize) -> Self {
+        Self { spine, ind }
+    }
+
     /// Node at the address
     fn get_node(&self, g: &PortGraph, root: NodeIndex) -> Option<NodeIndex> {
         let root = self.spine.get_node(g, root)?;
@@ -128,18 +146,38 @@ impl NodeAddress {
     }
 }
 
+impl Debug for NodeAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{:?}: {})", self.spine, self.ind))
+    }
+}
+
 /// An interval of nodes in a graph.
 ///
 /// By specifiying a spine address and a range, we can specify a range of nodes
 /// in a graph.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NodeRange {
     spine: SpineAddress,
     range: ZeroRange,
 }
 
+impl Debug for NodeRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{:?} for {:?}", self.range, self.spine,))
+    }
+}
+
 impl NodeRange {
+    /// Create a new node range.
+    pub fn new(spine: SpineAddress, range: RangeInclusive<isize>) -> Self {
+        Self {
+            spine,
+            range: range.try_into().expect("invalid range"),
+        }
+    }
+
     fn contains(&self, node: &NodeAddress) -> bool {
         self.spine == node.spine && self.range.contains(node.ind)
     }
@@ -185,12 +223,28 @@ impl NodeRange {
 }
 
 /// An addressing scheme for ports.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Address {
     addr: NodeAddress,
     label: PortLabel,
     // no_addr: Vec<NodeRange>,
+}
+
+impl Address {
+    /// Create a new address for a port of a graph.
+    pub fn new(spine: SpineAddress, ind: isize, label: PortLabel) -> Self {
+        Self {
+            addr: NodeAddress::new(spine, ind),
+            label,
+        }
+    }
+}
+
+impl Debug for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("{:?} [{:?}]", self.addr, self.label))
+    }
 }
 
 type Graph<'g> = (&'g PortGraph, NodeIndex);
@@ -226,4 +280,17 @@ impl<'g, V> PortAddress<GraphBis<'g, V>> for Address {
 
 fn n_times(n: usize) -> impl Iterator<Item = ()> {
     repeat(()).take(n)
+}
+
+/// Characterise a constraint by a type.
+///
+/// Useful to group elementary constraints into similar constraints for optimisation.
+pub trait ConstraintType: Constraint {
+    /// The type of the constraint
+    type CT;
+
+    /// Get the type of the constraint
+    ///
+    /// May fail if the constraint is not elementary
+    fn constraint_type(&self) -> Self::CT;
 }

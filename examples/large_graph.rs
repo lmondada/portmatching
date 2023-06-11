@@ -12,7 +12,7 @@ fn main() {
         patterns.push(UnweightedPattern::from_graph(p).unwrap());
     }
     let path = path.join("large_graphs/graph_0.json");
-    let graph: PortGraph = serde_json::from_reader(fs::File::open(&path).unwrap()).unwrap();
+    let graph: PortGraph = serde_json::from_reader(fs::File::open(path).unwrap()).unwrap();
 
     println!("Loaded graph and patterns");
     let matcher = TrieMatcher::from_patterns(patterns);

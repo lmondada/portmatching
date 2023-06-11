@@ -13,6 +13,16 @@ pub(crate) use zero_range::ZeroRange;
 pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
 
+pub(crate) mod toposort;
+pub(crate) use toposort::toposort;
+
+pub(crate) mod age;
+
+pub(crate) mod causal;
+
+pub(crate) mod sets_of_sets;
+pub(crate) use sets_of_sets::SetsOfSets;
+
 #[cfg(test)]
 pub(crate) mod test_utils;
 

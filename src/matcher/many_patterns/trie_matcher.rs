@@ -1,12 +1,14 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::{Debug, Display},
+    mem,
 };
 
+use itertools::Itertools;
 use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
 
 use crate::{
-    constraint::{Address, PortAddress},
+    constraint::{Address, ConstraintType, PortAddress},
     graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
     pattern::{Edge, Pattern},
     Constraint, ManyPatternMatcher, Matcher, PatternID, Skeleton,
@@ -80,8 +82,28 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
 
     /// Spread transitions across nodes to minimise the number of constraints
     /// to check
-    pub fn optimise(&mut self) {
-        self.trie.optimise();
+    pub fn optimise(&mut self, cutoff: usize)
+    where
+        C: ConstraintType,
+        C::CT: Ord,
+        C: Display,
+        A: Debug,
+    {
+        // This callback is a bit different than the other `clone_state`
+        // Here states are never cloned, but existing states are reused
+        // so their matches must be merged
+        let clone_state = |old_state: StateID, new_state: StateID| {
+            let mut old = self
+                .match_states
+                .get(&old_state)
+                .cloned()
+                .unwrap_or_default();
+            self.match_states
+                .entry(new_state)
+                .or_default()
+                .append(&mut old);
+        };
+        self.trie.optimise(clone_state, cutoff);
     }
 }
 
@@ -183,6 +205,8 @@ where
         // Decompose a pattern into "lines", which are paths in the pattern
         let all_lines = pattern.all_lines();
 
+        let mut trie = mem::take(&mut self.trie).as_builder::<usize>();
+
         for line in all_lines {
             // Traverse the line
             let mut first_edge = true;
@@ -190,19 +214,17 @@ where
                 let constraint = pattern.to_constraint(e);
                 if self.add_non_det(first_edge) {
                     // The edge is added non-deterministically
-                    current_states = self.trie.add_graph_edge_nondet(
+                    current_states = trie.add_graph_edge_nondet(
                         &skeleton.get_port_address(out_port),
                         current_states,
                         constraint,
-                        // &mut clone_state,
                     );
                 } else {
                     // All other edges are deterministic
-                    current_states = self.trie.add_graph_edge_det(
+                    current_states = trie.add_graph_edge_det(
                         &skeleton.get_port_address(out_port),
                         current_states,
                         constraint,
-                        // &mut clone_state,
                     );
                 }
                 first_edge = false;
@@ -221,7 +243,23 @@ where
             );
         };
 
-        let current_states = self.trie.finalize(clone_state);
+        let final_age = *trie.age();
+        let (trie, new_nodes) = trie.finalize(root_state(), clone_state);
+        current_states = current_states
+            .into_iter()
+            .flat_map(|s| {
+                if let Some(new_nodes) = new_nodes.get(&s) {
+                    new_nodes
+                        .iter()
+                        .filter_map(|&(n, age)| (age == Some(final_age)).then_some(n))
+                        .collect_vec()
+                } else {
+                    vec![s]
+                }
+            })
+            .collect();
+
+        self.trie = trie;
 
         // Record matching pattern in final states
         for state in current_states {
@@ -239,7 +277,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset, SecondaryMap};
+    use portgraph::{proptest::gen_portgraph, NodeIndex, PortGraph, PortOffset, UnmanagedDenseMap};
 
     use proptest::prelude::*;
 
@@ -442,7 +480,7 @@ mod tests {
         let n0 = p1.add_node(2, 1);
         let n1 = p1.add_node(1, 0);
         link(&mut p1, (n0, 0), (n1, 0));
-        let mut w1 = SecondaryMap::new();
+        let mut w1 = UnmanagedDenseMap::new();
         w1[n0] = 2;
         w1[n1] = 1;
         let mut p2 = PortGraph::new();
@@ -450,14 +488,14 @@ mod tests {
         let n1 = p2.add_node(0, 2);
         link(&mut p2, (n1, 0), (n0, 1));
         link(&mut p2, (n1, 1), (n0, 0));
-        let mut w2 = SecondaryMap::new();
+        let mut w2 = UnmanagedDenseMap::new();
         w2[n0] = 3;
         w2[n1] = 4;
         let mut matcher = TrieMatcher::new(TrieConstruction::Balanced);
         matcher.add_pattern(WeightedPattern::from_weighted_graph(p1, w1).unwrap());
         matcher.add_pattern(WeightedPattern::from_weighted_graph(p2, w2).unwrap());
         let mut g = PortGraph::new();
-        let mut w = SecondaryMap::new();
+        let mut w = UnmanagedDenseMap::new();
         let n0 = g.add_node(0, 2);
         let n1 = g.add_node(2, 1);
         let n2 = g.add_node(2, 1);
@@ -589,7 +627,60 @@ mod tests {
                 .collect_vec();
             // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
             let mut matcher = TrieMatcher::from_patterns(patterns.clone());
-            matcher.optimise();
+            matcher.optimise(10);
+            let many_matches = matcher.find_matches(&g);
+            let many_matches = (0..patterns.len())
+                .map(|i| {
+                    many_matches
+                        .iter()
+                        .filter(|m| m.id == PatternID(i))
+                        .cloned()
+                        .collect_vec()
+                })
+                .collect_vec();
+            prop_assert_eq!(many_matches, single_matches);
+        }
+    }
+
+    proptest! {
+        #[ignore = "a bit slow"]
+        #[test]
+        fn many_graphs_proptest_balanced_optimised_small(
+            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
+            g in gen_portgraph(30, 4, 60)
+        ) {
+            // for path in glob("pattern_*.json").expect("glob pattern failed").flatten() {
+            //     fs::remove_file(path).expect("Removing file failed");
+            // }
+            // for (i, p) in patterns.iter().enumerate() {
+            //     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(p).unwrap()).unwrap();
+            // }
+            // fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            let patterns = patterns
+                .into_iter()
+                .map(|p| UnweightedPattern::from_graph(p).unwrap())
+                .collect_vec();
+            let single_matchers = patterns
+                .clone()
+                .into_iter()
+                .map(SinglePatternMatcher::from_pattern)
+                .collect_vec();
+            let single_matches = single_matchers
+                .into_iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    m.find_matches(&g)
+                        .into_iter()
+                        .map(|m| PatternMatch {
+                            id: PatternID(i),
+                            root: m[&patterns[i].root],
+                        })
+                        .collect_vec()
+                })
+                .collect_vec();
+            // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            let mut matcher = TrieMatcher::from_patterns(patterns.clone());
+            matcher.optimise(1);
             let many_matches = matcher.find_matches(&g);
             let many_matches = (0..patterns.len())
                 .map(|i| {
