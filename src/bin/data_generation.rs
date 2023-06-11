@@ -3,7 +3,7 @@ use itertools::Itertools;
 use portmatching::{utils::is_connected, ManyPatternMatcher, TrieMatcher, UnweightedPattern};
 use std::{
     cmp,
-    fs::{self, File},
+    fs::{self, File}, time::Instant,
 };
 
 use portgraph::PortGraph;
@@ -122,7 +122,7 @@ fn main() {
 }
 
 fn precompile(patterns: &[UnweightedPattern], sizes: &[usize], dir: &str) {
-    fs::create_dir_all(format!("dir/tries")).expect("could not create directory");
+    fs::create_dir_all(format!("{dir}/tries")).expect("could not create directory");
     let optim_cutoff = 10;
 
     let n_sizes = sizes.len();
@@ -130,18 +130,22 @@ fn precompile(patterns: &[UnweightedPattern], sizes: &[usize], dir: &str) {
     let mut matcher = TrieMatcher::default();
     for (i, &l) in sizes.iter().enumerate() {
         assert!(l > last_size);
-        println!("Compiling size {l}... ({}/{n_sizes})", i + 1);
+        println!("Compiling size {l} ({}/{n_sizes})...", i + 1);
+        let start_t = Instant::now();
         for p in &patterns[last_size..l] {
             matcher.add_pattern(p.clone());
         }
+        println!("Completed in {:?}s", start_t.elapsed().as_secs());
         fs::write(
             format!("{dir}/tries/balanced_{l}.bin"),
             rmp_serde::to_vec(&matcher).unwrap(),
         )
         .unwrap_or_else(|_| panic!("could not write to {dir}/tries"));
         println!("Optimising size {l}... ({}/{n_sizes})", i + 1);
+        let start_t = Instant::now();
         let mut opt_matcher = matcher.clone();
         opt_matcher.optimise(optim_cutoff);
+        println!("Completed in {:?}s", start_t.elapsed().as_secs());
         fs::write(
             format!("{dir}/tries/optimised_{l}.bin"),
             rmp_serde::to_vec(&opt_matcher).unwrap(),

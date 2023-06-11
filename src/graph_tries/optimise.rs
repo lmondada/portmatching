@@ -252,6 +252,7 @@ where
         let mut clones = BTreeMap::<_, BTreeSet<_>>::new();
         // let mut loop_cnt = 0;
         let mut visited = BTreeSet::new();
+        let mut nodes_order = None;
         while let Some((into, world_age)) = unmerged.pop_front() {
             if visited.contains(&(into, world_age)) {
                 continue;
@@ -264,21 +265,11 @@ where
             clones.entry(into).or_default().insert(model);
             let out_port = builder.trie.weights[model].out_port.clone();
             let start_states = if let Some(out_port) = out_port {
-                let nodes_order = get_nodes_order(&builder.trie.graph, root_state());
                 builder.valid_start_states(
                     &out_port,
                     into,
                     true,
-                    |from, trie| {
-                        let mut all_models = node_copies.get(&model).iter().copied();
-                        let to = all_models
-                            .find(|&to| !is_ancestor(to, from, &trie.graph, &nodes_order));
-                        to.unwrap_or_else(|| {
-                            let to = trie.add_state(false);
-                            node_copies.insert(&model, to);
-                            to
-                        })
-                    },
+                    find_non_ancestor(model, node_copies, &mut nodes_order),
                     &BTreeSet::from_iter([world_age]),
                     &get_age(model),
                 )
@@ -298,9 +289,19 @@ where
                         builder.trie.weights[into].non_deterministic,
                         builder.trie.weights[model].non_deterministic,
                     ) {
-                        (_, true) => builder.merge_non_det(into, model, &ages, node_copies),
-                        (true, false) => builder.merge_non_det_det(into, model, &ages, node_copies),
-                        (false, false) => builder.merge_det(into, model, &ages, node_copies),
+                        (_, true) => {
+                            builder.merge_non_det(into, model, &ages, node_copies, &mut nodes_order)
+                        }
+                        (true, false) => builder.merge_non_det_det(
+                            into,
+                            model,
+                            &ages,
+                            node_copies,
+                            &mut nodes_order,
+                        ),
+                        (false, false) => {
+                            builder.merge_det(into, model, &ages, node_copies, &mut nodes_order)
+                        }
                     },
                 );
             }
@@ -398,6 +399,16 @@ fn sanitize_ages(
     *in_ages = new_in_ages;
 }
 
+fn ensure_some<'a>(
+    order: &'a mut Option<UnmanagedDenseMap<NodeIndex, usize>>,
+    g: &PortGraph,
+) -> &'a UnmanagedDenseMap<NodeIndex, usize> {
+    if order.is_none() {
+        *order = Some(get_nodes_order(g, root_state()));
+    }
+    order.as_ref().unwrap()
+}
+
 fn get_nodes_order(g: &PortGraph, root: NodeIndex) -> UnmanagedDenseMap<NodeIndex, usize> {
     let mut nodes_order = UnmanagedDenseMap::new();
     // start counting at 1, 0 means "undef"
@@ -424,11 +435,11 @@ where
         other: StateID,
         ages: &UnmanagedDenseMap<StateID, usize>,
         node_copies: &mut SetsOfSets<NodeIndex>,
+        nodes_order: &mut Option<UnmanagedDenseMap<NodeIndex, usize>>,
     ) -> Vec<(StateID, usize)> {
         if other == into {
             return vec![];
         }
-        let nodes_order = get_nodes_order(&self.trie.graph, root_state());
         let mut unmerged = Vec::new();
         let world_age = BTreeSet::from_iter([ages[other]]);
         for o in 0..self.trie.graph.num_outputs(other) {
@@ -445,24 +456,14 @@ where
                 &mut self.trace,
                 p,
                 next_p,
-                world_age.clone(),
+                &world_age,
                 BTreeSet::from_iter([next_age]),
             );
             if let Some(cons) = self.trie.weights[p].clone() {
                 let next_states = self.insert_transitions(
                     into,
                     cons.clone(),
-                    |from, trie| {
-                        let mut all_models = node_copies.get(&next_other).iter().copied();
-                        let to = all_models.find(|&to| {
-                            from != to && !is_ancestor(to, from, &trie.graph, &nodes_order)
-                        });
-                        to.unwrap_or_else(|| {
-                            let to = trie.add_state(false);
-                            node_copies.insert(&next_other, to);
-                            to
-                        })
-                    },
+                    find_non_ancestor(next_other, node_copies, nodes_order),
                     &world_age,
                     &BTreeSet::from_iter([next_age]),
                 );
@@ -474,17 +475,7 @@ where
             } else if self.trie.weights[into].non_deterministic {
                 let into_p = self.follow_fail(
                     into,
-                    |from, trie| {
-                        let mut all_models = node_copies.get(&next_other).iter().copied();
-                        let to = all_models.find(|&to| {
-                            from != to && !is_ancestor(to, from, &trie.graph, &nodes_order)
-                        });
-                        to.unwrap_or_else(|| {
-                            let to = trie.add_state(false);
-                            node_copies.insert(&next_other, to);
-                            to
-                        })
-                    },
+                    find_non_ancestor(next_other, node_copies, nodes_order),
                     &world_age,
                     &BTreeSet::from_iter([next_age]),
                 );
@@ -502,7 +493,7 @@ where
                         &mut self.trace,
                         p,
                         next_p,
-                        world_age.clone(),
+                        &world_age,
                         BTreeSet::from_iter([next_age]),
                     );
                     if next_into != next_other {
@@ -520,27 +511,17 @@ where
         other: StateID,
         ages: &UnmanagedDenseMap<StateID, usize>,
         node_copies: &mut SetsOfSets<NodeIndex>,
+        nodes_order: &mut Option<UnmanagedDenseMap<NodeIndex, usize>>,
     ) -> Vec<(StateID, usize)> {
         if other == into {
             return vec![];
         }
         let mut unmerged = Vec::new();
         let world_age = ages[other];
-        let nodes_order = get_nodes_order(&self.trie.graph, root_state());
         if self.trie.graph.num_outputs(other) > 0 {
             let into_p = self.follow_fail(
                 into,
-                |from, trie| {
-                    let mut all_models = node_copies.get(&other).iter().copied();
-                    let to = all_models.find(|&to| {
-                        from != to && !is_ancestor(to, from, &trie.graph, &nodes_order)
-                    });
-                    to.unwrap_or_else(|| {
-                        let to = trie.add_state(false);
-                        node_copies.insert(&other, to);
-                        to
-                    })
-                },
+                find_non_ancestor(other, node_copies, nodes_order),
                 &BTreeSet::from_iter([world_age]),
                 &BTreeSet::from_iter([world_age]),
             );
@@ -558,13 +539,13 @@ where
         other: StateID,
         ages: &UnmanagedDenseMap<StateID, usize>,
         node_copies: &mut SetsOfSets<NodeIndex>,
+        nodes_order: &mut Option<UnmanagedDenseMap<NodeIndex, usize>>,
     ) -> Vec<(StateID, usize)> {
         if into == other {
             return vec![];
         }
         let mut unmerged = Vec::new();
         let mut used_constraints = BTreeSet::new();
-        let nodes_order = get_nodes_order(&self.trie.graph, root_state());
         let world_age = ages[other];
         for o in 0..self.trie.graph.num_outputs(other) {
             let p = self.trie.graph.output(other, o).expect("invalid port");
@@ -580,24 +561,14 @@ where
                 &mut self.trace,
                 p,
                 next_p,
-                BTreeSet::from_iter([world_age]),
+                &BTreeSet::from_iter([world_age]),
                 BTreeSet::from_iter([next_age]),
             );
             if let Some(cons) = self.trie.weights[p].clone() {
                 let (next_states, new_used) = self.insert_transitions_filtered(
                     into,
                     cons.clone(),
-                    |from, trie| {
-                        let mut all_models = node_copies.get(&next_other).iter().copied();
-                        let to = all_models.find(|&to| {
-                            from != to && !is_ancestor(to, from, &trie.graph, &nodes_order)
-                        });
-                        to.unwrap_or_else(|| {
-                            let to = trie.add_state(false);
-                            node_copies.insert(&next_other, to);
-                            to
-                        })
-                    },
+                    find_non_ancestor(next_other, node_copies, nodes_order),
                     |t| !used_constraints.contains(t),
                     &BTreeSet::from_iter([world_age]),
                     &BTreeSet::from_iter([next_age]),
@@ -625,7 +596,7 @@ where
                         &mut self.trace,
                         transition,
                         next_into,
-                        BTreeSet::from_iter([world_age]),
+                        &BTreeSet::from_iter([world_age]),
                         BTreeSet::from_iter([next_age]),
                     );
                     let next_into = self.trie.graph.port_node(next_into).expect("invalid port");
@@ -637,17 +608,7 @@ where
                 if last_port.is_none() || self.trie.weights[last_port.unwrap()].is_some() {
                     self.follow_fail(
                         into,
-                        |from, trie| {
-                            let mut all_models = node_copies.get(&next_other).iter().copied();
-                            let to = all_models.find(|&to| {
-                                from != to && !is_ancestor(to, from, &trie.graph, &nodes_order)
-                            });
-                            to.unwrap_or_else(|| {
-                                let to = trie.add_state(false);
-                                node_copies.insert(&next_other, to);
-                                to
-                            })
-                        },
+                        find_non_ancestor(next_other, node_copies, nodes_order),
                         &BTreeSet::from_iter([world_age]),
                         &BTreeSet::from_iter([ages[next_other]]),
                     );
@@ -655,6 +616,29 @@ where
             }
         }
         unmerged
+    }
+}
+
+fn find_non_ancestor<'b, C: Ord + Clone + Constraint, A: Ord + Clone>(
+    state: NodeIndex,
+    node_copies: &'b mut SetsOfSets<NodeIndex>,
+    nodes_order: &'b mut Option<UnmanagedDenseMap<NodeIndex, usize>>,
+) -> impl for<'a> FnMut(NodeIndex, &'a mut BaseGraphTrie<C, A>) -> NodeIndex + 'b {
+    move |from, trie| {
+        let mut all_states = node_copies.get(&state).iter().copied();
+        if let Some(to) = all_states.find(|&to| {
+            from != to && !is_ancestor(to, from, &trie.graph, ensure_some(nodes_order, &trie.graph))
+        }) {
+            if nodes_order.as_ref().unwrap()[to] < nodes_order.as_ref().unwrap()[from] {
+                *nodes_order = None;
+            }
+            to
+        } else {
+            let to = trie.add_state(false);
+            nodes_order.as_mut().unwrap()[to] = nodes_order.as_ref().unwrap()[from] + 1;
+            node_copies.insert(&state, to);
+            to
+        }
     }
 }
 

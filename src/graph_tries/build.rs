@@ -142,7 +142,7 @@ where
             &mut self.trace,
             out_port,
             in_port,
-            from_world_age.clone(),
+            from_world_age,
             to_world_age.clone(),
         );
         in_port
@@ -239,7 +239,7 @@ where
                             &mut self.trace,
                             out_port,
                             in_port,
-                            world_age.clone(),
+                            &world_age,
                             to_world_age.clone(),
                         );
                         curr_states.push_back((node, next_world_age.clone()));
@@ -461,7 +461,7 @@ where
                     &mut self.trace,
                     transition,
                     in_port,
-                    from_world_age.clone(),
+                    &from_world_age,
                     to_world_age.clone(),
                 );
                 next_states.push(self.trie.graph.port_node(in_port).expect("invalid port"));
@@ -563,21 +563,21 @@ where
     }
 }
 
-pub(super) fn trace_insert<Age: age::Age + Clone + Eq>(
-    trace: &mut UnmanagedDenseMap<PortIndex, (Vec<Age>, bool)>,
+pub(super) fn trace_insert<'a, Age: age::Age + Clone + Eq>(
+    trace: &'a mut UnmanagedDenseMap<PortIndex, (Vec<Age>, bool)>,
     from: PortIndex,
     to: PortIndex,
-    from_age: Age,
-    to_age: Age,
-) -> &Age {
-    let pos = trace[from].0.iter().position(|x| x == &from_age);
+    from_age: &Age,
+    mut to_age: Age,
+) -> &'a Age {
+    let pos = trace[from].0.iter().position(|x| x == from_age);
     if let Some(pos) = pos {
         let other = &trace[to].0[pos];
-        let merged = to_age.merge(other);
-        trace[to].0[pos] = merged;
+        to_age.merge(other);
+        trace[to].0[pos] = to_age;
         &trace[to].0[pos]
     } else {
-        trace[from].0.push(from_age);
+        trace[from].0.push(from_age.clone());
         trace[to].0.push(to_age);
         trace[to].0.last().expect("just added")
     }

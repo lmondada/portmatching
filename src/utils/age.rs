@@ -1,16 +1,15 @@
 use std::collections::BTreeSet;
 
 pub trait Age {
-    fn merge(&self, other: &Self) -> Self;
+    fn merge(&mut self, other: &Self);
     fn next(&self) -> Self;
 }
 
 impl Age for usize {
-    fn merge(&self, other: &Self) -> Self {
+    fn merge(&mut self, other: &Self) {
         if self != other {
             panic!("Cannot merge ages {:?} and {:?}", self, other);
         }
-        *self
     }
 
     fn next(&self) -> Self {
@@ -19,8 +18,8 @@ impl Age for usize {
 }
 
 impl Age for BTreeSet<usize> {
-    fn merge(&self, other: &Self) -> Self {
-        self.iter().chain(other.iter()).copied().collect()
+    fn merge(&mut self, other: &Self) {
+        self.extend(other.iter().copied());
     }
 
     fn next(&self) -> Self {
