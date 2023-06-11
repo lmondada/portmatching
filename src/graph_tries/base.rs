@@ -185,7 +185,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     ///
     /// Returns whether the state is non-deterministic after the conversion.
     #[allow(clippy::wrong_self_convention)]
-    fn into_non_deterministic(&mut self, state: NodeIndex) -> bool {
+    pub(super) fn into_non_deterministic(&mut self, state: NodeIndex) -> bool {
         let det_flag = &mut self.weights[state].non_deterministic;
         if self.graph.num_outputs(state) <= 1 {
             *det_flag = true;

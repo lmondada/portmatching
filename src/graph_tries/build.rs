@@ -7,7 +7,8 @@ use std::{
 };
 
 use portgraph::{
-    dot::dot_string_weighted, NodeIndex, PortIndex, PortOffset, UnmanagedDenseMap, Weights, PortGraph,
+    dot::dot_string_weighted, NodeIndex, PortIndex, PortOffset, UnmanagedDenseMap,
+    Weights,
 };
 
 use crate::{
@@ -114,10 +115,10 @@ where
     }
 
     /// Follow FAIL transition, creating a new state if necessary.
-    pub(super) fn follow_fail(
+    pub(super) fn follow_fail<F: FnOnce(StateID, &mut BaseGraphTrie<C, A>) -> StateID>(
         &mut self,
         state: StateID,
-        new_state: &mut Option<StateID>,
+        new_state: F,
         from_world_age: &Age,
         to_world_age: &Age,
     ) -> PortIndex
@@ -184,10 +185,10 @@ where
     ///
     /// Careful! The order of transitions is very important and appending at the
     /// end without checking the ordering is incorrect
-    fn append_transition(
+    fn append_transition<F: FnOnce(StateID, &mut BaseGraphTrie<C, A>) -> StateID>(
         &mut self,
         state: StateID,
-        new_state: &mut Option<StateID>,
+        new_state: F,
         constraint: EdgeWeight<C>,
     ) -> (PortIndex, PortIndex) {
         self.set_num_ports(
@@ -197,33 +198,30 @@ where
         );
         let last_port = self.trie.graph.outputs(state).last().expect("just created");
         self.trie.weights[last_port] = constraint;
-        let next = new_state.get_or_insert_with(|| self.trie.add_state(false));
-        let in_port = self.add_edge(last_port, *next).expect("just created");
+        let new_state = new_state(state, &mut self.trie);
+        let in_port = self.add_edge(last_port, new_state).expect("just created");
         (last_port, in_port)
     }
 
-    pub(super) fn valid_start_states<F: FnMut(StateID, StateID, &PortGraph) -> bool> (
+    pub(super) fn valid_start_states<F: FnMut(StateID, &mut BaseGraphTrie<C, A>) -> StateID>(
         &mut self,
         out_port: &A,
         trie_state: StateID,
         deterministic: bool,
-        new_start_state: &mut Option<StateID>,
-        mut use_state: F,
+        mut new_state: F,
         from_world_age: &Age,
         to_world_age: &Age,
-    ) -> (Vec<StateID>, Vec<Age>)
+    ) -> Vec<StateID>
     where
         Age: Eq + age::Age,
     {
         let mut start_states = Vec::new();
-        let mut start_world_ages = Vec::new();
         let mut curr_states: VecDeque<_> = [(trie_state, from_world_age.clone())].into();
         // let mut world_age = from_world_age;
         while let Some((state, world_age)) = curr_states.pop_front() {
             // Try to convert to start state
             if self.trie.into_start_state(state, out_port, deterministic) {
                 start_states.push(state);
-                start_world_ages.push(world_age.clone());
             } else {
                 // Not a start state, so follow all possible edges and start over
                 if !self.trie.weight(state).non_deterministic {
@@ -248,10 +246,7 @@ where
                         curr_states.push_back((node, next_world_age.clone()));
                     }
                 }
-                if new_start_state.is_some() && !use_state(state, new_start_state.unwrap(), &self.trie.graph) {
-                    *new_start_state = None;
-                }
-                let in_port = self.follow_fail(state, new_start_state, &world_age, to_world_age);
+                let in_port = self.follow_fail(state, &mut new_state, &world_age, to_world_age);
                 let out_port = self
                     .trie
                     .graph
@@ -264,7 +259,7 @@ where
                 ));
             }
         }
-        (start_states, start_world_ages)
+        start_states
     }
 
     /// Add graph edge to the trie.
@@ -299,12 +294,10 @@ where
                     out_port,
                     state,
                     deterministic,
-                    &mut new_start_state,
-                    |_, _, _| true,
+                    |_, trie| *new_start_state.get_or_insert_with(|| trie.add_state(false)),
                     &world_age,
                     &world_age,
                 )
-                .0
                 .into_iter()
             })
             .collect::<BTreeSet<_>>();
@@ -317,7 +310,7 @@ where
                 self.insert_transitions(
                     state,
                     constraint.clone(),
-                    &mut new_state,
+                    |_, trie| *new_state.get_or_insert_with(|| trie.add_state(false)),
                     &world_age,
                     &world_age.next(),
                 )
@@ -371,16 +364,17 @@ where
     ///
     /// It is important that `transitions` is ordered in the same order as
     /// the ports.
-    pub(super) fn insert_transitions(
+    pub(super) fn insert_transitions<F>(
         &mut self,
         state: NodeIndex,
         new_cond: C,
-        new_state: &mut Option<NodeIndex>,
+        new_state: F,
         from_world_age: &Age,
         to_world_age: &Age,
     ) -> Vec<NodeIndex>
     where
         Age: Eq + age::Age,
+        F: for<'a> FnMut(StateID, &'a mut BaseGraphTrie<C, A>) -> StateID,
     {
         self.insert_transitions_filtered(
             state,
@@ -393,45 +387,23 @@ where
         .0
     }
 
-    pub(super) fn insert_transitions_ages(
+    pub(super) fn insert_transitions_filtered<F, G>(
         &mut self,
         state: NodeIndex,
         new_cond: C,
-        new_state: &mut Option<NodeIndex>,
-        from_world_age: &Age,
-        to_world_age: &Age,
-    ) -> (Vec<NodeIndex>, Vec<Age>)
-    where
-        Age: Eq + age::Age,
-    {
-        let (a, _, b) = self.insert_transitions_filtered(
-            state,
-            new_cond,
-            new_state,
-            |_| true,
-            from_world_age,
-            to_world_age,
-        );
-        (a, b)
-    }
-
-    pub(super) fn insert_transitions_filtered<F>(
-        &mut self,
-        state: NodeIndex,
-        new_cond: C,
-        new_state: &mut Option<NodeIndex>,
+        mut new_state: G,
         mut transition_filter: F,
         from_world_age: &Age,
         to_world_age: &Age,
-    ) -> (Vec<NodeIndex>, Vec<C>, Vec<Age>)
+    ) -> (Vec<NodeIndex>, Vec<C>)
     where
         F: FnMut(&C) -> bool,
+        G: FnMut(StateID, &mut BaseGraphTrie<C, A>) -> StateID,
         Age: Eq + age::Age,
     {
         // The states we are transitioning to, to be returned
         let mut next_states = Vec::new();
         let mut used_transitions = Vec::new();
-        let mut next_world_ages = Vec::new();
 
         // The transitions, along with the index where they should be inserted
         let mut new_transitions = Vec::new();
@@ -486,7 +458,7 @@ where
                     .graph
                     .port_link(transition)
                     .expect("Disconnected transition");
-                let next_age = trace_insert(
+                trace_insert(
                     &mut self.trace,
                     transition,
                     in_port,
@@ -495,7 +467,6 @@ where
                 );
                 next_states.push(self.trie.graph.port_node(in_port).expect("invalid port"));
                 used_transitions.push(new_cond.clone());
-                next_world_ages.push(next_age.clone());
                 alread_inserted.insert(curr_cond.clone());
             } else if !self.trie.weights[state].non_deterministic || curr_cond == &new_cond {
                 // Copy existing transition
@@ -557,20 +528,19 @@ where
                 } else {
                     None
                 }
-                .unwrap_or_else(|| *new_state.get_or_insert_with(|| self.trie.add_state(false)));
+                .unwrap_or_else(|| new_state(state, &mut self.trie));
                 let in_port = self.add_edge(new, next_state).expect("new port index");
                 self.trace[new].0.push(from_world_age.clone());
                 self.trace[in_port].0.push(to_world_age.clone());
                 next_states.push(next_state);
                 used_transitions.push(transition);
-                next_world_ages.push(to_world_age.clone())
             }
             if offset == new_offset {
                 // There are no more empty slots. We are done
                 break;
             }
         }
-        (next_states, used_transitions, next_world_ages)
+        (next_states, used_transitions)
     }
 
     pub(super) fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
@@ -594,13 +564,13 @@ where
     }
 }
 
-pub(super) fn trace_insert<'a, Age: age::Age + Clone + Eq>(
-    trace: &'a mut UnmanagedDenseMap<PortIndex, (Vec<Age>, bool)>,
+pub(super) fn trace_insert<Age: age::Age + Clone + Eq>(
+    trace: &mut UnmanagedDenseMap<PortIndex, (Vec<Age>, bool)>,
     from: PortIndex,
     to: PortIndex,
     from_age: Age,
     to_age: Age,
-) -> &'a Age {
+) -> &Age {
     let pos = trace[from].0.iter().position(|x| x == &from_age);
     if let Some(pos) = pos {
         let other = &trace[to].0[pos];

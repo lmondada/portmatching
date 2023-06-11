@@ -46,7 +46,7 @@ pub(crate) fn is_ancestor<Map: SecondaryMap<NodeIndex, usize>>(
             for port in graph.input_links(descendant).flatten() {
                 let node = graph.port_node(port).expect("invalid port");
                 match topsort.get(node) {
-                    ind if ascendants_inds.contains(&ind) => return true,
+                    ind if ascendants_inds.contains(ind) => return true,
                     ind if ascendants_inds.first().unwrap() < ind => {
                         new_descendants.insert(node);
                     }
