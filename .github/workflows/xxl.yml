@@ -31,7 +31,7 @@ jobs:
         
       - name: Precompile XXL dataset
         run: |
-          cargo run --bin=data_generation --all-features -- -X"${{ matrix.sizes }}" -o datasets/xxl
+          cargo run --bin=data_generation --release --all-features -- -X"${{ matrix.sizes }}" -o datasets/xxl
 
       - name: Push to repo
         run: |
