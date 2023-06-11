@@ -1,0 +1,41 @@
+on:
+  push:
+    branches: [bench]
+    paths:
+      - datasets/xxl/**
+
+name: "Precompiling XXL dataset"
+
+permissions:
+  contents: write
+
+
+jobs:
+  all:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        sizes: [500, 1000, 1500, 2000]
+    
+    steps:
+      - uses: actions/checkout@v3
+        name: Check out repo
+        with:
+          token: ${{ secrets.ACCESS_TOKEN }}
+      
+      - name: Set up git name
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "<>"
+        
+      - name: Precompile XXL dataset
+        run: |
+          cargo run --bin=data_generation --all-features -- -X"${{ matrix.sizes }}" -o datasets/xxl
+
+      - name: Push to repo
+        run: |
+          git pull
+          git add -f datasets/xxl
+          git commit -m "Precompiled size ${{ matrix.sizes }}"
+          git push
