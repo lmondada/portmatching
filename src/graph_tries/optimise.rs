@@ -310,7 +310,6 @@ where
         // sanitise before `finalize`
         for (state, &age) in ages.iter() {
             if age != 0 {
-                // Does not seem to help
                 for &state in node_copies.get(&state).iter() {
                     if builder
                         .trie
@@ -620,23 +619,30 @@ where
 }
 
 fn find_non_ancestor<'b, C: Ord + Clone + Constraint, A: Ord + Clone>(
-    state: NodeIndex,
+    next_state: NodeIndex,
     node_copies: &'b mut SetsOfSets<NodeIndex>,
     nodes_order: &'b mut Option<UnmanagedDenseMap<NodeIndex, usize>>,
 ) -> impl for<'a> FnMut(NodeIndex, &'a mut BaseGraphTrie<C, A>) -> NodeIndex + 'b {
     move |from, trie| {
-        let mut all_states = node_copies.get(&state).iter().copied();
-        if let Some(to) = all_states.find(|&to| {
+        let mut all_next_states = node_copies.get(&next_state).iter().copied();
+        if let Some(to) = all_next_states.find(|&to| {
             from != to && !is_ancestor(to, from, &trie.graph, ensure_some(nodes_order, &trie.graph))
         }) {
-            if nodes_order.as_ref().unwrap()[to] < nodes_order.as_ref().unwrap()[from] {
+            if nodes_order.as_ref().unwrap()[to] <= nodes_order.as_ref().unwrap()[from] {
                 *nodes_order = None;
             }
             to
         } else {
             let to = trie.add_state(false);
-            nodes_order.as_mut().unwrap()[to] = nodes_order.as_ref().unwrap()[from] + 1;
-            node_copies.insert(&state, to);
+            nodes_order.as_mut().unwrap()[to] = nodes_order
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|(_, &v)| v)
+                .max()
+                .unwrap_or_default()
+                + 1;
+            node_copies.insert(&next_state, to);
             to
         }
     }
