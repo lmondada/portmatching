@@ -22,13 +22,19 @@ where
     A: Clone + Ord,
 {
     /// The largest non-deterministic states, in topological order
-    pub(crate) fn large_non_det_states(&self, cutoff: usize) -> Vec<StateID> {
+    pub(crate) fn large_non_det_states(&self, cutoff: usize, depth_cutoff: usize) -> Vec<StateID> {
         // Always process parent nodes first when converting to det to avoid
         // node count explosion
-        pg::toposort::<BitVec<_>>(&self.graph, [root_state()], Direction::Outgoing)
-            .filter(|&n| self.graph.num_outputs(n) > cutoff)
-            .filter(|&n| self.weight(n).non_deterministic)
-            .collect()
+        pg::toposort_filtered::<BitVec<_>>(
+            &self.graph,
+            [root_state()],
+            Direction::Outgoing,
+            move |n| depth(n, &self.graph) < depth_cutoff,
+            |_, _| true,
+        )
+        .filter(move |&n| self.graph.num_outputs(n) > cutoff)
+        .filter(|&n| self.weight(n).non_deterministic)
+        .collect()
     }
 
     pub(crate) fn all_constraints(&self, state: StateID) -> Vec<Option<&C>> {
@@ -170,11 +176,12 @@ where
             let c = self.weights[p].clone();
             if !duplicates.insert(c) {
                 shift_left += 1;
-                self.graph.unlink_port(p);
+                let child = self.graph.unlink_port(p).expect("unlinked port");
                 self.weights[p] = None;
                 // Note: we know this node was added recently, so all descendants
                 // will also have other parents and no node will be orphan
-                // however, this leaves a dangling port in the child's inputs
+                let child = self.graph.port_node(child).expect("unlinked port");
+                self.remove_stray_inputs(child);
             } else if shift_left > 0 {
                 let new = self
                     .graph
@@ -274,7 +281,7 @@ where
     }
 }
 
-fn _depth(n: NodeIndex, graph: &PortGraph) -> usize {
+fn depth(n: NodeIndex, graph: &PortGraph) -> usize {
     let mut d = 1;
     let mut layer = BTreeSet::from_iter([n]);
     while !layer.contains(&root_state()) {

@@ -127,7 +127,6 @@ where
     {
         let fail_port = self.trie.graph.outputs(state).find(|&p| {
             self.trie.weights[p].is_none()
-                && (!self.trace[p].1 || self.trace[p].0.contains(from_world_age))
         });
         let (out_port, in_port) = if let Some(out_port) = fail_port {
             let in_port = self
