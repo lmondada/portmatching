@@ -14,7 +14,7 @@ use portgraph::{
 
 use crate::{constraint::Constraint, utils::cover::untangle_threads};
 
-use super::{root_state, GraphTrie, StateID};
+use super::{GraphTrie, StateID};
 
 /// A node in the GraphTrie.
 ///
@@ -502,61 +502,83 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
 
         // The transitions, along with the index where they should be inserted
         let mut new_transitions = Vec::new();
-        let mut alread_inserted = BTreeSet::new();
+        let mut already_inserted = BTreeSet::new();
         let mut offset = 0;
 
-        // Compute the transitions to add
-        loop {
-            let Some(transition) = self.graph.output(state, offset) else {
+        if self.weights[state].non_deterministic {
+            // either the transition exists and we use it, or we create a new one
+            if let Some(out_port) = self
+                .graph
+                .outputs(state)
+                .find(|&p| self.weights[p].as_ref() == Some(&new_cond))
+            {
+                // We found a transition with the same condition: use it
+                let in_port = self
+                    .graph
+                    .port_link(out_port)
+                    .expect("Disconnected transition");
+                if !self.trace[out_port].0.contains(&from_world_age) {
+                    self.trace[out_port].0.push(from_world_age);
+                    self.trace[in_port].0.push(to_world_age);
+                }
+                next_states.push(self.graph.port_node(in_port).expect("invalid port"));
+                return next_states;
+            } else {
+                let out_port = self
+                    .graph
+                    .outputs(state)
+                    .find(|&p| self.weights[p].as_ref() < Some(&new_cond));
+                let offset = out_port
+                    .map(|p| self.graph.port_offset(p).expect("invalid port").index())
+                    .unwrap_or(self.graph.num_outputs(state));
+                new_transitions.push((offset, new_cond));
+            }
+        } else {
+            // Compute the transitions to add
+            loop {
+                let Some(transition) = self.graph.output(state, offset) else {
                 // We passed the last transition: insert and stop iteration
-                if alread_inserted.insert(new_cond.clone()) {
+                if already_inserted.insert(new_cond.clone()) {
                     new_transitions.push((offset, new_cond));
                 }
                 break;
             };
-            let Some(curr_cond) = self.weights[transition].as_ref() else {
+                let Some(curr_cond) = self.weights[transition].as_ref() else {
                 // FAIL transition: insert before and stop iteration
-                if alread_inserted.insert(new_cond.clone()) {
+                if already_inserted.insert(new_cond.clone()) {
                     new_transitions.push((offset, new_cond));
                 }
                 break;
             };
-            let Some(merged_cond) = curr_cond.and(&new_cond) else {
+                let Some(merged_cond) = curr_cond.and(&new_cond) else {
                 // We ignore conditions we cannot merge with
                 offset += 1;
                 continue
             };
-            if &merged_cond != curr_cond {
-                if !self.weights[state].non_deterministic {
+                if &merged_cond != curr_cond {
                     // insert new condition before current one
-                    if alread_inserted.insert(merged_cond.clone()) {
+                    if already_inserted.insert(merged_cond.clone()) {
                         new_transitions.push((offset, merged_cond.clone()));
                     }
                 } else {
-                    // Just insert the new condition and that's it
-                    if alread_inserted.insert(new_cond.clone()) {
-                        new_transitions.push((offset, new_cond));
+                    // use existing transition
+                    let in_port = self
+                        .graph
+                        .port_link(transition)
+                        .expect("Disconnected transition");
+                    if !self.trace[transition].0.contains(&from_world_age) {
+                        self.trace[transition].0.push(from_world_age);
+                        self.trace[in_port].0.push(to_world_age);
                     }
+                    next_states.push(self.graph.port_node(in_port).expect("invalid port"));
+                    already_inserted.insert(curr_cond.clone());
+                }
+                if merged_cond == new_cond {
+                    // we've inserted the new condition, our job is done
                     break;
                 }
-            } else if (!self.weights[state].non_deterministic || curr_cond == &new_cond) {
-                // use existing transition
-                let in_port = self
-                    .graph
-                    .port_link(transition)
-                    .expect("Disconnected transition");
-                if !self.trace[transition].0.contains(&from_world_age) {
-                    self.trace[transition].0.push(from_world_age);
-                    self.trace[in_port].0.push(to_world_age);
-                }
-                next_states.push(self.graph.port_node(in_port).expect("invalid port"));
-                alread_inserted.insert(curr_cond.clone());
+                offset += 1;
             }
-            if merged_cond == new_cond {
-                // we've inserted the new condition, our job is done
-                break;
-            }
-            offset += 1;
         }
 
         // Create new ports for the new transitions
