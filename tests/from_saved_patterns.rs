@@ -155,6 +155,7 @@ fn from_saved_patterns() {
         "55",
         "56",
         "57",
+        "58",
     ];
     for test_name in testcases {
         println!("{test_name}...");
@@ -170,7 +171,7 @@ fn from_saved_patterns() {
         //     fs::write(path, matcher.dotstring()).unwrap();
         // }
         test(&matcher, &graph, &exp, patterns.len());
-        matcher.optimise(1);
+        matcher.optimise(1, 10);
         // {
         //     let mut path = path.clone();
         //     path.push("trie_aft.gv");
