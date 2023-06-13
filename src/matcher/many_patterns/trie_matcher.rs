@@ -3,10 +3,10 @@ use std::{
     fmt::{Debug, Display},
 };
 
-use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph};
+use portgraph::{dot::dot_string_weighted, NodeIndex, PortGraph, PortIndex, algorithms::postorder, Direction};
 
 use crate::{
-    constraint::{Address, ConstraintType, PortAddress},
+    constraint::{mutually_exclusive, totally_ordered, Address, ConstraintType, PortAddress},
     graph_tries::{root_state, BaseGraphTrie, GraphTrie, StateID},
     pattern::{Edge, Pattern},
     Constraint, ManyPatternMatcher, Matcher, PatternID, Skeleton,
@@ -84,24 +84,65 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
     where
         C: ConstraintType,
         C::CT: Ord,
-        C: Display,
         A: Debug,
     {
-        // This callback is a bit different than the other `clone_state`
-        // Here states are never cloned, but existing states are reused
-        // so their matches must be merged
-        let clone_state = |old_state: StateID, new_state: StateID| {
-            let mut old = self
-                .match_states
-                .get(&old_state)
-                .cloned()
-                .unwrap_or_default();
-            self.match_states
-                .entry(new_state)
-                .or_default()
-                .append(&mut old);
+        for node in self.trie.large_non_det_states(cutoff) {
+            // Split `node` into a tree of mostly deterministic elementary nodes
+            let bottom_nodes = self.trie.split_into_det_tree(node);
+
+            // now make bottom nodes deterministic
+            for bottom_node in bottom_nodes {
+                self.try_make_det(bottom_node);
+            }
+        }
+    }
+
+    /// Try turning `node` into deterministc node
+    fn try_make_det(&mut self, node: NodeIndex) -> bool {
+        let constraints = self.trie.all_constraints(node);
+        let is_totally_ordered = totally_ordered(&constraints);
+        for i in (0..self.trie.graph.num_outputs(node)).rev() {
+            let Some(next_p) = self.trie.graph.output(node, i + 1) else {
+                        continue
+                    };
+            let p = self.trie.graph.output(node, i).unwrap();
+            if is_totally_ordered || self.trie.transition(p) == self.trie.transition(next_p) {
+                self.merge_ports(p, next_p);
+            }
+        }
+        self.trie.remove_duplicate_ports(node);
+        let constraints = self.trie.all_constraints(node);
+        if is_totally_ordered || mutually_exclusive(&constraints) {
+            self.trie.weights[node].non_deterministic = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn merge_ports(&mut self, into: PortIndex, other: PortIndex) {
+        let child = |p| {
+            let link = self.trie.graph.port_link(p)?;
+            self.trie.graph.port_node(link)
         };
-        self.trie.optimise(clone_state, cutoff);
+        let other_state = child(other).expect("unlinked port");
+        let into_state = child(into).expect("unlinked port");
+        // List all patterns that can be reached
+        let other_patterns = postorder(&self.trie.graph, [other_state], Direction::Outgoing)
+            .flat_map(|n| self.match_states[&n].iter().copied())
+            .collect::<BTreeSet<_>>();
+        let into_patterns = postorder(&self.trie.graph, [into_state], Direction::Outgoing)
+            .flat_map(|n| self.match_states[&n].iter().copied())
+            .collect::<BTreeSet<_>>();
+        // Re-Link into port with other port
+        for removed_node in self.trie.relink(into, other_state) {
+            self.match_states.remove(&removed_node);
+        }
+
+        // Now add all into patterns not in other
+        for p in into_patterns.difference(&other_patterns) {
+            // TODO: find out how much of the pattern must be added
+        }
     }
 }
 

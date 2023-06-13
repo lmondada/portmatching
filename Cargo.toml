@@ -14,6 +14,7 @@ bitvec = "1.0.1"
 portgraph = "0.4.0"
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 smallvec = "1.10.0"
+itertools = "0.10.5"
 
 # these are for datagen only
 rand = { version = "0.8.5", optional = true }
@@ -26,7 +27,6 @@ serde = ["dep:serde", "portgraph/serde", "smallvec/serde"]
 datagen = ["dep:rand", "dep:serde_json", "dep:clap", "dep:rmp-serde"]
 
 [dev-dependencies]
-itertools = "0.10.5"
 proptest = "1.1.0"
 serde = "1.0.156"
 serde_json = "1.0.96"
