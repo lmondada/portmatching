@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt::{Debug, Display}, fs,
+    fmt::{Debug, Display},
 };
 
 use itertools::Itertools;
@@ -85,7 +85,6 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
 impl<C: Clone + Ord + Constraint, P> TrieMatcher<C, Address, P>
 where
     P: Pattern<Constraint = C>,
-    C: Display
 {
     /// Spread transitions across nodes to minimise the number of constraints
     /// to check
@@ -118,8 +117,8 @@ where
         let is_totally_ordered = totally_ordered(&constraints);
         for i in (0..self.trie.graph.num_outputs(node)).rev() {
             let Some(next_p) = self.trie.graph.output(node, i + 1) else {
-                        continue
-                    };
+                continue
+            };
             let p = self.trie.graph.output(node, i).unwrap();
             if is_totally_ordered || self.trie.transition(p) == self.trie.transition(next_p) {
                 self.merge_ports(p, next_p);
@@ -205,7 +204,7 @@ where
         for line in lines {
             // Traverse the line
             let mut first_edge = true;
-            for ref e @ &Edge(out_port, _) in line {
+            for e @ &Edge(out_port, _) in line {
                 let constraint = pattern.to_constraint(e);
                 if self.add_non_det(first_edge) {
                     // The edge is added non-deterministically
@@ -309,7 +308,6 @@ impl<C: Clone + Ord + Constraint, G, P> ManyPatternMatcher<G, P> for TrieMatcher
 where
     Self: Matcher<G>,
     P: Pattern<Constraint = C>,
-    C: Display
 {
     type Constraint = C;
 
@@ -348,8 +346,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use glob::glob;
-    use std::fs;
+    // use glob::glob;
+    // use std::fs;
 
     use itertools::Itertools;
 
@@ -725,15 +723,15 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
-            for entry in glob("pattern_*.json").expect("glob pattern failed") {
-                if let Ok(path) = entry {
-                    fs::remove_file(path).expect("Removing file failed");
-                }
-            }
-            for (i, p) in patterns.iter().enumerate() {
-                fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(p).unwrap()).unwrap();
-            }
-            fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            // for entry in glob("pattern_*.json").expect("glob pattern failed") {
+            //     if let Ok(path) = entry {
+            //         fs::remove_file(path).expect("Removing file failed");
+            //     }
+            // }
+            // for (i, p) in patterns.iter().enumerate() {
+            //     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(p).unwrap()).unwrap();
+            // }
+            // fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
             let patterns = patterns
                 .into_iter()
                 .map(|p| UnweightedPattern::from_graph(p).unwrap())
@@ -756,7 +754,7 @@ mod tests {
                         .collect_vec()
                 })
                 .collect_vec();
-            fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
             let mut matcher = TrieMatcher::from_patterns(patterns.clone());
             matcher.optimise(1, 10);
             let many_matches = matcher.find_matches(&g);
