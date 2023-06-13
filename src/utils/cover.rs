@@ -59,7 +59,13 @@ where
             .input_links(node)
             .flatten()
             .map(|p| graph.port_node(p).expect("Invalid port"))
-            .any(|n| all_nodes.contains(&n) && !visited.contains(&n))
+            .any(|n| {
+                let p = all_nodes.contains(&n) && !visited.contains(&n);
+                if p {
+                    // println!("Waiting for node {n:?}");
+                }
+                p
+            })
         {
             // there is a predecessor in nodes that was not yet visited, so wait
             curr_nodes.push_back(node);
@@ -118,8 +124,8 @@ where
                 for old_port in graph.all_ports(old) {
                     let offset = graph.port_offset(old_port).expect("invalid port");
                     let new_port = graph.port_index(new, offset).expect("invalid offset");
-                    let old_val = trace.take(old_port);
-                    if old_val != Default::default() {
+                    if trace.get(old_port) != &Default::default() {
+                        let old_val = trace.get(old_port).clone();
                         trace.set(new_port, old_val);
                     }
                     if let Some(val) = trace_curr.get(&old_port).cloned() {

@@ -104,7 +104,8 @@ fn perform_benches(c: &mut Criterion) {
         .next()
         .expect("Did not find any large circuit");
 
-    let optim_cutoff = 20;
+    let size_cutoff = 10;
+    let depth_cutoff = 5;
     let mut group = c.benchmark_group("Many Patterns Matching");
     bench_matching(
         "Naive matching",
@@ -130,7 +131,7 @@ fn perform_benches(c: &mut Criterion) {
         &graph,
         |ps| {
             let mut m = TrieMatcher::from_patterns(ps);
-            m.optimise(optim_cutoff);
+            m.optimise(size_cutoff, depth_cutoff);
             m
         },
     );
@@ -183,7 +184,7 @@ fn perform_benches(c: &mut Criterion) {
         (0..=300).step_by(30),
         |ps| {
             let mut m = TrieMatcher::from_patterns(ps);
-            m.optimise(optim_cutoff);
+            m.optimise(size_cutoff, depth_cutoff);
             m
         },
     );

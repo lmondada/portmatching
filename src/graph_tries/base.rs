@@ -6,14 +6,15 @@ use std::{
 };
 
 use bitvec::vec::BitVec;
+use itertools::Itertools;
 use portgraph::{
-    dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex,
-    PortOffset, UnmanagedDenseMap, Weights, algorithms::toposort,
+    algorithms::toposort, dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex,
+    PortOffset, UnmanagedDenseMap, Weights,
 };
 
 use crate::{constraint::Constraint, utils::cover::untangle_threads};
 
-use super::{GraphTrie, StateID};
+use super::{root_state, GraphTrie, StateID};
 
 /// A node in the GraphTrie.
 ///
@@ -180,6 +181,7 @@ impl<C: Display + Clone, A: Debug + Clone> BaseGraphTrie<C, A> {
                     .map(|c| c.to_string())
                     .unwrap_or("FAIL".to_string()),
             };
+            str_weights[p] += &format!(" [{:?}]", self.trace[p]);
         }
         for n in self.graph.nodes_iter() {
             str_weights[n] = self.weights[n].to_string();
@@ -218,6 +220,13 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         &self.weights[state]
     }
 
+    /// Reset the trie trace and world age.
+    pub fn reset(&mut self) -> UnmanagedDenseMap<PortIndex, (Vec<usize>, bool)> {
+        // Reset all trackers
+        self.world_age = 0;
+        mem::take(&mut self.trace)
+    }
+
     /// Reorganise trie after having added transitions.
     ///
     /// This step is essential after each pattern that has been added to the trie.
@@ -231,9 +240,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     where
         F: FnMut(StateID, StateID),
     {
-        // Reset all trackers
-        self.world_age = 0;
-        let trace = mem::take(&mut self.trace);
+        let trace = self.reset();
 
         let weights = RefCell::new(&mut self.weights);
 
@@ -259,6 +266,14 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                 self.trace.rekey(old, new)
             },
         )
+    }
+
+    pub(crate) fn insert_trace(&mut self, from: PortIndex) {
+        if !self.trace[from].0.contains(&self.world_age) {
+            let to = self.graph.port_link(from).expect("unlinked port");
+            self.trace[from].0.push(self.world_age);
+            self.trace[to].0.push(self.world_age);
+        }
     }
 
     fn add_state(&mut self, non_deterministic: bool) -> StateID {
@@ -302,10 +317,10 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         from_world_age: usize,
         to_world_age: usize,
     ) -> PortIndex {
-        let fail_port = self.graph.outputs(state).find(|&p| {
-            self.weights[p].is_none()
-                && (!self.trace[p].1 || self.trace[p].0.contains(&from_world_age))
-        });
+        let fail_port = self
+            .graph
+            .outputs(state)
+            .find(|&p| self.weights[p].is_none());
         let (out_port, in_port) = if let Some(out_port) = fail_port {
             let in_port = self
                 .graph
@@ -524,9 +539,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                     }
                     break;
                 }
-            } else if (!self.weights[state].non_deterministic || curr_cond == &new_cond)
-                && (!self.trace[transition].1 || self.trace[transition].0.contains(&from_world_age))
-            {
+            } else if (!self.weights[state].non_deterministic || curr_cond == &new_cond) {
                 // use existing transition
                 let in_port = self
                     .graph
@@ -538,11 +551,6 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                 }
                 next_states.push(self.graph.port_node(in_port).expect("invalid port"));
                 alread_inserted.insert(curr_cond.clone());
-            } else if !self.weights[state].non_deterministic || curr_cond == &new_cond {
-                // Copy existing transition
-                if alread_inserted.insert(merged_cond.clone()) {
-                    new_transitions.push((offset, merged_cond.clone()));
-                }
             }
             if merged_cond == new_cond {
                 // we've inserted the new condition, our job is done
@@ -651,17 +659,59 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
 
     pub(crate) fn relink(&mut self, port: PortIndex, new_link: StateID) -> Vec<StateID> {
         let unlinked = self.graph.unlink_port(port).expect("unlinked port");
-        self.add_edge(port, new_link)
-            .expect("just unlinked");
+        self.add_edge(port, new_link).expect("just unlinked");
         // Garbage collect nodes no longer linked to anything
         let mut removed = Vec::new();
         let unlinked = self.graph.port_node(unlinked).expect("invalid port");
         if self.graph.num_inputs(unlinked) == 1 {
             removed = toposort::<BitVec>(&self.graph, [unlinked], Direction::Outgoing).collect();
             for &n in removed.iter() {
-                self.graph.remove_node(n);
+                self.remove_node(n);
             }
+        } else {
+            self.remove_stray_inputs(unlinked);
         }
         removed
+    }
+
+    fn remove_node(&mut self, state: StateID) {
+        for port in self.graph.all_ports(state) {
+            self.weights[port] = None;
+            self.trace[port] = Default::default();
+        }
+        for port in self.graph.output_links(state).flatten().collect_vec() {
+            let child = self.graph.port_node(port).expect("invalid port");
+            self.remove_stray_inputs(child);
+        }
+        self.weights[state] = Default::default();
+        self.graph.remove_node(state);
+    }
+
+    pub(super) fn remove_stray_inputs(&mut self, node: NodeIndex)
+    where
+        C: Constraint + Clone + Ord,
+        A: Clone + Ord,
+    {
+        let mut shift_left = 0;
+        for i in 0..self.graph.num_inputs(node) {
+            let p = self.graph.input(node, i).expect("0 <= i < num_inputs");
+            if self.graph.port_link(p).is_none() {
+                shift_left += 1;
+            } else if shift_left > 0 {
+                let new = self
+                    .graph
+                    .port_index(node, PortOffset::new_incoming(i - shift_left))
+                    .expect("invalid i - shift_left");
+                if let Some(out_port) = self.graph.unlink_port(p) {
+                    self.graph.link_ports(out_port, new).unwrap();
+                }
+                self.weights.ports.rekey(p, Some(new));
+            }
+        }
+        self.set_num_ports(
+            node,
+            self.graph.num_inputs(node) - shift_left,
+            self.graph.num_outputs(node),
+        );
     }
 }
