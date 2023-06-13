@@ -1,65 +1,208 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeSet, HashSet},
     fmt, iter,
 };
 
-use portgraph::{PortIndex, SecondaryMap};
+use bitvec::vec::BitVec;
+use itertools::Itertools;
+use portgraph::{algorithms as pg, NodeIndex, PortGraph};
+use portgraph::{Direction, PortOffset};
 
-use crate::{constraint::ConstraintType, utils::toposort, Constraint};
+use crate::{
+    constraint::{mutually_exclusive, totally_ordered, ConstraintType},
+    Constraint,
+};
 
 use super::{root_state, BaseGraphTrie, StateID};
 
 // impl<A: Clone + Ord> BaseGraphTrie<C, A> {
 impl<C, A> BaseGraphTrie<C, A>
 where
-    C: ConstraintType + Clone + Ord,
-    C::CT: Ord,
+    C: Constraint + Clone + Ord,
     A: Clone + Ord,
-    C: fmt::Display,
-    A: fmt::Debug,
 {
-    /// Turn nodes into multiple ones by only relying on elementary constraints
-    pub fn optimise<F>(&mut self, mut clone_state: F, cutoff: usize)
-    where
-        F: FnMut(StateID, StateID),
-    {
-        let nodes = self
-            .graph
-            .nodes_iter()
+    /// The largest non-deterministic states, in topological order
+    pub(crate) fn large_non_det_states(&self, cutoff: usize) -> Vec<StateID> {
+        // Always process parent nodes first when converting to det to avoid
+        // node count explosion
+        pg::toposort::<BitVec<_>>(&self.graph, [root_state()], Direction::Outgoing)
             .filter(|&n| self.graph.num_outputs(n) > cutoff)
             .filter(|&n| self.weight(n).non_deterministic)
-            .collect::<Vec<_>>();
-
-        for node in nodes {
-            self.split_into_tree(node, &mut clone_state);
-        }
-
-        // Now turn non-deterministic states into deterministic if number of
-        // transitions remains unchanged
-        while let Some(node) = {
-            // In these cases it's easy (and sensible) to turn non-deterministic
-            // states into deterministic
-            self.graph.nodes_iter().find(|&n| {
-                self.graph.num_outputs(n) > cutoff && self.weight(n).non_deterministic && {
-                    let constraints = self
-                        .graph
-                        .outputs(n)
-                        .map(|p| self.weights[p].as_ref())
-                        .collect();
-                    totally_ordered(&constraints) || mutually_exclusive(&constraints)
-                }
-            })
-        } {
-            self.make_deterministic(node, &mut clone_state);
-        }
+            .collect()
     }
 
-    /// Only do this for non-det!
-    fn split_into_tree<F: FnMut(StateID, StateID)>(&mut self, node: StateID, mut clone_state: F) {
+    pub(crate) fn all_constraints(&self, state: StateID) -> Vec<Option<&C>> {
+        self.graph
+            .outputs(state)
+            .map(|p| self.weights[p].as_ref())
+            .collect()
+    }
+
+    pub(crate) fn split_into_det_tree(&mut self, node: StateID) -> Vec<StateID>
+    where
+        A: fmt::Debug,
+        C: ConstraintType,
+        C::CT: Ord,
+    {
+        // Split into non-deterministic tree
+        let bottom_nodes = self.split_into_tree(node);
+
+        let inner_nodes = pg::toposort_filtered::<HashSet<_>>(
+            &self.graph,
+            [node],
+            Direction::Outgoing,
+            |n| !bottom_nodes.contains(&n),
+            |_, _| true,
+        )
+        .collect_vec();
+
+        // Make inner nodes of tree deterministic
+        for node in inner_nodes {
+            let constraints = self.all_constraints(node);
+            if mutually_exclusive(&constraints) {
+                self.weights[node].non_deterministic = true;
+                continue;
+            } else if !totally_ordered(&constraints) {
+                // Do not attempt to make deterministic
+                continue;
+            }
+            for i in (0..self.graph.num_outputs(node)).rev() {
+                let child_i = |i| {
+                    let out = self.graph.output(node, i)?;
+                    let link = self.graph.port_link(out).expect("unlinked port");
+                    self.graph.port_node(link)
+                };
+                let Some(right) = child_i(i + 1) else {
+                    continue
+                };
+                let left = child_i(i).expect("0 <= i < num_outputs");
+                assert_eq!(self.weights[left], self.weights[right]);
+                assert!(self.weights[left].non_deterministic);
+
+                // merge right into left
+                let mut new_transitions = self
+                    .graph
+                    .outputs(right)
+                    .map(|right_p| {
+                        let mut offset = 0;
+                        let right_con = self.weights[right_p].as_ref();
+                        while offset < self.graph.num_outputs(left) {
+                            let left_p = self.graph.output(left, offset).expect("invalid port");
+                            let left_con = self.weights[left_p].as_ref();
+                            let Some(right_con) = right_con else {
+                                offset += 1;
+                                continue
+                            };
+                            let Some(left_con) = left_con else {
+                                break
+                            };
+                            if right_con.constraint_type() < left_con.constraint_type() {
+                                break;
+                            }
+                            offset += 1;
+                            if right_con == left_con {
+                                break;
+                            }
+                        }
+                        let next_right = self.graph.port_link(right_p).expect("unlinked port");
+                        let next_right = self.graph.port_node(next_right).expect("invalid port");
+                        (offset, right_con.cloned(), next_right)
+                    })
+                    .collect_vec();
+
+                // Create new ports for the new transitions
+                let n_ports = self.graph.num_outputs(left);
+                self.set_num_ports(
+                    left,
+                    self.graph.num_inputs(left),
+                    n_ports + new_transitions.len(),
+                );
+
+                // Now shift ports to make space for new ones
+                let mut new_offset = self.graph.num_outputs(left);
+                for offset in (0..=n_ports).rev() {
+                    // move existing transition
+                    if offset < n_ports {
+                        new_offset -= 1;
+                        let old = self
+                            .graph
+                            .port_index(left, PortOffset::new_outgoing(offset))
+                            .expect("invalid offset");
+                        let new = self
+                            .graph
+                            .port_index(left, PortOffset::new_outgoing(new_offset))
+                            .expect("invalid offset");
+                        if let Some(in_port) = self.graph.unlink_port(old) {
+                            self.graph.link_ports(new, in_port).unwrap();
+                        }
+                        self.weights.ports.rekey(old, Some(new));
+                    }
+                    // Insert new transitions
+                    while matches!(new_transitions.last(), Some(&(o, _, _)) if offset == o) {
+                        let (_, transition, next_state) =
+                            new_transitions.pop().expect("just checked");
+                        new_offset -= 1;
+                        let new = self
+                            .graph
+                            .port_index(left, PortOffset::new_outgoing(new_offset))
+                            .expect("invalid offset");
+                        self.weights[new] = transition.clone();
+                        self.add_edge(new, next_state).expect("new port index");
+                    }
+                    if offset == new_offset {
+                        // There are no more empty slots. We are done
+                        break;
+                    }
+                }
+            }
+            self.remove_duplicate_ports(node);
+            self.weights[node].non_deterministic = false;
+        }
+        bottom_nodes
+    }
+
+    pub(crate) fn remove_duplicate_ports(&mut self, node: StateID) {
+        // Clean up duplicates
+        let mut duplicates = BTreeSet::new();
+        let mut shift_left = 0;
+        for i in 0..self.graph.num_outputs(node) {
+            let p = self.graph.output(node, i).expect("0 <= i < num_outputs");
+            let c = self.weights[p].clone();
+            if !duplicates.insert(c) {
+                shift_left += 1;
+                self.graph.unlink_port(p);
+                self.weights[p] = None;
+                // Note: we know this node was added recently, so all descendants
+                // will also have other parents and no node will be orphan
+                // however, this leaves a dangling port in the child's inputs
+            } else if shift_left > 0 {
+                let new = self
+                    .graph
+                    .port_index(node, PortOffset::new_outgoing(i - shift_left))
+                    .expect("invalid i - shift_left");
+                if let Some(in_port) = self.graph.unlink_port(p) {
+                    self.graph.link_ports(new, in_port).unwrap();
+                }
+                self.weights.ports.rekey(p, Some(new));
+            }
+        }
+        self.set_num_ports(
+            node,
+            self.graph.num_inputs(node),
+            self.graph.num_outputs(node) - shift_left,
+        );
+    }
+
+    /// This only works for non-deterministic states
+    fn split_into_tree(&mut self, node: StateID) -> Vec<StateID>
+    where
+        C: ConstraintType,
+        C::CT: Ord,
+    {
+        assert!(self.weight(node).non_deterministic);
         let transitions = self
             .graph
             .outputs(node)
-            .filter(|&p| self.weights[p].is_some())
             .map(|p| {
                 let in_port = self.graph.unlink_port(p).expect("unlinked transition");
                 // note: we are leaving dangling inputs, but we know they will
@@ -67,398 +210,86 @@ where
                 self.graph.port_node(in_port).expect("invalid port")
             })
             .collect::<Vec<_>>();
-        let mut fail_transition = self
-            .graph
-            .outputs(node)
-            .find(|&p| self.weights[p].is_none())
-            .map(|p| {
-                let in_port = self.graph.unlink_port(p).expect("unlinked transition");
-                self.graph.port_node(in_port).expect("invalid port")
-            });
-        let fail_node_weight = fail_transition.map(|f| self.weight(f).clone());
         let constraints = self
             .graph
             .outputs(node)
-            .filter_map(|p| self.weights[p].take())
-            .map(|c| c.to_elementary())
+            .map(|p| self.weights[p].take())
+            .map(|c| {
+                if let Some(c) = c {
+                    c.to_elementary()
+                } else {
+                    vec![]
+                }
+            })
             .collect::<Vec<_>>();
         let all_constraint_types = constraints
             .iter()
             .flatten()
             .map(|c| c.constraint_type())
             .collect::<BTreeSet<_>>();
+
         // We space out constraints so they all follow the same layout
         let constraints = constraints.into_iter().map(|c| {
             let mut c = c.into_iter().peekable();
             let mut ret = Vec::new();
             for ct in all_constraint_types.iter() {
-                let Some(next) = c.peek() else { break };
-                if ct == &next.constraint_type() {
-                    ret.push(c.next());
+                if let Some(next) = c.peek() {
+                    if ct == &next.constraint_type() {
+                        ret.push(c.next());
+                    } else {
+                        ret.push(None);
+                    }
                 } else {
                     ret.push(None);
                 }
             }
             ret
         });
+
         self.set_num_ports(node, self.graph.num_inputs(node), 0);
-        // Use within loop, allocate once
-        let mut new_states = Vec::new();
+
+        let mut bottom_states = Vec::new();
         for (all_cons, in_node) in constraints.into_iter().zip(transitions) {
-            let mut states = vec![node];
+            let mut state = node;
             for (cons, is_first, is_last) in mark_first_last(&all_cons) {
-                new_states.clear();
-                for &state in &states {
-                    if let Some(cons) = cons {
-                        let mut new_state = is_last.then_some(in_node);
-                        new_states.append(&mut self.insert_transitions(
-                            state,
-                            cons.clone(),
-                            &mut new_state,
-                            0,
-                            0,
-                        ));
-                    } else {
-                        assert!(!is_last, "last transition should not be fail");
-                        // This only works because we know node is non-det
-                        let mut new_state = if is_first
-                            && fail_transition.is_some()
-                            && (fail_node_weight.as_ref().unwrap().out_port.is_none()
-                                || &self.weights[node] == fail_node_weight.as_ref().unwrap())
-                        {
-                            fail_transition
-                        } else {
-                            None
-                        };
-                        let next_p = self.follow_fail(state, &mut new_state, 0, 0);
-                        new_states.push(self.graph.port_node(next_p).unwrap());
-                    }
+                let mut new_state = is_last.then_some(in_node);
+                if is_last {
+                    bottom_states.push(state);
                 }
-                states.clear();
-                states.append(&mut new_states);
+                if let Some(cons) = cons {
+                    let next_states =
+                        self.insert_transitions(state, cons.clone(), &mut new_state, 0, 0);
+                    assert_eq!(next_states.len(), 1);
+                    state = next_states[0];
+                } else {
+                    let next_p = self.follow_fail(state, &mut new_state, 0, 0);
+                    state = self.graph.port_node(next_p).unwrap();
+                }
                 if !is_last {
-                    for &state in &states {
-                        self.weights[state] = self.weights[node].clone();
-                    }
-                }
-            }
-            self.finalize(root_state(), &mut clone_state);
-        }
-        if fail_transition.is_some() {
-            let in_p = self.follow_fail(node, &mut fail_transition, 0, 0);
-            let mut node = self.graph.port_node(in_p).expect("invalid port");
-            if let Some(out_port) = fail_node_weight.unwrap().out_port {
-                let next = self.valid_start_states(&out_port, node, false, &mut fail_transition, 0);
-                assert_eq!(next.len(), 1);
-                node = next[0];
-            }
-            debug_assert_eq!(node, fail_transition.unwrap());
-        }
-    }
-
-    /// Turn a non-deterministic state into a deterministic one
-    ///
-    /// Assumes all transitions are either totally ordered or mutually exclusive.
-    /// Otherwise calling this is undefined behaviour.
-    fn make_deterministic<F>(&mut self, state: StateID, mut clone_state: F)
-    where
-        F: FnMut(StateID, StateID),
-    {
-        if self.graph.num_outputs(state) < 2 {
-            // nothing to do
-            self.weights[state].non_deterministic = false;
-            return;
-        }
-        let first_p = self.graph.output(state, 0).expect("num_outputs > 0");
-        let snd_p = self.graph.output(state, 1).expect("num_outputs > 1");
-        if let (Some(first), Some(snd)) =
-            (self.weights[first_p].as_ref(), self.weights[snd_p].as_ref())
-        {
-            if first.and(snd).is_none() {
-                // By assumption all transitions are mutually exclusive, so nothing to do
-                self.weights[state].non_deterministic = false;
-                return;
-            }
-        }
-        for i in (0..self.graph.num_outputs(state)).rev() {
-            let p = self.graph.output(state, i).expect("0 <= i < num_outputs");
-            let Some(next_p) = self.graph.output(state, i+1) else { continue };
-            // By assumption all transitions are totally ordered, so we can merge
-            // next_p into p
-            self.merge_into(p, next_p, &mut clone_state);
-        }
-        self.weights[state].non_deterministic = false;
-    }
-
-    fn merge_into<F>(&mut self, into: PortIndex, other: PortIndex, mut clone_state: F)
-    where
-        F: FnMut(StateID, StateID),
-    {
-        self.trace = Default::default();
-        let root = self.graph.port_node(other).expect("invalid port");
-        let ages: BTreeMap<_, _> = toposort(&self.graph, root).zip(0..).collect();
-
-        self.trace[other].0.push(ages[&root]);
-        self.trace[into].0.push(ages[&root]);
-
-        let into = self.graph.port_link(into).expect("unlinked transition");
-        let into_node = self.graph.port_node(into).expect("invalid port");
-        let other = self.graph.port_link(other).expect("unlinked transition");
-        let other_node = self.graph.port_node(other).expect("invalid port");
-
-        if into_node == other_node {
-            return;
-        }
-
-        self.trace[other].0.push(ages[&other_node]);
-        self.trace[into].0.push(ages[&other_node]);
-
-        let mut unmerged: VecDeque<_> = [(into_node, other_node, ages[&other_node])].into();
-        let mut clones = BTreeMap::<_, BTreeSet<_>>::new();
-        let mut all_ogs = BTreeSet::new();
-        while let Some((into, other, from_world_age)) = unmerged.pop_front() {
-            clones.entry(into).or_default().insert(other);
-            all_ogs.insert(other);
-            let out_port = self.weights[other].out_port.clone();
-            let start_states = if let Some(out_port) = out_port {
-                self.valid_start_states(&out_port, into, true, &mut Some(other), from_world_age)
-            } else {
-                vec![into]
-            };
-            for into in start_states {
-                unmerged.extend(
-                    match (
-                        self.weights[into].non_deterministic,
-                        self.weights[other].non_deterministic,
-                    ) {
-                        (_, true) => self.merge_non_det(into, other, from_world_age, &ages),
-                        (true, false) => self.merge_non_det_det(into, other, from_world_age),
-                        (false, false) => self.merge_det(into, other, from_world_age, &ages),
-                    },
-                );
-            }
-        }
-
-        // little trick to avoid breaking up OG state in `finalize`
-        for &og in &all_ogs {
-            for p in self.graph.inputs(og) {
-                let v = &mut self.trace[p].0;
-                if v.is_empty() {
-                    v.push(ages[&og]);
-                }
-                debug_assert_eq!(*v, vec![ages[&og]]);
-            }
-        }
-        // let mut weights = Weights::<String, _>::new();
-        // for p in self.graph.ports_iter() {
-        //     weights[p] = format!(
-        //         "{} [{:?}]",
-        //         self.weights[p]
-        //             .as_ref()
-        //             .map(|c| c.to_string())
-        //             .unwrap_or_default(),
-        //         self.trace[p]
-        //     );
-        // }
-        // fs::write(format!("trie_mid_{into:?}.gv"), dot_string_weighted(&self.graph, &weights)).unwrap();
-
-        for new in self.finalize(root, |old, new| {
-            if let Some(old) = clones.get(&old).cloned() {
-                clones.entry(new).or_default().extend(old);
-            }
-            clone_state(old, new)
-        }) {
-            for &old in clones.get(&new).into_iter().flatten() {
-                clone_state(old, new);
-            }
-        }
-    }
-
-    fn merge_non_det(
-        &mut self,
-        into: StateID,
-        other: StateID,
-        from_world_age: usize,
-        ages: &BTreeMap<StateID, usize>,
-    ) -> Vec<(StateID, StateID, usize)> {
-        if other == into {
-            return vec![];
-        }
-        let mut unmerged = Vec::new();
-        for o in 0..self.graph.num_outputs(other) {
-            let p = self.graph.output(other, o).expect("invalid port");
-            let next_p = self.graph.port_link(p).expect("unlinked transition");
-            let next_other = self.graph.port_node(next_p).expect("invalid port");
-            // Mark the trace
-            if !self.trace[p].0.contains(&from_world_age) {
-                self.trace[p].0.push(from_world_age);
-                self.trace[next_p].0.push(ages[&next_other]);
-            }
-            if let Some(cons) = self.weights[p].clone() {
-                let (next_states, ages) = self.insert_transitions_ages(
-                    into,
-                    cons.clone(),
-                    &mut Some(next_other),
-                    from_world_age,
-                    ages[&next_other],
-                );
-                for (next_into, to_world_age) in next_states.into_iter().zip(ages) {
-                    if next_into != next_other {
-                        unmerged.push((next_into, next_other, to_world_age));
-                    }
-                }
-            } else if self.weights[into].non_deterministic {
-                let into_p = self.follow_fail(
-                    into,
-                    &mut Some(next_other),
-                    from_world_age,
-                    ages[&next_other],
-                );
-                let from = self.graph.port_link(into_p).expect("unlinked transition");
-                let to_world_age = get_next_world_age(from, into_p, &self.trace, from_world_age);
-                let next_into = self.graph.port_node(into_p).expect("invalid port");
-                if next_into != next_other {
-                    unmerged.push((next_into, next_other, to_world_age));
-                }
-            } else {
-                // Delay world age
-                if into != next_other {
-                    unmerged.push((into, next_other, from_world_age));
+                    self.weights[state] = self.weights[node].clone();
                 }
             }
         }
-        unmerged
-    }
-
-    fn merge_non_det_det(
-        &mut self,
-        into: StateID,
-        other: StateID,
-        from_world_age: usize,
-    ) -> Vec<(StateID, StateID, usize)> {
-        if other == into {
-            return vec![];
-        }
-        let mut unmerged = Vec::new();
-        if self.graph.num_outputs(other) > 0 {
-            let into_p = self.follow_fail(into, &mut Some(other), from_world_age, from_world_age);
-            let into = self.graph.port_node(into_p).expect("invalid port");
-            if into != other {
-                unmerged.push((into, other, from_world_age));
-            }
-        }
-        unmerged
-    }
-
-    fn merge_det(
-        &mut self,
-        into: StateID,
-        other: StateID,
-        from_world_age: usize,
-        ages: &BTreeMap<StateID, usize>,
-    ) -> Vec<(StateID, StateID, usize)> {
-        if into == other {
-            return vec![];
-        }
-        let mut unmerged = Vec::new();
-        let mut used_constraints = BTreeSet::new();
-        for o in 0..self.graph.num_outputs(other) {
-            let p = self.graph.output(other, o).expect("invalid port");
-            let next_p = self.graph.port_link(p).expect("unlinked transition");
-            let next_other = self.graph.port_node(next_p).expect("invalid port");
-            // Mark the trace
-            if !self.trace[p].0.contains(&from_world_age) {
-                self.trace[p].0.push(from_world_age);
-                self.trace[next_p].0.push(ages[&next_other]);
-            }
-            if let Some(cons) = self.weights[p].clone() {
-                let (next_states, new_used, next_ages) = self.insert_transitions_filtered(
-                    into,
-                    cons.clone(),
-                    &mut Some(next_other),
-                    |t| !used_constraints.contains(t),
-                    from_world_age,
-                    ages[&next_other],
-                );
-                used_constraints.extend(new_used);
-                for (next_into, to_world_age) in next_states.into_iter().zip(next_ages) {
-                    if next_into != next_other {
-                        unmerged.push((next_into, next_other, to_world_age));
-                    }
-                }
-            } else {
-                for transition in self.graph.outputs(into) {
-                    if self.weights[transition].is_some()
-                        && used_constraints.contains(self.weights[transition].as_ref().unwrap())
-                    {
-                        continue;
-                    }
-                    let next_into = self
-                        .graph
-                        .port_link(transition)
-                        .expect("invalid transition");
-                    if !self.trace[transition].0.contains(&from_world_age) {
-                        self.trace[transition].0.push(from_world_age);
-                        self.trace[next_into].0.push(ages[&next_other]);
-                    }
-                    let to_world_age =
-                        get_next_world_age(transition, next_into, &self.trace, from_world_age);
-                    let next_into = self.graph.port_node(next_into).expect("invalid port");
-                    if next_into != next_other {
-                        unmerged.push((next_into, next_other, to_world_age));
-                    }
-                }
-            }
-        }
-        unmerged
+        bottom_states
     }
 }
 
-/// Whether constraints are in a total order, from largest to smallest
-fn totally_ordered<C>(constraints: &Vec<Option<&C>>) -> bool
-where
-    C: Constraint + Ord,
-{
-    (0..(constraints.len() - 1)).all(|i| {
-        let Some(d) = constraints[i + 1] else { return true };
-        let Some(c) = constraints[i] else { return false };
-        let Some(candd) = c.and(d) else { return false };
-        &candd == c
-    })
-}
-
-/// Whether no two constraints are compatible
-fn mutually_exclusive<C>(constraints: &Vec<Option<&C>>) -> bool
-where
-    C: Constraint + Ord,
-{
-    for c1 in constraints {
-        for c2 in constraints {
-            let (Some(c1), Some(c2)) = (c1, c2) else { return false };
-            if c1.and(c2).is_some() {
-                return false;
-            }
-        }
+fn _depth(n: NodeIndex, graph: &PortGraph) -> usize {
+    let mut d = 1;
+    let mut layer = BTreeSet::from_iter([n]);
+    while !layer.contains(&root_state()) {
+        d += 1;
+        layer = layer
+            .into_iter()
+            .flat_map(|n| {
+                graph
+                    .input_links(n)
+                    .flatten()
+                    .map(|p| graph.port_node(p).unwrap())
+            })
+            .collect();
     }
-    true
-}
-
-pub(super) fn get_next_world_age<Map>(
-    from: PortIndex,
-    to: PortIndex,
-    trace: &Map,
-    from_world_age: usize,
-) -> usize
-where
-    Map: SecondaryMap<PortIndex, (Vec<usize>, bool)>,
-{
-    let pos = trace
-        .get(from)
-        .0
-        .iter()
-        .position(|&x| x == from_world_age)
-        .unwrap();
-    trace.get(to).0[pos]
+    d
 }
 
 fn mark_first_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Item, bool, bool)> {
@@ -476,6 +307,8 @@ fn mark_first_last<I: IntoIterator>(all_cons: I) -> impl Iterator<Item = (I::Ite
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use portgraph::{PortGraph, SecondaryMap, Weights};
 
     use crate::{
@@ -530,7 +363,8 @@ mod tests {
             trace: SecondaryMap::new(),
         };
 
-        trie.optimise(|_, _| {}, 1);
+        trie.split_into_det_tree(n0);
+        fs::write("test_optimise.dot", trie._dotstring()).unwrap();
         assert_eq!(
             trie._dotstring(),
             r#"digraph {

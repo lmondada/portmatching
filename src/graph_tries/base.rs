@@ -5,14 +5,15 @@ use std::{
     mem,
 };
 
+use bitvec::vec::BitVec;
 use portgraph::{
     dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex,
-    PortOffset, UnmanagedDenseMap, Weights,
+    PortOffset, UnmanagedDenseMap, Weights, algorithms::toposort,
 };
 
 use crate::{constraint::Constraint, utils::cover::untangle_threads};
 
-use super::{optimise::get_next_world_age, GraphTrie, StateID};
+use super::{GraphTrie, StateID};
 
 /// A node in the GraphTrie.
 ///
@@ -266,7 +267,7 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         node
     }
 
-    fn add_edge(
+    pub(super) fn add_edge(
         &mut self,
         out_port: PortIndex,
         in_node: StateID,
@@ -480,52 +481,9 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         from_world_age: usize,
         to_world_age: usize,
     ) -> Vec<NodeIndex> {
-        self.insert_transitions_filtered(
-            state,
-            new_cond,
-            new_state,
-            |_| true,
-            from_world_age,
-            to_world_age,
-        )
-        .0
-    }
-
-    pub(super) fn insert_transitions_ages(
-        &mut self,
-        state: NodeIndex,
-        new_cond: C,
-        new_state: &mut Option<NodeIndex>,
-        from_world_age: usize,
-        to_world_age: usize,
-    ) -> (Vec<NodeIndex>, Vec<usize>) {
-        let (a, _, b) = self.insert_transitions_filtered(
-            state,
-            new_cond,
-            new_state,
-            |_| true,
-            from_world_age,
-            to_world_age,
-        );
-        (a, b)
-    }
-
-    pub(super) fn insert_transitions_filtered<F>(
-        &mut self,
-        state: NodeIndex,
-        new_cond: C,
-        new_state: &mut Option<NodeIndex>,
-        mut transition_filter: F,
-        from_world_age: usize,
-        to_world_age: usize,
-    ) -> (Vec<NodeIndex>, Vec<C>, Vec<usize>)
-    where
-        F: FnMut(&C) -> bool,
-    {
         // The states we are transitioning to, to be returned
         let mut next_states = Vec::new();
         let mut used_transitions = Vec::new();
-        let mut next_world_ages = Vec::new();
 
         // The transitions, along with the index where they should be inserted
         let mut new_transitions = Vec::new();
@@ -548,11 +506,6 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                 }
                 break;
             };
-            if !transition_filter(curr_cond) {
-                // We ignore transitions that do not pass the filter
-                offset += 1;
-                continue;
-            }
             let Some(merged_cond) = curr_cond.and(&new_cond) else {
                 // We ignore conditions we cannot merge with
                 offset += 1;
@@ -584,13 +537,6 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                     self.trace[in_port].0.push(to_world_age);
                 }
                 next_states.push(self.graph.port_node(in_port).expect("invalid port"));
-                used_transitions.push(new_cond.clone());
-                next_world_ages.push(get_next_world_age(
-                    transition,
-                    in_port,
-                    &self.trace,
-                    from_world_age,
-                ));
                 alread_inserted.insert(curr_cond.clone());
             } else if !self.weights[state].non_deterministic || curr_cond == &new_cond {
                 // Copy existing transition
@@ -654,14 +600,13 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
                 self.trace[in_port].0.push(to_world_age);
                 next_states.push(next_state);
                 used_transitions.push(transition);
-                next_world_ages.push(to_world_age)
             }
             if offset == new_offset {
                 // There are no more empty slots. We are done
                 break;
             }
         }
-        (next_states, used_transitions, next_world_ages)
+        next_states
     }
 
     /// Try to convert into a start state for `graph_edge`
@@ -688,16 +633,8 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
     }
 
     pub(super) fn set_num_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
-        if state == NodeIndex::new(2) {
-            println!(
-                "N4: ({}, {}) => ({incoming}, {outgoing})",
-                self.graph.num_inputs(state),
-                self.graph.num_outputs(state)
-            );
-        }
         self.graph
             .set_num_ports(state, incoming, outgoing, |old, new| {
-                println!("{old:?} => {new:?}");
                 let new = new.new_index();
                 self.trace.rekey(old, new);
                 self.weights.ports.rekey(old, new);
@@ -710,5 +647,21 @@ impl<C: Clone + Ord + Constraint, A: Clone + Ord> BaseGraphTrie<C, A> {
         }
         self.trace.rekey(old, Some(new));
         self.weights.ports.rekey(old, Some(new));
+    }
+
+    pub(crate) fn relink(&mut self, port: PortIndex, new_link: StateID) -> Vec<StateID> {
+        let unlinked = self.graph.unlink_port(port).expect("unlinked port");
+        self.add_edge(port, new_link)
+            .expect("just unlinked");
+        // Garbage collect nodes no longer linked to anything
+        let mut removed = Vec::new();
+        let unlinked = self.graph.port_node(unlinked).expect("invalid port");
+        if self.graph.num_inputs(unlinked) == 1 {
+            removed = toposort::<BitVec>(&self.graph, [unlinked], Direction::Outgoing).collect();
+            for &n in removed.iter() {
+                self.graph.remove_node(n);
+            }
+        }
+        removed
     }
 }

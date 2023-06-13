@@ -294,3 +294,32 @@ pub trait ConstraintType: Constraint {
     /// May fail if the constraint is not elementary
     fn constraint_type(&self) -> Self::CT;
 }
+
+/// Whether constraints are in a total order, from largest to smallest
+pub(crate) fn totally_ordered<C>(constraints: &Vec<Option<&C>>) -> bool
+where
+    C: Constraint + Ord,
+{
+    (0..(constraints.len() - 1)).all(|i| {
+        let Some(d) = constraints[i + 1] else { return true };
+        let Some(c) = constraints[i] else { return false };
+        let Some(candd) = c.and(d) else { return false };
+        &candd == c
+    })
+}
+
+/// Whether no two constraints are compatible
+pub(crate) fn mutually_exclusive<C>(constraints: &Vec<Option<&C>>) -> bool
+where
+    C: Constraint + Ord,
+{
+    for c1 in constraints {
+        for c2 in constraints {
+            let (Some(c1), Some(c2)) = (c1, c2) else { return false };
+            if c1.and(c2).is_some() {
+                return false;
+            }
+        }
+    }
+    true
+}
