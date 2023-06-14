@@ -1,16 +1,20 @@
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt, iter,
 };
 
 use bitvec::vec::BitVec;
 use itertools::Itertools;
-use portgraph::{algorithms as pg, NodeIndex, PortGraph};
+use portgraph::{
+    algorithms::{self as pg, toposort},
+    NodeIndex, PortGraph,
+};
 use portgraph::{Direction, PortOffset};
 
 use crate::{
-    constraint::{mutually_exclusive, totally_ordered, ConstraintType},
-    Constraint,
+    constraint::{mutually_exclusive, totally_ordered, Address, ConstraintType},
+    pattern::Edge,
+    Constraint, Pattern, Skeleton,
 };
 
 use super::{root_state, BaseGraphTrie, StateID};
@@ -281,6 +285,76 @@ where
             }
         }
         bottom_states
+    }
+}
+
+impl<C> BaseGraphTrie<C, Address>
+where
+    C: Constraint + Clone + Ord,
+{
+    pub(crate) fn consume_pattern<P: Pattern<Constraint = C>>(
+        &self,
+        pattern: &P,
+        state: StateID,
+    ) -> Vec<Vec<Edge>> {
+        let skeleton = Skeleton::new(pattern.graph(), pattern.root());
+
+        let mut lines = pattern.all_lines();
+        let mut line_ind = BTreeMap::new();
+        let max_ind = (lines.len(), lines[lines.len() - 1].len());
+        for node in toposort::<BitVec>(&self.graph, [root_state()], Direction::Outgoing) {
+            if node == root_state() {
+                line_ind.insert(node, (0, 0));
+                continue;
+            } else {
+                line_ind.insert(node, max_ind);
+            }
+            for p in self.graph.input_links(node).flatten() {
+                let in_node = self.graph.port_node(p).unwrap();
+                let curr_edge = {
+                    let (i, j) = line_ind[&in_node];
+                    lines.get(i).map(|x| &x[j])
+                };
+                let Some(curr_edge) = curr_edge else { continue };
+                let mut increase_ind = false;
+                if self.weights[in_node].out_port == Some(skeleton.get_port_address(curr_edge.0)) {
+                    let curr_c = pattern.to_constraint(curr_edge);
+                    if let Some(in_c) = self.weights[p].as_ref() {
+                        let Some(merged) = in_c.and(&curr_c) else {
+                            // Constraint is not compatible, skip
+                            continue;
+                        };
+                        if &merged == in_c {
+                            // that means in_c => curr_c, i.e. curr_c is satisfied
+                            increase_ind = true;
+                        }
+                    }
+                }
+                let new_ind = if increase_ind {
+                    let (i, j) = line_ind[&in_node];
+                    if j + 1 == lines[i].len() {
+                        (i + 1, 0)
+                    } else {
+                        (i, j + 1)
+                    }
+                } else {
+                    line_ind[&in_node]
+                };
+                if line_ind[&node] > new_ind {
+                    // We can reduce the index of this node
+                    line_ind.insert(node, new_ind);
+                }
+            }
+            if node == state {
+                break;
+            }
+        }
+        let (i, j) = line_ind[&state];
+        lines.drain(0..i);
+        if !lines.is_empty() {
+            lines[0].drain(0..j);
+        }
+        lines
     }
 }
 
