@@ -105,16 +105,18 @@ where
                             if right_con.constraint_type() < left_con.constraint_type() {
                                 break;
                             }
-                            offset += 1;
                             if right_con == left_con {
                                 break;
                             }
+                            offset += 1;
                         }
                         let next_right = self.graph.port_link(right_p).expect("unlinked port");
                         let next_right = self.graph.port_node(next_right).expect("invalid port");
                         (offset, right_con.cloned(), next_right)
                     })
                     .collect_vec();
+
+                new_transitions.sort_unstable_by_key(|&(o, _, _)| o);
 
                 // Create new ports for the new transitions
                 let n_ports = self.graph.num_outputs(left);
@@ -157,6 +159,7 @@ where
                     }
                     if offset == new_offset {
                         // There are no more empty slots. We are done
+                        assert!(new_transitions.is_empty());
                         break;
                     }
                 }
