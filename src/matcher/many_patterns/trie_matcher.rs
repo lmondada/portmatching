@@ -154,6 +154,7 @@ where
         }
 
         // Now add all into patterns not in other
+        // TODO: maybe other \ into has less patterns, we could merge the other way around
         for &pattern_id in into_patterns.difference(&other_patterns) {
             // TODO: find out how much of the pattern must be added
 
