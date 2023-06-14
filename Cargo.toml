@@ -43,6 +43,14 @@ features = ["proptest", "serde"]
 name = "large_graph"
 required-features = ["serde"]
 
+[[example]]
+name = "count_transitions"
+required-features = ["serde", "datagen"]
+
+[[example]]
+name = "optimise_graph"
+required-features = ["serde", "datagen"]
+
 [[test]]
 name = "from_saved_patterns"
 required-features = ["serde"]
