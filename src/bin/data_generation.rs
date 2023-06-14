@@ -122,8 +122,8 @@ fn main() {
 }
 
 fn precompile(patterns: &[UnweightedPattern], sizes: &[usize], dir: &str) {
-    let size_cutoff = 10;
-    let depth_cutoff = 5;
+    let size_cutoff = 5;
+    let depth_cutoff = 8;
     fs::create_dir_all(format!("{dir}/tries")).expect("could not create directory");
 
     let n_sizes = sizes.len();
