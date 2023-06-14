@@ -159,13 +159,18 @@ where
             // TODO: find out how much of the pattern must be added
 
             self.trie.reset();
-
-            let all_lines = self.patterns[pattern_id.0].all_lines();
+            // manually add trace
             self.trie.insert_trace(into);
+
             let next = self.trie.graph.port_link(into).expect("unlinked port");
             let next = self.trie.graph.port_node(next).expect("invalid port");
-            self.add_lines(&all_lines, pattern_id, next);
-            // manually add trace
+
+            self.add_lines(
+                self.trie
+                    .consume_pattern(&self.patterns[pattern_id.0], next),
+                pattern_id,
+                next,
+            );
 
             // A callback when a state is cloned in the trie
             // necessary to keep track of the match states
@@ -189,9 +194,9 @@ where
         }
     }
 
-    fn add_lines<'a>(
+    fn add_lines(
         &mut self,
-        lines: impl IntoIterator<Item = impl IntoIterator<Item = &'a Edge>>,
+        lines: impl IntoIterator<Item = impl IntoIterator<Item = Edge>>,
         pattern_id: PatternID,
         root: StateID,
     ) {
@@ -205,8 +210,8 @@ where
         for line in lines {
             // Traverse the line
             let mut first_edge = true;
-            for e @ &Edge(out_port, _) in line {
-                let constraint = pattern.to_constraint(e);
+            for e @ Edge(out_port, _) in line {
+                let constraint = pattern.to_constraint(&e);
                 if self.add_non_det(first_edge) {
                     // The edge is added non-deterministically
                     current_states = self.trie.add_graph_edge_nondet(
@@ -320,7 +325,7 @@ where
         // Decompose a pattern into "lines", which are paths in the pattern
         let all_lines = self.patterns[pattern_id.0].all_lines();
 
-        self.add_lines(&all_lines, pattern_id, root_state());
+        self.add_lines(all_lines, pattern_id, root_state());
 
         // A callback when a state is cloned in the trie
         // necessary to keep track of the match states
