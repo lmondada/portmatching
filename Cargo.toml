@@ -22,16 +22,11 @@ serde_json = { version = "1.0.96", optional = true }
 clap = { version = "4.2.2", features = ["derive"], optional = true }
 rmp-serde = { version = "1.1.1", optional = true }
 glob = { version = "0.3.1", optional = true }
+csv = { version = "1.2.2", optional = true }
 
 [features]
 serde = ["dep:serde", "portgraph/serde", "smallvec/serde"]
-datagen = [
-    "dep:rand",
-    "dep:serde_json",
-    "dep:clap",
-    "dep:rmp-serde",
-    "dep:glob",
-]
+datagen = ["dep:rand", "dep:serde_json", "dep:clap", "dep:rmp-serde", "dep:glob", "dep:csv"]
 
 [dev-dependencies]
 proptest = "1.1.0"
