@@ -1,4 +1,4 @@
-use portgraph::{NodeIndex, PortGraph, SecondaryMap};
+use portgraph::{NodeIndex, PortGraph, UnmanagedDenseMap};
 
 use crate::{constraint::WeightedAdjConstraint, Pattern, Skeleton, UnweightedPattern};
 
@@ -13,7 +13,7 @@ pub struct WeightedPattern<N> {
     /// The (unweighted) pattern
     pattern: UnweightedPattern,
     /// Node weights
-    pub(crate) weights: SecondaryMap<NodeIndex, N>,
+    pub(crate) weights: UnmanagedDenseMap<NodeIndex, N>,
 }
 
 impl<N: Clone + Eq> Pattern for WeightedPattern<N> {
@@ -51,7 +51,7 @@ impl<N> WeightedPattern<N> {
     /// Create a new pattern from a graph.
     pub fn from_weighted_graph(
         graph: PortGraph,
-        weights: SecondaryMap<NodeIndex, N>,
+        weights: UnmanagedDenseMap<NodeIndex, N>,
     ) -> Result<Self, InvalidPattern> {
         Ok(WeightedPattern {
             pattern: UnweightedPattern::from_graph(graph)?,
