@@ -9,6 +9,8 @@ use super::{Edge, InvalidPattern};
 /// Patterns must be connected and have a fixed `root` node,
 /// which by default is chosen to be the centre of the graph, for fast
 /// matching and short relative paths to the root.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct WeightedPattern<N> {
     /// The (unweighted) pattern
     pattern: UnweightedPattern,
