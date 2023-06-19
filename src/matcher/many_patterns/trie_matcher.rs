@@ -80,6 +80,11 @@ impl<C: Constraint + Clone + Ord, A: Clone + Ord, P> TrieMatcher<C, A, P> {
             TrieConstruction::Balanced => is_first_edge,
         }
     }
+
+    /// Reference to pattern with given id
+    pub fn get_pattern(&self, id: PatternID) -> &P {
+        &self.patterns[id.0]
+    }
 }
 
 impl<C: Clone + Ord + Constraint, P> TrieMatcher<C, Address, P>

@@ -60,4 +60,9 @@ impl<N> WeightedPattern<N> {
             weights,
         })
     }
+
+    /// Set of weights of pattern.
+    pub fn weights(&self) -> &UnmanagedDenseMap<NodeIndex, N> {
+        &self.weights
+    }
 }

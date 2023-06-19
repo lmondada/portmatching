@@ -7,7 +7,10 @@ mod weighted;
 
 use std::collections::BTreeMap;
 
-use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset};
+use portgraph::{
+    substitute::{BoundedSubgraph, SubgraphRef},
+    NodeIndex, PortGraph, PortIndex, PortOffset,
+};
 
 #[doc(inline)]
 pub use unweighted::UnweightedPattern;
@@ -43,9 +46,9 @@ pub trait Pattern {
     ///
     /// This is useful to get the location of a pattern in a graph
     /// given a mapping of its root.
-    fn get_boundary(&self, root: NodeIndex, graph: &PortGraph) -> PatternBoundaries {
-        let mut out_edges = Vec::new();
-        let mut in_edges = Vec::new();
+    fn get_boundary(&self, root: NodeIndex, graph: &PortGraph) -> BoundedSubgraph {
+        let mut outputs = Vec::new();
+        let mut inputs = Vec::new();
         let mut pattern_to_graph = BTreeMap::from([(self.root(), root)]);
         for line in self.all_lines() {
             for edge in line {
@@ -59,17 +62,17 @@ pub trait Pattern {
                     let next_graph = graph.port_node(port_in).unwrap();
                     pattern_to_graph.insert(next_pattern, next_graph);
                 } else {
+                    let link = graph.port_link(port_out).expect("Invalid pattern in graph");
                     match &port_offset {
-                        PortOffset::Incoming(_) => in_edges.push(port_out),
-                        PortOffset::Outgoing(_) => out_edges.push(port_out),
+                        PortOffset::Incoming(_) => inputs.push(link),
+                        PortOffset::Outgoing(_) => outputs.push(link),
                     }
                 }
             }
         }
-        PatternBoundaries {
-            _in_edges: in_edges,
-            _out_edges: out_edges,
-        }
+        let subgraph =
+            SubgraphRef::new_from_indices(pattern_to_graph.into_values(), Some(graph.node_count()));
+        BoundedSubgraph::new(subgraph, inputs, outputs)
     }
 
     /// Every pattern has a unique canonical ordering of its edges.
@@ -116,4 +119,59 @@ pub enum InvalidPattern {
     DisconnectedPattern,
     /// Empty patterns are not allowed.
     EmptyPattern,
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+    use portgraph::{
+        substitute::{BoundedSubgraph, SubgraphRef},
+        PortGraph,
+    };
+
+    use crate::{Pattern, UnweightedPattern};
+
+    #[test]
+    fn test_get_boundary() {
+        let mut g = PortGraph::new();
+        let mut p = PortGraph::new();
+        //      1 -- 3
+        // 0 <          > 4 -- 5
+        //      2 ----
+        let n0 = g.add_node(0, 2);
+        let n1 = g.add_node(1, 1);
+        let p1 = p.add_node(1, 1);
+        g.link_nodes(n0, 0, n1, 0).unwrap();
+        let n2 = g.add_node(1, 1);
+        let p2 = p.add_node(1, 1);
+        g.link_nodes(n0, 1, n2, 0).unwrap();
+        let n3 = g.add_node(1, 1);
+        let p3 = p.add_node(1, 1);
+        g.link_nodes(n1, 0, n3, 0).unwrap();
+        p.link_nodes(p1, 0, p3, 0).unwrap();
+        let n4 = g.add_node(2, 1);
+        let p4 = p.add_node(2, 1);
+        g.link_nodes(n3, 0, n4, 0).unwrap();
+        p.link_nodes(p3, 0, p4, 0).unwrap();
+        g.link_nodes(n2, 0, n4, 1).unwrap();
+        p.link_nodes(p2, 0, p4, 1).unwrap();
+        let n5 = g.add_node(1, 0);
+        g.link_nodes(n4, 0, n5, 0).unwrap();
+
+        let left = UnweightedPattern::from_graph(p)
+            .unwrap()
+            .get_boundary(n3, &g);
+        let right = BoundedSubgraph::new(
+            SubgraphRef::new_from_indices([n1, n2, n3, n4], Some(6)),
+            g.outputs(n0).collect(),
+            g.inputs(n5).collect(),
+        );
+        // Ideally: assert_eq!(left, right);
+        assert_eq!(
+            left.subgraph.nodes().collect_vec(),
+            right.subgraph.nodes().collect_vec()
+        );
+        assert_eq!(left.inputs, right.inputs);
+        assert_eq!(left.outputs, right.outputs);
+    }
 }
