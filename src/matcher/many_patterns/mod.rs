@@ -39,7 +39,7 @@ pub struct PatternMatch {
 }
 
 /// ID for a pattern in a [`ManyPatternMatcher`].
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct PatternID(pub usize);
 
