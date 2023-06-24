@@ -17,6 +17,7 @@ use super::{Address, ConstraintType, ConstraintVec, NodeRange, PortAddress, Spin
 ///
 /// Furthermore, a constraint can include a condition on the target node weight
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum WeightedAdjConstraint<N> {
     /// The port is not linked.
     Dangling,
