@@ -7,8 +7,6 @@ on:
 
 name: "Data Generation for Benchmarking"
 
-# flag
-
 permissions:
   contents: write
 
