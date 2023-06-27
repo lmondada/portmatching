@@ -3,7 +3,6 @@ use std::{
     fmt::{Debug, Display},
 };
 
-use itertools::Itertools;
 use portgraph::{
     algorithms::postorder, dot::dot_string_weighted, Direction, NodeIndex, PortGraph, PortIndex,
 };
@@ -103,20 +102,22 @@ where
             has_changed = false;
             for node in self.trie.large_non_det_states(cutoff, depth_cutoff) {
                 // Split `node` into a tree of mostly deterministic elementary nodes
-                let bottom_nodes = self.trie.split_into_det_tree(node);
+                let _bottom_nodes = self.trie.split_into_det_tree(node);
 
+                // TODO: fix this
                 // now make bottom nodes deterministic
-                for bottom_node in bottom_nodes.into_iter().unique() {
-                    has_changed |= self.try_make_det(bottom_node);
-                }
-                if has_changed {
-                    break;
-                }
+                // for bottom_node in bottom_nodes.into_iter().unique() {
+                //     has_changed |= self.try_make_det(bottom_node);
+                // }
+                // if has_changed {
+                //     break;
+                // }
             }
         }
     }
 
     /// Try turning `node` into deterministc node
+    #[allow(dead_code)]
     fn try_make_det(&mut self, node: NodeIndex) -> bool {
         let constraints = self.trie.all_constraints(node);
         let is_totally_ordered = totally_ordered(&constraints);
