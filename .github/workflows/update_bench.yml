@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [new-optimise]
+    branches: [consume-pattern-opti]
 
 name: "Update origin/bench"
 
@@ -23,8 +23,8 @@ jobs:
           git config user.name "GitHub Actions Bot"
           git config user.email "<>"
       
-      - name: Merge new-optimise into bench
+      - name: Merge consume-pattern-opti into bench
         run: |
           git switch bench
-          git merge -Xtheirs -m "Merge branch new-optimise into bench" origin/new-optimise
+          git merge -Xtheirs -m "Merge branch consume-pattern-opti into bench" origin/consume-pattern-opti
           git push
