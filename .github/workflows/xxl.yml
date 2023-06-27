@@ -16,7 +16,7 @@ jobs:
 
     strategy:
       matrix:
-        sizes: [500, 1000, 1500, 2000]
+        sizes: [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000]
     
     steps:
       - uses: actions/checkout@v3
