@@ -12,12 +12,16 @@ use itertools::Itertools;
 
 use portgraph::NodeIndex;
 use portgraph::PortGraph;
+use portgraph::UnmanagedDenseMap;
 use portmatching::constraint::Address;
 use portmatching::constraint::UnweightedAdjConstraint;
+use portmatching::constraint::WeightedAdjConstraint;
 use portmatching::matcher::many_patterns::{ManyPatternMatcher, NaiveManyMatcher, TrieMatcher};
 use portmatching::matcher::Matcher;
 use portmatching::pattern::UnweightedPattern;
 use portmatching::TrieConstruction;
+use portmatching::WeightedPattern;
+use rand::Rng;
 
 type Graph<'g> = (&'g PortGraph, NodeIndex);
 
@@ -56,6 +60,36 @@ fn bench_matching_xxl(
                 .expect("could not deserialize trie");
         group.bench_with_input(BenchmarkId::new(name, size), &size, |b, _| {
             b.iter(|| criterion::black_box(matcher.find_matches(graph)));
+        });
+    }
+}
+
+fn gen_weights(nodes: impl Iterator<Item = NodeIndex>) -> UnmanagedDenseMap<NodeIndex, usize> {
+    let mut rng = rand::thread_rng();
+    let mut weights = UnmanagedDenseMap::new();
+    for n in nodes {
+        weights[n] = rng.gen_range(0..8);
+    }
+    weights
+}
+
+fn bench_matching_xxl_weighted(
+    name: &str,
+    group: &mut BenchmarkGroup<WallTime>,
+    prefix: &str,
+    sizes: impl Iterator<Item = usize>,
+    graph: &PortGraph,
+) {
+    let weights = gen_weights(graph.nodes_iter());
+    group.sample_size(10);
+    for size in sizes {
+        group.throughput(Throughput::Elements(size as u64));
+        let file_name = format!("datasets/xxl/tries/weighted_{prefix}_{size}.bin");
+        let matcher: TrieMatcher<WeightedAdjConstraint<usize>, Address, WeightedPattern<usize>> =
+            rmp_serde::from_read(fs::File::open(file_name).unwrap())
+                .expect("could not deserialize trie");
+        group.bench_with_input(BenchmarkId::new(name, size), &size, |b, _| {
+            b.iter(|| criterion::black_box(matcher.find_weighted_matches(graph, &weights)));
         });
     }
 }
@@ -225,6 +259,23 @@ fn perform_benches(c: &mut Criterion) {
         &graph,
     );
     bench_matching_xxl(
+        "Balanced Graph Trie (optimised)",
+        &mut group,
+        "optimised",
+        (500..=5000).step_by(500),
+        &graph,
+    );
+    group.finish();
+
+    let mut group = c.benchmark_group("Many Patterns Matching XXL weighted");
+    bench_matching_xxl_weighted(
+        "Balanced Graph Trie",
+        &mut group,
+        "balanced",
+        (500..=5000).step_by(500),
+        &graph,
+    );
+    bench_matching_xxl_weighted(
         "Balanced Graph Trie (optimised)",
         &mut group,
         "optimised",
