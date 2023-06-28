@@ -1,12 +1,13 @@
 use clap::Parser;
-use itertools::Itertools;
-use portmatching::{utils::is_connected, ManyPatternMatcher, TrieMatcher, UnweightedPattern};
+use portmatching::{
+    utils::is_connected, ManyPatternMatcher, TrieMatcher, UnweightedPattern, WeightedPattern,
+};
 use std::{
     cmp,
     fs::{self, File},
 };
 
-use portgraph::PortGraph;
+use portgraph::{NodeIndex, PortGraph, UnmanagedDenseMap};
 use rand::{distributions::Uniform, prelude::Distribution, rngs::StdRng, Rng, SeedableRng};
 
 #[derive(Parser)]
@@ -68,22 +69,27 @@ fn main() {
 
     if let Some(sizes) = args.pre_compile {
         let pattern_path = format!("{dir}/small_circuits/pattern_*.json");
-        let patterns = glob::glob(&pattern_path)
+        let (patterns, weighted_patterns): (Vec<_>, Vec<_>) = glob::glob(&pattern_path)
             .expect("cannot read small circuits directory")
             .map(|p| {
-                let g = serde_json::from_reader(
+                let g: PortGraph = serde_json::from_reader(
                     File::open(p.as_ref().expect("path does not exist?"))
                         .expect("Could not open small circuit"),
                 )
                 .expect("could not serialize");
-                UnweightedPattern::from_graph(g).expect("pattern not connected")
+                let w = gen_weights(g.nodes_iter());
+                (
+                    UnweightedPattern::from_graph(g.clone()).expect("pattern not connected"),
+                    WeightedPattern::from_weighted_graph(g, w).expect("pattern not connected"),
+                )
             })
-            .collect_vec();
+            .unzip();
         let sizes = sizes
             .split(',')
             .map(|s| s.parse::<usize>().unwrap())
             .collect::<Vec<_>>();
         precompile(&patterns, &sizes, &dir);
+        precompile_weighted(&weighted_patterns, &sizes, &dir);
     } else {
         // large circuits
         {
@@ -121,6 +127,15 @@ fn main() {
     }
 }
 
+fn gen_weights(nodes: impl Iterator<Item = NodeIndex>) -> UnmanagedDenseMap<NodeIndex, usize> {
+    let mut rng = rand::thread_rng();
+    let mut weights = UnmanagedDenseMap::new();
+    for n in nodes {
+        weights[n] = rng.gen_range(0..8);
+    }
+    weights
+}
+
 fn precompile(patterns: &[UnweightedPattern], sizes: &[usize], dir: &str) {
     let size_cutoff = 5;
     let depth_cutoff = 8;
@@ -145,6 +160,41 @@ fn precompile(patterns: &[UnweightedPattern], sizes: &[usize], dir: &str) {
         opt_matcher.optimise(size_cutoff, depth_cutoff);
         fs::write(
             format!("{dir}/tries/optimised_{l}.bin"),
+            rmp_serde::to_vec(&opt_matcher).unwrap(),
+        )
+        .unwrap_or_else(|_| panic!("could not write to {dir}/tries"));
+        last_size = l;
+    }
+}
+
+fn precompile_weighted<N: Ord + Clone + serde::Serialize + 'static>(
+    patterns: &[WeightedPattern<N>],
+    sizes: &[usize],
+    dir: &str,
+) {
+    let size_cutoff = 5;
+    let depth_cutoff = 8;
+    fs::create_dir_all(format!("{dir}/tries")).expect("could not create directory");
+
+    let n_sizes = sizes.len();
+    let mut last_size = 0;
+    let mut matcher = TrieMatcher::default();
+    for (i, &l) in sizes.iter().enumerate() {
+        assert!(l > last_size);
+        println!("Compiling size {l}... ({}/{n_sizes})", i + 1);
+        for p in &patterns[last_size..l] {
+            matcher.add_pattern(p.clone());
+        }
+        fs::write(
+            format!("{dir}/tries/weighted_balanced_{l}.bin"),
+            rmp_serde::to_vec(&matcher).unwrap(),
+        )
+        .unwrap_or_else(|_| panic!("could not write to {dir}/tries"));
+        println!("Optimising size {l}... ({}/{n_sizes})", i + 1);
+        let mut opt_matcher = matcher.clone();
+        opt_matcher.optimise(size_cutoff, depth_cutoff);
+        fs::write(
+            format!("{dir}/tries/weighted_optimised_{l}.bin"),
             rmp_serde::to_vec(&opt_matcher).unwrap(),
         )
         .unwrap_or_else(|_| panic!("could not write to {dir}/tries"));
