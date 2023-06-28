@@ -9,7 +9,6 @@ name: "Precompiling XXL dataset"
 permissions:
   contents: write
 
-
 jobs:
   all:
     runs-on: ubuntu-latest
@@ -38,4 +37,5 @@ jobs:
           git pull
           git add -f datasets/xxl
           git commit -m "Precompiled size ${{ matrix.sizes }}"
+          git pull --rebase
           git push
