@@ -13,26 +13,26 @@ use itertools::Itertools;
 use portgraph::NodeIndex;
 use portgraph::PortGraph;
 use portgraph::UnmanagedDenseMap;
-use portmatching::constraint::Address;
-use portmatching::constraint::UnweightedAdjConstraint;
-use portmatching::constraint::WeightedAdjConstraint;
-use portmatching::matcher::many_patterns::{ManyPatternMatcher, NaiveManyMatcher, TrieMatcher};
-use portmatching::matcher::Matcher;
-use portmatching::pattern::UnweightedPattern;
-use portmatching::TrieConstruction;
-use portmatching::WeightedPattern;
+use portmatching::matcher::many_patterns::ManyMatcher;
+use portmatching::matcher::PortMatcher;
+use portmatching::matcher::UnweightedManyMatcher;
+use portmatching::NaiveManyMatcher;
+use portmatching::Pattern;
+use portmatching::Property;
 use rand::Rng;
 
-type Graph<'g> = (&'g PortGraph, NodeIndex);
-
-fn bench_matching<'g, M: Matcher<Graph<'g>>>(
+fn bench_matching<'g, M: PortMatcher<&'g PortGraph>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
-    patterns: &[UnweightedPattern],
+    patterns: &[Pattern<M::N, M::PNode, M::PEdge>],
     sizes: impl Iterator<Item = usize>,
     graph: &'g PortGraph,
-    mut get_matcher: impl FnMut(Vec<UnweightedPattern>) -> M,
-) {
+    mut get_matcher: impl FnMut(Vec<Pattern<M::N, M::PNode, M::PEdge>>) -> M,
+) where
+    M::PEdge: Property,
+    M::PNode: Property,
+    M::N: Copy,
+{
     group.sample_size(10);
     for n in sizes {
         group.throughput(Throughput::Elements(n as u64));
@@ -55,7 +55,7 @@ fn bench_matching_xxl(
     for size in sizes {
         group.throughput(Throughput::Elements(size as u64));
         let file_name = format!("datasets/xxl/tries/{prefix}_{size}.bin");
-        let matcher: TrieMatcher<UnweightedAdjConstraint, Address, UnweightedPattern> =
+        let matcher: UnweightedManyMatcher =
             rmp_serde::from_read(fs::File::open(file_name).unwrap())
                 .expect("could not deserialize trie");
         group.bench_with_input(BenchmarkId::new(name, size), &size, |b, _| {
@@ -64,6 +64,7 @@ fn bench_matching_xxl(
     }
 }
 
+#[allow(unused)]
 fn gen_weights(nodes: impl Iterator<Item = NodeIndex>) -> UnmanagedDenseMap<NodeIndex, usize> {
     let mut rng = rand::thread_rng();
     let mut weights = UnmanagedDenseMap::new();
@@ -73,6 +74,7 @@ fn gen_weights(nodes: impl Iterator<Item = NodeIndex>) -> UnmanagedDenseMap<Node
     weights
 }
 
+#[allow(unused)]
 fn bench_matching_xxl_weighted(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
@@ -80,27 +82,32 @@ fn bench_matching_xxl_weighted(
     sizes: impl Iterator<Item = usize>,
     graph: &PortGraph,
 ) {
-    let weights = gen_weights(graph.nodes_iter());
-    group.sample_size(10);
-    for size in sizes {
-        group.throughput(Throughput::Elements(size as u64));
-        let file_name = format!("datasets/xxl/tries/weighted_{prefix}_{size}.bin");
-        let matcher: TrieMatcher<WeightedAdjConstraint<usize>, Address, WeightedPattern<usize>> =
-            rmp_serde::from_read(fs::File::open(file_name).unwrap())
-                .expect("could not deserialize trie");
-        group.bench_with_input(BenchmarkId::new(name, size), &size, |b, _| {
-            b.iter(|| criterion::black_box(matcher.find_weighted_matches(graph, &weights)));
-        });
-    }
+    todo!()
+    // let weights = gen_weights(graph.nodes_iter());
+    // group.sample_size(10);
+    // for size in sizes {
+    //     group.throughput(Throughput::Elements(size as u64));
+    //     let file_name = format!("datasets/xxl/tries/weighted_{prefix}_{size}.bin");
+    //     let matcher: TrieMatcher<WeightedAdjConstraint<usize>, Address, WeightedPattern<usize>> =
+    //         rmp_serde::from_read(fs::File::open(file_name).unwrap())
+    //             .expect("could not deserialize trie");
+    //     group.bench_with_input(BenchmarkId::new(name, size), &size, |b, _| {
+    //         b.iter(|| criterion::black_box(matcher.find_weighted_matches(graph, &weights)));
+    //     });
+    // }
 }
 
-fn bench_trie_construction<'g, M: Matcher<Graph<'g>>>(
+fn bench_trie_construction<'g, M: PortMatcher<&'g PortGraph>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
-    patterns: &[UnweightedPattern],
+    patterns: &[Pattern<M::N, M::PNode, M::PEdge>],
     sizes: impl Iterator<Item = usize>,
-    mut get_matcher: impl FnMut(Vec<UnweightedPattern>) -> M,
-) {
+    mut get_matcher: impl FnMut(Vec<Pattern<M::N, M::PNode, M::PEdge>>) -> M,
+) where
+    M::N: Copy,
+    M::PNode: Copy,
+    M::PEdge: Copy,
+{
     group.sample_size(10);
     for n in sizes {
         group.throughput(Throughput::Elements(n as u64));
@@ -122,7 +129,7 @@ fn perform_benches(c: &mut Criterion) {
                     .expect("Could not open small circuit"),
             )
             .expect("could not serialize");
-            UnweightedPattern::from_graph(g).expect("pattern not connected")
+            Pattern::from_portgraph(&g)
         })
         .collect_vec();
     // TODO: use more than one graph in benchmark
@@ -138,8 +145,6 @@ fn perform_benches(c: &mut Criterion) {
         .next()
         .expect("Did not find any large circuit");
 
-    let size_cutoff = 10;
-    let depth_cutoff = 5;
     let mut group = c.benchmark_group("Many Patterns Matching");
     bench_matching(
         "Naive matching",
@@ -155,47 +160,7 @@ fn perform_benches(c: &mut Criterion) {
         &patterns,
         (0..=1000).step_by(100),
         &graph,
-        TrieMatcher::from_patterns,
-    );
-    bench_matching(
-        "Balanced Graph Trie (optimised)",
-        &mut group,
-        &patterns,
-        (0..=1000).step_by(100),
-        &graph,
-        |ps| {
-            let mut m = TrieMatcher::from_patterns(ps);
-            m.optimise(size_cutoff, depth_cutoff);
-            m
-        },
-    );
-    bench_matching(
-        "Non-deterministic Graph Trie",
-        &mut group,
-        &patterns,
-        (0..=1000).step_by(100),
-        &graph,
-        |ps| {
-            let mut matcher = TrieMatcher::new(TrieConstruction::NonDeterministic);
-            for p in ps {
-                matcher.add_pattern(p);
-            }
-            matcher
-        },
-    );
-    bench_matching(
-        "Deterministic Graph Trie",
-        &mut group,
-        &patterns,
-        (0..=300).step_by(100),
-        &graph,
-        |ps| {
-            let mut matcher = TrieMatcher::new(TrieConstruction::Deterministic);
-            for p in ps {
-                matcher.add_pattern(p);
-            }
-            matcher
-        },
+        ManyMatcher::from_patterns,
     );
     // This is too slow
     // bench_matching("Naive", &mut group, &patterns, &graph, |p| {
@@ -209,44 +174,7 @@ fn perform_benches(c: &mut Criterion) {
         &mut group,
         &patterns,
         (0..=300).step_by(30),
-        TrieMatcher::from_patterns,
-    );
-    bench_trie_construction(
-        "Balanced Graph Trie (optimised)",
-        &mut group,
-        &patterns,
-        (0..=300).step_by(30),
-        |ps| {
-            let mut m = TrieMatcher::from_patterns(ps);
-            m.optimise(size_cutoff, depth_cutoff);
-            m
-        },
-    );
-    bench_trie_construction(
-        "Non-deterministic Graph Trie",
-        &mut group,
-        &patterns,
-        (0..=300).step_by(30),
-        |ps| {
-            let mut matcher = TrieMatcher::new(TrieConstruction::NonDeterministic);
-            for p in ps {
-                matcher.add_pattern(p);
-            }
-            matcher
-        },
-    );
-    bench_trie_construction(
-        "Deterministic Graph Trie",
-        &mut group,
-        &patterns,
-        (0..=300).step_by(30),
-        |ps| {
-            let mut matcher = TrieMatcher::new(TrieConstruction::Deterministic);
-            for p in ps {
-                matcher.add_pattern(p);
-            }
-            matcher
-        },
+        ManyMatcher::from_patterns,
     );
     group.finish();
 

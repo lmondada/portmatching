@@ -1,4 +1,4 @@
-use portgraph::{NodeIndex, PortGraph};
+use portgraph::{LinkView, NodeIndex, PortGraph, PortMut, PortView};
 
 use super::pre_order::{Direction, PreOrder};
 
@@ -7,9 +7,7 @@ fn undirected_depths(graph: &PortGraph, start: NodeIndex) -> Vec<u32> {
     let mut depths = vec![u32::MAX; graph.node_capacity()];
     depths[start.index()] = 1;
     for node in preorder {
-        let neighs = graph
-            .all_links(node)
-            .filter_map(|p| graph.port_node(p.as_ref().copied()?));
+        let neighs = graph.all_neighbours(node);
         let min_depth = neighs
             .map(|neigh| depths[neigh.index()])
             .min()
@@ -66,8 +64,10 @@ pub fn centre(graph: &PortGraph) -> Result<NodeIndex, NoCentreError> {
 
 #[cfg(test)]
 mod tests {
+    use portgraph::{PortMut, PortView};
+
     use crate::utils::depth::{centre, undirected_depths, NoCentreError};
-    use crate::utils::test_utils::*;
+    use crate::utils::test::*;
 
     #[test]
     fn depths() {

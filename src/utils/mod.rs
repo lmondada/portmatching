@@ -2,23 +2,24 @@
 //!
 //! Much of this should probably be moved upstream to `portgraph`.
 
-pub(crate) mod cover;
 mod depth;
-// pub(crate) mod iter;
 pub(crate) mod pre_order;
 
-pub(crate) mod zero_range;
-pub(crate) use zero_range::ZeroRange;
+// pub(crate) mod cover;
+// pub(crate) mod zero_range;
+// pub(crate) use zero_range::ZeroRange;
 
 pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
 
+mod shared_iter;
+pub(crate) use shared_iter::SharedIter;
 // pub(crate) mod toposort;
 
 #[cfg(test)]
-pub(crate) mod test_utils;
+pub(crate) mod test;
 
-use portgraph::{Direction, NodeIndex, PortGraph, PortIndex, PortOffset};
+use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortIndex, PortOffset, PortView};
 
 /// Returns the port on the opposite side of the same node
 pub(crate) fn port_opposite(port: PortIndex, graph: &PortGraph) -> Option<PortIndex> {

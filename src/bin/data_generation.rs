@@ -1,13 +1,13 @@
 use clap::Parser;
 use portmatching::{
-    utils::is_connected, ManyPatternMatcher, TrieMatcher, UnweightedPattern, WeightedPattern,
+    matcher::UnweightedManyMatcher, utils::is_connected, Pattern, UnweightedPattern,
 };
 use std::{
     cmp,
     fs::{self, File},
 };
 
-use portgraph::{NodeIndex, PortGraph, UnmanagedDenseMap};
+use portgraph::{LinkMut, LinkView, NodeIndex, PortGraph, PortMut, PortView, UnmanagedDenseMap};
 use rand::{distributions::Uniform, prelude::Distribution, rngs::StdRng, Rng, SeedableRng};
 
 #[derive(Parser)]
@@ -69,7 +69,7 @@ fn main() {
 
     if let Some(sizes) = args.pre_compile {
         let pattern_path = format!("{dir}/small_circuits/pattern_*.json");
-        let (patterns, weighted_patterns): (Vec<_>, Vec<_>) = glob::glob(&pattern_path)
+        let (patterns, _weighted_patterns): (Vec<_>, Vec<_>) = glob::glob(&pattern_path)
             .expect("cannot read small circuits directory")
             .map(|p| {
                 let g: PortGraph = serde_json::from_reader(
@@ -77,10 +77,10 @@ fn main() {
                         .expect("Could not open small circuit"),
                 )
                 .expect("could not serialize");
-                let w = gen_weights(g.nodes_iter());
+                let _w = gen_weights(g.nodes_iter());
                 (
-                    UnweightedPattern::from_graph(g.clone()).expect("pattern not connected"),
-                    WeightedPattern::from_weighted_graph(g, w).expect("pattern not connected"),
+                    Pattern::from_portgraph(&g),
+                    (), // Pattern::from_weighted_graph(g, w).expect("pattern not connected"),
                 )
             })
             .unzip();
@@ -89,7 +89,7 @@ fn main() {
             .map(|s| s.parse::<usize>().unwrap())
             .collect::<Vec<_>>();
         precompile(&patterns, &sizes, &dir);
-        precompile_weighted(&weighted_patterns, &sizes, &dir);
+        // precompile_weighted(&weighted_patterns, &sizes, &dir);
     } else {
         // large circuits
         {
@@ -121,7 +121,7 @@ fn main() {
                 );
                 let f = format!("{dir}/small_circuits/pattern_{i}.json");
                 fs::write(f, serde_json::to_vec(&g).unwrap()).expect("could not write to file");
-                UnweightedPattern::from_graph(g).unwrap();
+                Pattern::from_portgraph(&g);
             }
         };
     }
@@ -137,37 +137,22 @@ fn gen_weights(nodes: impl Iterator<Item = NodeIndex>) -> UnmanagedDenseMap<Node
 }
 
 fn precompile(patterns: &[UnweightedPattern], sizes: &[usize], dir: &str) {
-    let size_cutoff = 5;
-    let depth_cutoff = 8;
     fs::create_dir_all(format!("{dir}/tries")).expect("could not create directory");
 
     let n_sizes = sizes.len();
-    let mut last_size = 0;
-    let mut matcher = TrieMatcher::default();
     for (i, &l) in sizes.iter().enumerate() {
-        assert!(l > last_size);
         println!("Compiling size {l}... ({}/{n_sizes})", i + 1);
-        for p in &patterns[last_size..l] {
-            matcher.add_pattern(p.clone());
-        }
+        let matcher = UnweightedManyMatcher::from_patterns(patterns[..l].to_vec());
         fs::write(
             format!("{dir}/tries/balanced_{l}.bin"),
             rmp_serde::to_vec(&matcher).unwrap(),
         )
         .unwrap_or_else(|_| panic!("could not write to {dir}/tries"));
         println!("Optimising size {l}... ({}/{n_sizes})", i + 1);
-        let mut opt_matcher = matcher.clone();
-        opt_matcher.optimise(size_cutoff, depth_cutoff);
-        fs::write(
-            format!("{dir}/tries/optimised_{l}.bin"),
-            rmp_serde::to_vec(&opt_matcher).unwrap(),
-        )
-        .unwrap_or_else(|_| panic!("could not write to {dir}/tries"));
-        last_size = l;
     }
 }
 
-fn precompile_weighted<N: Ord + Clone + serde::Serialize + 'static>(
+/*fn precompile_weighted<N: Ord + Clone + serde::Serialize + 'static>(
     patterns: &[WeightedPattern<N>],
     sizes: &[usize],
     dir: &str,
@@ -200,7 +185,7 @@ fn precompile_weighted<N: Ord + Clone + serde::Serialize + 'static>(
         .unwrap_or_else(|_| panic!("could not write to {dir}/tries"));
         last_size = l;
     }
-}
+}*/
 
 fn gen_qubits<R: Rng>(q: usize, k: usize, rng: &mut R) -> Vec<usize> {
     let qubits = Uniform::from(0..q);

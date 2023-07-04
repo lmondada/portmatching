@@ -5,7 +5,7 @@ use std::{
 
 use bitvec::prelude::*;
 
-use portgraph::{NodeIndex, PortGraph, PortOffset};
+use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView};
 
 pub enum Direction {
     _Incoming = 0,
@@ -46,14 +46,11 @@ impl<'graph> Iterator for PreOrder<'graph> {
         while self.visited.replace(next.index(), true) {
             next = self.queue.pop_front()?;
         }
-        let link_ports = match self.direction {
-            Direction::_Incoming => self.graph.links(next, portgraph::Direction::Incoming),
-            Direction::_Outgoing => self.graph.links(next, portgraph::Direction::Outgoing),
-            Direction::Both => self.graph.all_links(next),
-        };
-        for neigh in link_ports.filter_map(|p| p.and_then(|p| self.graph.port_node(p))) {
-            self.queue.push_back(neigh);
-        }
+        self.queue.extend(match self.direction {
+            Direction::_Incoming => self.graph.neighbours(next, portgraph::Direction::Incoming),
+            Direction::_Outgoing => self.graph.neighbours(next, portgraph::Direction::Outgoing),
+            Direction::Both => self.graph.all_neighbours(next),
+        });
         Some(next)
     }
 }
@@ -91,7 +88,7 @@ pub fn shortest_path(
     let mut nodes = pre_order(graph, source.iter().copied(), Direction::Both);
     while target.iter().all(|n| distance[n.index()] == usize::MAX) {
         let node = nodes.next()?;
-        if let Some(best_out_port) = graph.all_links(node).flatten().min_by_key(|&p| {
+        if let Some((_, best_out_port)) = graph.all_links(node).min_by_key(|&(_, p)| {
             let n = graph.port_node(p).expect("invalid port");
             distance[n.index()]
         }) {
@@ -121,9 +118,10 @@ pub fn shortest_path(
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
+    use portgraph::PortView;
 
     use super::{Direction, PreOrder};
-    use crate::utils::test_utils::*;
+    use crate::utils::test::*;
 
     #[test]
     fn preorder() {
