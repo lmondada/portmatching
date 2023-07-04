@@ -5,13 +5,10 @@ use std::{
 
 use itertools::Itertools;
 
-use portgraph::{NodeIndex, PortGraph};
+use portgraph::{NodeIndex, PortGraph, PortOffset};
 use portmatching::{
-    matcher::{
-        many_patterns::{ManyPatternMatcher, PatternID, PatternMatch, TrieMatcher},
-        Matcher,
-    },
-    pattern::UnweightedPattern,
+    matcher::{ManyMatcher, PatternMatch, PortMatcher},
+    UnweightedPattern,
 };
 
 fn valid_json_file(s: &str, pattern: &str) -> bool {
@@ -36,7 +33,7 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<UnweightedPattern>> {
         //     path.set_extension("gv");
         //     fs::write(path, dot_string(&p)).unwrap();
         // }
-        patterns.push(UnweightedPattern::from_graph(p).unwrap());
+        patterns.push(UnweightedPattern::from_portgraph(&p));
     }
 
     Ok(patterns)
@@ -61,13 +58,13 @@ fn load_graph(dir: &Path) -> io::Result<PortGraph> {
     Err(io::Error::new(io::ErrorKind::Other, "no file found"))
 }
 
-fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
+fn load_results(dir: &Path) -> io::Result<Vec<PatternMatch<UnweightedPattern, NodeIndex>>> {
     for entry in fs::read_dir(dir)? {
         let Ok(entry) = entry else { continue };
         let file_name = entry.file_name().to_str().unwrap().to_string();
         let path = entry.path();
         if valid_json_file(&file_name, "results") {
-            let res: Vec<Vec<PatternMatch>> =
+            let res: Vec<PatternMatch<UnweightedPattern, NodeIndex>> =
                 serde_json::from_reader(fs::File::open(path)?).unwrap();
             return Ok(res);
         }
@@ -76,23 +73,20 @@ fn load_results(dir: &Path) -> io::Result<Vec<Vec<PatternMatch>>> {
     Err(io::Error::new(io::ErrorKind::Other, "no file found"))
 }
 
-fn test<'g, M: Matcher<(&'g PortGraph, NodeIndex), Match = PatternMatch>>(
+fn test<'g, M>(
     matcher: &M,
     graph: &'g PortGraph,
-    exp: &[Vec<PatternMatch>],
+    exp: &Vec<PatternMatch<UnweightedPattern, NodeIndex>>,
     n_patterns: usize,
-) {
-    let many_matches = matcher.find_matches(graph);
-    let many_matches = (0..n_patterns)
-        .map(|i| {
-            many_matches
-                .iter()
-                .filter(|m| m.id == PatternID(i))
-                .cloned()
-                .collect_vec()
-        })
+) where
+    M: PortMatcher<&'g PortGraph, N = NodeIndex, PNode = (), PEdge = (PortOffset, PortOffset)>,
+{
+    let many_matches = matcher
+        .find_matches(graph)
+        .into_iter()
+        .map(|m| m.clone_pattern())
         .collect_vec();
-    assert_eq!(many_matches, exp);
+    assert_eq!(&many_matches, exp);
 }
 
 #[test]
@@ -165,17 +159,10 @@ fn from_saved_patterns() {
         let graph = load_graph(&path).unwrap();
         let exp = load_results(&path).unwrap();
 
-        let mut matcher = TrieMatcher::from_patterns(patterns.clone());
+        let mut matcher = ManyMatcher::from_patterns(patterns.clone());
         // {
         //     let mut path = path.clone();
         //     path.push("trie.gv");
-        //     fs::write(path, matcher.dotstring()).unwrap();
-        // }
-        test(&matcher, &graph, &exp, patterns.len());
-        matcher.optimise(1, 10);
-        // {
-        //     let mut path = path.clone();
-        //     path.push("trie_aft.gv");
         //     fs::write(path, matcher.dotstring()).unwrap();
         // }
         test(&matcher, &graph, &exp, patterns.len());

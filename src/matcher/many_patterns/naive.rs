@@ -1,21 +1,34 @@
+use std::borrow::Borrow;
+
+use itertools::Itertools;
 use portgraph::{NodeIndex, PortGraph};
 
 use crate::{
-    matcher::{Matcher, SinglePatternMatcher},
-    Pattern,
+    matcher::{Match, PortMatcher, SinglePatternMatcher},
+    patterns::UnweightedEdge,
+    Pattern, Property, Universe,
 };
-
-use super::{ManyPatternMatcher, PatternID, PatternMatch};
 
 /// A simple matcher for matching multiple patterns.
 ///
 /// This matcher uses [`SinglePatternMatcher`]s to match each pattern separately.
 /// Useful as a baseline in benchmarking.
-pub struct NaiveManyMatcher<C> {
-    matchers: Vec<SinglePatternMatcher<Box<dyn Pattern<Constraint = C>>>>,
+pub struct NaiveManyMatcher<U: Universe, PNode, PEdge: Property> {
+    matchers: Vec<SinglePatternMatcher<U, PNode, PEdge>>,
 }
 
-impl<C> Default for NaiveManyMatcher<C> {
+impl<U: Universe, PNode: Property, PEdge: Property> NaiveManyMatcher<U, PNode, PEdge> {
+    pub fn from_patterns(patterns: Vec<Pattern<U, PNode, PEdge>>) -> Self {
+        Self {
+            matchers: patterns
+                .into_iter()
+                .map(SinglePatternMatcher::new)
+                .collect(),
+        }
+    }
+}
+
+impl<U: Universe, PNode, PEdge: Property> Default for NaiveManyMatcher<U, PNode, PEdge> {
     fn default() -> Self {
         Self {
             matchers: Default::default(),
@@ -23,36 +36,32 @@ impl<C> Default for NaiveManyMatcher<C> {
     }
 }
 
-type Graph<'g> = (&'g PortGraph, NodeIndex);
+impl<G> PortMatcher<G> for NaiveManyMatcher<NodeIndex, (), UnweightedEdge>
+where
+    G: Borrow<PortGraph> + Copy,
+{
+    type N = NodeIndex;
+    type PNode = ();
+    type PEdge = UnweightedEdge;
 
-impl<'g, C> Matcher<Graph<'g>> for NaiveManyMatcher<C> {
-    type Match = PatternMatch;
-
-    fn find_anchored_matches(&self, graph @ (_, root): Graph<'g>) -> Vec<Self::Match> {
+    fn find_rooted_matches(&self, graph: G, root: Self::N) -> Vec<Match<'_, Self, G>> {
         self.matchers
             .iter()
-            .enumerate()
-            .flat_map(|(i, m)| {
-                m.find_anchored_matches(graph)
-                    .into_iter()
-                    .map(move |m| PatternMatch {
-                        id: PatternID(i),
-                        root: m[&root],
-                    })
-            })
+            .flat_map(|m| m.find_rooted_matches(graph, root))
             .collect()
+    }
+
+    fn nodes(g: G) -> Vec<Self::N> {
+        todo!()
     }
 }
 
-impl<'g, C, P> ManyPatternMatcher<Graph<'g>, P> for NaiveManyMatcher<C>
-where
-    P: Pattern<Constraint = C> + 'static,
+impl<U: Universe, PNode, PEdge: Property> FromIterator<SinglePatternMatcher<U, PNode, PEdge>>
+    for NaiveManyMatcher<U, PNode, PEdge>
 {
-    type Constraint = C;
-
-    fn add_pattern(&mut self, pattern: P) -> PatternID {
-        self.matchers
-            .push(SinglePatternMatcher::from_pattern(Box::new(pattern)));
-        PatternID(self.matchers.len() - 1)
+    fn from_iter<T: IntoIterator<Item = SinglePatternMatcher<U, PNode, PEdge>>>(iter: T) -> Self {
+        Self {
+            matchers: iter.into_iter().collect(),
+        }
     }
 }

@@ -11,7 +11,7 @@ rust-version = "1.69"
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-portgraph = "0.4.0"
+portgraph = "0.7.0"
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 smallvec = "1.10.0"
 itertools = "0.10.5"
@@ -23,6 +23,7 @@ clap = { version = "4.2.2", features = ["derive"], optional = true }
 rmp-serde = { version = "1.1.1", optional = true }
 glob = { version = "0.3.1", optional = true }
 csv = { version = "1.2.2", optional = true }
+derive_more = "0.99.17"
 
 [features]
 serde = ["dep:serde", "portgraph/serde", "smallvec/serde"]
@@ -36,7 +37,7 @@ glob = "0.3.1"
 criterion = { version = "0.4.0", features = ["html_reports"] }
 
 [dev-dependencies.portgraph]
-version = "0.4.0"
+version = "0.7.0"
 features = ["proptest", "serde"]
 
 [[example]]

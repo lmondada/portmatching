@@ -343,8 +343,6 @@ mod tests {
 
     use portgraph::{PortGraph, PortOffset, UnmanagedDenseMap};
 
-    use crate::graph_tries::root_state;
-
     use super::untangle_threads;
 
     #[test]
