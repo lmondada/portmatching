@@ -1,13 +1,16 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    hash::Hash,
+};
 
 use super::{Line, LinePattern};
-use crate::{Property, Universe};
+use crate::{EdgeProperty, NodeProperty, Universe};
 use itertools::Itertools;
 use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortOffset, PortView};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Pattern<U: Universe, PNode, PEdge: Property> {
+pub struct Pattern<U: Universe, PNode, PEdge: Eq + Hash> {
     nodes: HashMap<U, PNode>,
     edges: HashMap<(U, PEdge), U>,
     root: Option<U>,
@@ -29,7 +32,7 @@ pub(crate) struct Edge<U, PNode, PEdge> {
 #[derive(Debug)]
 struct NoRootFound;
 
-impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
+impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -98,7 +101,7 @@ impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
     }
 }
 
-fn order_edges<U: Universe, PNode: Property, PEdge: Property>(
+fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
     all_edges: &HashSet<Edge<U, PNode, PEdge>>,
     root_candidate: U,
 ) -> Option<Vec<Edge<U, PNode, PEdge>>> {
@@ -107,15 +110,15 @@ fn order_edges<U: Universe, PNode: Property, PEdge: Property>(
     known_nodes.insert(root_candidate);
 
     let mut edges = Vec::new();
-    let n_edges = all_edges.len();
-    while edges.len() < n_edges {
+    while edges.len() < all_edges.len() {
         let next_edge = all_edges
             .iter()
             .filter(|e| !known_edges.contains(e))
             .find(|e| {
                 let src = e.source.expect("Pattern cannot have dangling edges");
                 let tgt = e.target.expect("Pattern cannot have dangling edges");
-                known_nodes.contains(&src) || known_nodes.contains(&tgt)
+                let rev = e.edge_prop.reverse().is_some();
+                known_nodes.contains(&src) || (rev && known_nodes.contains(&tgt))
             })?;
         edges.push(next_edge.clone());
         known_nodes.insert(next_edge.source.unwrap());
@@ -125,7 +128,7 @@ fn order_edges<U: Universe, PNode: Property, PEdge: Property>(
     Some(edges)
 }
 
-impl<U: Universe, PNode, PEdge: Property> Default for Pattern<U, PNode, PEdge> {
+impl<U: Universe, PNode, PEdge: Eq + Hash> Default for Pattern<U, PNode, PEdge> {
     fn default() -> Self {
         Self {
             nodes: Default::default(),
@@ -160,7 +163,7 @@ impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
     }
 }
 
-impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
+impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
     /// Try to convert the pattern into a line pattern
     ///
     /// Attempt every possible root and return `None` if none worked.
@@ -174,6 +177,14 @@ impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
             root,
         } = self;
         let mut to_visit = VecDeque::new();
+
+        // Add all the valid reverse edges too
+        let rev_edges = edges
+            .iter()
+            .filter_map(|(&(u, p), &v)| p.reverse().map(|rev| ((v, rev), u)))
+            .collect_vec();
+        edges.extend(rev_edges);
+
         add_new_edges(&mut to_visit, root?, edges.keys());
         let mut lines = Vec::new();
         while let Some((u, property)) = to_visit.pop_front() {
@@ -184,6 +195,10 @@ impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
                 let Some(v) = edges.remove(&(u, property)) else {
                     break;
                 };
+                // Also remove the reverse edge (if present)
+                if let Some(rev) = property.reverse() {
+                    edges.remove(&(v, rev));
+                }
                 new_edges.push((u, v, property));
                 let Some(&(_, new_prop)) = edges.keys().find(|(u, p)| u == &v && valid_successor(property, *p)) else {
                     break
@@ -200,7 +215,7 @@ impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
     }
 }
 
-fn add_new_edges<'a, U: Universe + 'a, PEdge: Ord + Copy + 'a>(
+fn add_new_edges<'a, U: Universe + 'a, PEdge: EdgeProperty + 'a>(
     queue: &mut VecDeque<(U, PEdge)>,
     node: U,
     edges: impl IntoIterator<Item = &'a (U, PEdge)>,
@@ -208,10 +223,16 @@ fn add_new_edges<'a, U: Universe + 'a, PEdge: Ord + Copy + 'a>(
     queue.extend(
         edges
             .into_iter()
-            .filter(|(u, _)| u == &node)
-            .sorted_by_key(|(_, p)| p)
-            .copied(),
+            .filter(|&&(u, _)| u == node)
+            .sorted_unstable_by_key(|&(_, prop)| prop),
     )
+}
+
+pub(crate) fn compatible_offsets(
+    (_, pout): (PortOffset, PortOffset),
+    (pin, _): (PortOffset, PortOffset),
+) -> bool {
+    pout.direction() != pin.direction() && pout.index() == pin.index()
 }
 
 #[cfg(test)]
@@ -220,31 +241,59 @@ mod tests {
 
     #[test]
     fn test_to_line_pattern() {
-        let mut p: Pattern<usize, (), (usize, usize)> = Default::default();
-        p.add_edge(0, 1, (0, 1));
-        p.add_edge(1, 2, (1, 0));
-        p.add_edge(0, 1, (1, 0));
-        p.add_edge(1, 2, (0, 1));
-        p.add_edge(0, 1, (2, 2));
-        p.add_edge(1, 2, (2, 2));
-        let t = |p| {
-            if p <= 1 {
-                1 - p
-            } else {
-                p
-            }
-        };
+        let mut p: Pattern<_, (), _> = Default::default();
+        let po = |i| PortOffset::new_outgoing(i);
+        let pi = |i| PortOffset::new_incoming(i);
+        p.add_edge(0, 1, (po(0), pi(1)));
+        p.add_edge(1, 2, (po(1), pi(0)));
+        p.add_edge(0, 1, (po(1), pi(0)));
+        p.add_edge(1, 2, (po(0), pi(1)));
+        p.add_edge(0, 1, (po(2), pi(2)));
+        p.add_edge(1, 2, (po(2), pi(2)));
         p.set_root(0);
         assert_eq!(
-            p.try_into_line_pattern(|(_, pout), (pin, _)| pin == t(pout)),
+            p.try_into_line_pattern(compatible_offsets),
             Some(LinePattern {
                 nodes: HashMap::new(),
                 lines: vec![
-                    Line::new(0, vec![(0, 1, (0, 1)), (1, 2, (1, 0)),]),
-                    Line::new(0, vec![(0, 1, (1, 0)), (1, 2, (0, 1)),]),
-                    Line::new(0, vec![(0, 1, (2, 2)), (1, 2, (2, 2)),])
+                    Line::new(0, vec![(0, 1, (po(0), pi(1))), (1, 2, (po(1), pi(0))),]),
+                    Line::new(0, vec![(0, 1, (po(1), pi(0))), (1, 2, (po(0), pi(1))),]),
+                    Line::new(0, vec![(0, 1, (po(2), pi(2))), (1, 2, (po(2), pi(2))),])
                 ]
             })
         );
+    }
+
+    #[test]
+    fn from_pattern_with_rev() {
+        let mut p = Pattern::<_, (), _>::new();
+        let po = |i| PortOffset::new_outgoing(i);
+        let pi = |i| PortOffset::new_incoming(i);
+        p.add_edge(0, 0, (po(0), pi(2)));
+        p.add_edge(0, 1, (po(1), pi(1)));
+        p.add_edge(2, 0, (po(0), pi(1)));
+        p.set_root(0);
+        let lp = p
+            .try_into_line_pattern(compatible_offsets)
+            .expect("Could not convert to line pattern");
+        assert_eq!(
+            lp.lines,
+            vec![
+                Line::new(0, vec![(0, 2, (pi(1), po(0)))]),
+                Line::new(0, vec![(0, 0, (pi(2), po(0)))]),
+                Line::new(0, vec![(0, 1, (po(1), pi(1)))]),
+            ]
+        );
+    }
+
+    #[test]
+    fn from_pattern_simple() {
+        let mut p = Pattern::<usize, (), (usize, usize)>::new();
+        p.add_edge(0, 0, (0, 2));
+        p.add_edge(0, 1, (1, 1));
+        p.add_edge(0, 2, (2, 0));
+        p.set_any_root().expect("Could not pick any root");
+        p.try_into_line_pattern(|(_, pout), (pin, _)| pin == pout)
+            .expect("Could not convert to line pattern");
     }
 }

@@ -346,6 +346,8 @@ where
 mod tests {
     use itertools::Itertools;
 
+    use crate::Pattern;
+
     use super::*;
 
     #[test]

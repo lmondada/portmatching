@@ -1,4 +1,4 @@
-use std::borrow::Borrow;
+use std::{borrow::Borrow, hash::Hash};
 
 use itertools::Itertools;
 use portgraph::{NodeIndex, PortGraph, PortView};
@@ -6,18 +6,18 @@ use portgraph::{NodeIndex, PortGraph, PortView};
 use crate::{
     matcher::{Match, PortMatcher, SinglePatternMatcher},
     patterns::UnweightedEdge,
-    Pattern, Property, Universe,
+    Pattern,  Universe, EdgeProperty, NodeProperty,
 };
 
 /// A simple matcher for matching multiple patterns.
 ///
 /// This matcher uses [`SinglePatternMatcher`]s to match each pattern separately.
 /// Useful as a baseline in benchmarking.
-pub struct NaiveManyMatcher<U: Universe, PNode, PEdge: Property> {
+pub struct NaiveManyMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
     matchers: Vec<SinglePatternMatcher<U, PNode, PEdge>>,
 }
 
-impl<U: Universe, PNode: Property, PEdge: Property> NaiveManyMatcher<U, PNode, PEdge> {
+impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> NaiveManyMatcher<U, PNode, PEdge> {
     pub fn from_patterns(patterns: Vec<Pattern<U, PNode, PEdge>>) -> Self {
         Self {
             matchers: patterns
@@ -28,7 +28,7 @@ impl<U: Universe, PNode: Property, PEdge: Property> NaiveManyMatcher<U, PNode, P
     }
 }
 
-impl<U: Universe, PNode, PEdge: Property> Default for NaiveManyMatcher<U, PNode, PEdge> {
+impl<U: Universe, PNode, PEdge: Eq + Hash> Default for NaiveManyMatcher<U, PNode, PEdge> {
     fn default() -> Self {
         Self {
             matchers: Default::default(),
@@ -51,7 +51,7 @@ where
     }
 }
 
-impl<U: Universe, PNode, PEdge: Property> FromIterator<SinglePatternMatcher<U, PNode, PEdge>>
+impl<U: Universe, PNode, PEdge: Eq + Hash> FromIterator<SinglePatternMatcher<U, PNode, PEdge>>
     for NaiveManyMatcher<U, PNode, PEdge>
 {
     fn from_iter<T: IntoIterator<Item = SinglePatternMatcher<U, PNode, PEdge>>>(iter: T) -> Self {

@@ -13,12 +13,13 @@ use itertools::Itertools;
 use portgraph::NodeIndex;
 use portgraph::PortGraph;
 use portgraph::UnmanagedDenseMap;
+use portmatching::EdgeProperty;
+use portmatching::NodeProperty;
 use portmatching::matcher::many_patterns::ManyMatcher;
 use portmatching::matcher::PortMatcher;
 use portmatching::matcher::UnweightedManyMatcher;
 use portmatching::NaiveManyMatcher;
 use portmatching::Pattern;
-use portmatching::Property;
 use rand::Rng;
 
 fn bench_matching<'g, M: PortMatcher<&'g PortGraph>>(
@@ -29,8 +30,8 @@ fn bench_matching<'g, M: PortMatcher<&'g PortGraph>>(
     graph: &'g PortGraph,
     mut get_matcher: impl FnMut(Vec<Pattern<NodeIndex, M::PNode, M::PEdge>>) -> M,
 ) where
-    M::PEdge: Property,
-    M::PNode: Property,
+    M::PEdge: EdgeProperty,
+    M::PNode: NodeProperty,
     NodeIndex: Copy,
 {
     group.sample_size(10);
@@ -145,14 +146,14 @@ fn perform_benches(c: &mut Criterion) {
         .expect("Did not find any large circuit");
 
     let mut group = c.benchmark_group("Many Patterns Matching");
-    bench_matching(
-        "Naive matching",
-        &mut group,
-        &patterns,
-        (0..=300).step_by(100),
-        &graph,
-        NaiveManyMatcher::from_patterns,
-    );
+    // bench_matching(
+    //     "Naive matching",
+    //     &mut group,
+    //     &patterns,
+    //     (0..=300).step_by(100),
+    //     &graph,
+    //     NaiveManyMatcher::from_patterns,
+    // );
     bench_matching(
         "Balanced Graph Trie",
         &mut group,
@@ -161,10 +162,6 @@ fn perform_benches(c: &mut Criterion) {
         &graph,
         ManyMatcher::from_patterns,
     );
-    // This is too slow
-    // bench_matching("Naive", &mut group, &patterns, &graph, |p| {
-    //     NaiveManyMatcher::from_patterns(p)
-    // });
     group.finish();
 
     let mut group = c.benchmark_group("Trie Construction");
