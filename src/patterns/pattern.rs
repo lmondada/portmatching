@@ -10,6 +10,7 @@ use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortOffset, PortView}
 pub struct Pattern<U: Universe, PNode, PEdge: Property> {
     nodes: HashMap<U, PNode>,
     edges: HashMap<(U, PEdge), U>,
+    root: Option<U>,
 }
 
 pub type UnweightedPattern = Pattern<NodeIndex, (), UnweightedEdge>;
@@ -25,6 +26,9 @@ pub(crate) struct Edge<U, PNode, PEdge> {
     pub(crate) target_prop: Option<PNode>,
 }
 
+#[derive(Debug)]
+struct NoRootFound;
+
 impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
     pub fn new() -> Self {
         Self::default()
@@ -37,7 +41,46 @@ impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
         self.edges.insert((u, property), v);
     }
 
+    pub fn root(&self) -> Option<U> {
+        self.root
+    }
+
+    pub fn set_root(&mut self, root: U) {
+        self.root = Some(root);
+    }
+
+    /// Let the pattern fix a root
+    fn set_any_root(&mut self) -> Result<U, NoRootFound> {
+        let all_edges: HashSet<_> = self
+            .edges
+            .iter()
+            .map(|(&(u, property), &v)| Edge {
+                source: Some(u),
+                target: Some(v),
+                edge_prop: property,
+                source_prop: self.nodes.get(&u).copied(),
+                target_prop: self.nodes.get(&v).copied(),
+            })
+            .collect();
+        let root = self
+            .all_nodes()
+            .find(|&root| order_edges(&all_edges, root).is_some())
+            .ok_or(NoRootFound)?;
+        self.root = Some(root);
+        Ok(root)
+    }
+
+    fn all_nodes(&self) -> impl Iterator<Item = U> + '_ {
+        self.nodes
+            .keys()
+            .copied()
+            .chain(self.edges.iter().flat_map(|(&(u, _), &v)| vec![u, v]))
+            .unique()
+    }
+
     /// The edges of the pattern, in a connected order (if it exists)
+    ///
+    /// If no root was set, this returns `None`
     pub(crate) fn edges(&self) -> Option<Vec<Edge<U, PNode, PEdge>>> {
         let all_edges: HashSet<_> = self
             .edges
@@ -50,16 +93,8 @@ impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
                 target_prop: self.nodes.get(&v).copied(),
             })
             .collect();
-        let all_nodes: HashSet<_> = all_edges
-            .iter()
-            .map(|e| vec![e.source, e.target])
-            .flatten()
-            .flatten()
-            .collect();
 
-        all_nodes
-            .into_iter()
-            .find_map(|root_candidate| order_edges(&all_edges, root_candidate))
+        order_edges(&all_edges, self.root?)
     }
 }
 
@@ -95,6 +130,7 @@ impl<U: Universe, PNode, PEdge: Property> Default for Pattern<U, PNode, PEdge> {
         Self {
             nodes: Default::default(),
             edges: Default::default(),
+            root: None,
         }
     }
 }
@@ -102,6 +138,9 @@ impl<U: Universe, PNode, PEdge: Property> Default for Pattern<U, PNode, PEdge> {
 impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
     pub fn from_portgraph(g: &PortGraph) -> Self {
         let mut pattern = Self::new();
+        for n in g.nodes_iter() {
+            pattern.require(n, ());
+        }
         for p in g.ports_iter() {
             if g.port_offset(p).unwrap().direction() == Direction::Incoming {
                 continue;
@@ -116,6 +155,7 @@ impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
             let pin_node = g.port_node(pin).unwrap();
             pattern.add_edge(pout_node, pin_node, (pout_offset, pin_offset));
         }
+        pattern.set_any_root().expect("Could not find root");
         pattern
     }
 }
@@ -128,25 +168,13 @@ impl<U: Universe, PNode: Property, PEdge: Property> Pattern<U, PNode, PEdge> {
         self,
         valid_successor: F,
     ) -> Option<LinePattern<U, PNode, PEdge>> {
-        let mut all_nodes = self
-            .edges
-            .iter()
-            .flat_map(|(&(u, _), &v)| vec![u, v])
-            .unique();
-        all_nodes.find_map(|root| {
-            self.clone()
-                .try_into_line_pattern_with_root(root, &valid_successor)
-        })
-    }
-
-    pub(crate) fn try_into_line_pattern_with_root<F: Fn(PEdge, PEdge) -> bool>(
-        self,
-        root: U,
-        valid_successor: F,
-    ) -> Option<LinePattern<U, PNode, PEdge>> {
-        let Self { nodes, mut edges } = self;
+        let Self {
+            nodes,
+            mut edges,
+            root,
+        } = self;
         let mut to_visit = VecDeque::new();
-        add_new_edges(&mut to_visit, root, edges.keys());
+        add_new_edges(&mut to_visit, root?, edges.keys());
         let mut lines = Vec::new();
         while let Some((u, property)) = to_visit.pop_front() {
             let mut new_edges = Vec::new();
@@ -206,8 +234,9 @@ mod tests {
                 p
             }
         };
+        p.set_root(0);
         assert_eq!(
-            p.try_into_line_pattern_with_root(0, |(_, pout), (pin, _)| pin == t(pout)),
+            p.try_into_line_pattern(|(_, pout), (pin, _)| pin == t(pout)),
             Some(LinePattern {
                 nodes: HashMap::new(),
                 lines: vec![

@@ -60,3 +60,10 @@ impl<U: Universe, PNode, PEdge: Property> FromIterator<SinglePatternMatcher<U, P
         }
     }
 }
+
+#[cfg(test)]
+mod naive_tests {
+    use proptest::prelude::*;
+
+    use crate::NaiveManyMatcher;
+}

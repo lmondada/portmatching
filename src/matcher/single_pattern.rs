@@ -39,12 +39,8 @@ impl<U: Universe, PNode: Property, PEdge: Property> SinglePatternMatcher<U, PNod
     /// Create a new matcher for a single pattern.
     pub fn new(pattern: Pattern<U, PNode, PEdge>) -> Self {
         // This is our "matching recipe" -- we precompute it once and store it
-        let edges = pattern.edges().expect("is pattern connected?");
-        let root = edges
-            .first()
-            .expect("Empty pattern not allowed")
-            .source
-            .unwrap();
+        let edges = pattern.edges().expect("Cannot match disconnected pattern");
+        let root = pattern.root().expect("Cannot match unrooted pattern");
         Self {
             pattern,
             edges,
@@ -72,6 +68,20 @@ where
         V: Universe,
         G: Copy,
     {
+        self.get_match_map(host, host_root, validate_edge).is_some()
+    }
+
+    pub(crate) fn get_match_map<G, V, F>(
+        &self,
+        host: G,
+        host_root: V,
+        validate_edge: F,
+    ) -> Option<BiMap<U, V>>
+    where
+        F: Fn(Edge<V, PNode, PEdge>, G) -> Option<(V, V)>,
+        V: Universe,
+        G: Copy,
+    {
         let mut match_map = BiMap::from_iter([(self.root, host_root)]);
         for &e in self.edges.iter() {
             let src = e.source.expect("Only connected edges allowed in pattern");
@@ -83,15 +93,15 @@ where
                 source_prop: e.source_prop,
                 target_prop: e.target_prop,
             };
-            if let Some((new_src, new_tgt)) = validate_edge(e_in_v, host) {
-                // This will fail if the map is not injective
-                match_map.insert_no_overwrite(src, new_src);
-                match_map.insert_no_overwrite(tgt, new_tgt);
-            } else {
-                return false;
+            let (new_src, new_tgt) = validate_edge(e_in_v, host)?;
+            if !match_map.contains_left(&src) {
+                match_map.insert_no_overwrite(src, new_src).ok()?;
+            }
+            if !match_map.contains_left(&tgt) {
+                match_map.insert_no_overwrite(tgt, new_tgt).ok()?;
             }
         }
-        true
+        Some(match_map)
     }
 
     /// The matches in `host` starting at `host_root`
@@ -129,7 +139,7 @@ impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
 }
 
 /// Check if an edge `e` is valid in a portgraph `g` without weights.
-fn validate_unweighted_edge<G>(
+pub(crate) fn validate_unweighted_edge<G>(
     e: Edge<NodeIndex, (), UnweightedEdge>,
     g: G,
 ) -> Option<(NodeIndex, NodeIndex)>
@@ -171,12 +181,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use itertools::Itertools;
-    use portgraph::{LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView};
+    use portgraph::{
+        proptest::gen_portgraph, LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView,
+    };
+    use proptest::prelude::*;
 
-    use crate::{matcher::PortMatcher, utils::test::graph, Pattern};
+    use crate::{
+        matcher::PortMatcher,
+        utils::test::{gen_portgraph_connected, graph},
+        Pattern,
+    };
 
     use super::SinglePatternMatcher;
 
@@ -184,7 +199,7 @@ mod tests {
     fn single_pattern_match_simple() {
         let g = graph();
         let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p);
+        let matcher = SinglePatternMatcher::from_pattern(p.clone());
 
         let (n0, n1, n3, n4) = (
             NodeIndex::new(0),
@@ -192,11 +207,20 @@ mod tests {
             NodeIndex::new(3),
             NodeIndex::new(4),
         );
-        assert_eq!(matcher.find_matches(&g), vec![/* todo id */]);
+        assert_eq!(
+            matcher
+                .find_matches(&g)
+                .into_iter()
+                .map(|m| m.to_match_map(&g).unwrap())
+                .collect_vec(),
+            vec![[(n0, n0), (n1, n1), (n3, n3), (n4, n4)]
+                .into_iter()
+                .collect()]
+        );
     }
 
     #[test]
-    fn single_pattern_distinguish_input_output() {
+    fn single_pattern_single_node() {
         let mut g = PortGraph::new();
         g.add_node(0, 1);
         let p = Pattern::from_portgraph(&g);
@@ -204,7 +228,7 @@ mod tests {
         let mut g = PortGraph::new();
         g.add_node(1, 0);
 
-        assert_eq!(matcher.find_matches(&g), vec![]);
+        assert_eq!(matcher.find_matches(&g).len(), 1);
     }
 
     #[test]
@@ -282,16 +306,28 @@ mod tests {
         }
         let vi = |i| g.nodes_iter().nth(i).unwrap();
         let vs1 = [vi(0), vi(10), vi(30), vi(55)];
-        let vs2 = [vi(23), vi(3), vi(44), vi(12)];
-        let vs3 = [vi(55), vi(12), vi(98), vi(99)];
+        let vs2 = [vi(3), vi(12), vi(23), vi(44)];
+        let vs3 = [vi(12), vi(55), vi(98), vi(99)];
         add_pattern(&mut g, &vs1);
         add_pattern(&mut g, &vs2);
         add_pattern(&mut g, &vs3);
 
-        let matches = matcher.find_matches(&g);
+        let mut matches = matcher
+            .find_matches(&g)
+            .into_iter()
+            .map(|m| {
+                m.to_match_map(&g)
+                    .unwrap()
+                    .values()
+                    .sorted()
+                    .copied()
+                    .collect_vec()
+            })
+            .collect_vec();
+        matches.sort_unstable_by_key(|v| *v.first().unwrap());
         assert_eq!(matches.len(), 3);
-        // assert_eq!(matches[0].values().copied().collect_vec(), vs1.to_vec());
-        // assert_eq!(matches[1].values().copied().collect_vec(), vs2.to_vec());
-        // assert_eq!(matches[2].values().copied().collect_vec(), vs3.to_vec());
+        assert_eq!(matches[0], vs1.to_vec());
+        assert_eq!(matches[1], vs2.to_vec());
+        assert_eq!(matches[2], vs3.to_vec());
     }
 }
