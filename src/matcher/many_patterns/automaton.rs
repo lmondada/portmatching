@@ -1,19 +1,19 @@
-use std::{borrow::Borrow, fmt};
+use std::{borrow::Borrow, fmt, hash::Hash};
 
 use itertools::Itertools;
-use portgraph::{LinkView, NodeIndex, PortGraph, PortView};
+use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView};
 
 use crate::{
     automaton::{LineBuilder, ScopeAutomaton},
     matcher::{Match, PatternMatch},
-    patterns::UnweightedEdge,
-    Pattern, PortMatcher, Property, Universe,
+    patterns::{UnweightedEdge, compatible_offsets},
+    EdgeProperty, NodeProperty, Pattern, PortMatcher, Universe,
 };
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ManyMatcher<U: Universe, PNode, PEdge: Property> {
+pub struct ManyMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
     automaton: ScopeAutomaton<PNode, PEdge>,
     patterns: Vec<Pattern<U, PNode, PEdge>>,
 }
@@ -29,13 +29,13 @@ pub struct ManyMatcher<U: Universe, PNode, PEdge: Property> {
 //     }
 // }
 
-impl<U: Universe, PNode: Property> ManyMatcher<U, PNode, UnweightedEdge> {
+impl<U: Universe, PNode: NodeProperty> ManyMatcher<U, PNode, UnweightedEdge> {
     pub fn from_patterns(patterns: Vec<Pattern<U, PNode, UnweightedEdge>>) -> Self {
         let line_patterns = patterns
             .clone()
             .into_iter()
             .map(|p| {
-                p.try_into_line_pattern(|(_, p), (pp, _)| p == pp)
+                p.try_into_line_pattern(compatible_offsets)
                     .expect("Failed to express pattern as line pattern")
             })
             .collect_vec();
@@ -48,7 +48,7 @@ impl<U: Universe, PNode: Property> ManyMatcher<U, PNode, UnweightedEdge> {
     }
 }
 
-impl<U: Universe, PNode: Property + fmt::Debug, PEdge: Property + fmt::Debug>
+impl<U: Universe, PNode: Copy + fmt::Debug, PEdge: Copy + Eq + Hash + fmt::Debug>
     ManyMatcher<U, PNode, PEdge>
 {
     /// A dotstring representation of the trie.
@@ -68,7 +68,7 @@ where
 
     fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<'_, Self, G>> {
         // Node weights (none)
-        let node_prop = |n, ()| true;
+        let node_prop = |_, ()| true;
         // Check edges exist
         let edge_prop = |n, (pout, pin)| {
             let graph = graph.borrow();
@@ -91,7 +91,7 @@ where
     }
 }
 
-impl<U: Universe, PNode: Property> From<Vec<Pattern<U, PNode, UnweightedEdge>>>
+impl<U: Universe, PNode: NodeProperty> From<Vec<Pattern<U, PNode, UnweightedEdge>>>
     for ManyMatcher<U, PNode, UnweightedEdge>
 {
     fn from(value: Vec<Pattern<U, PNode, UnweightedEdge>>) -> Self {

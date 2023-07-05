@@ -8,7 +8,7 @@
 pub mod many_patterns;
 pub mod single_pattern;
 
-use std::{borrow::Borrow, collections::HashMap};
+use std::{borrow::Borrow, collections::HashMap, hash::Hash};
 
 pub use many_patterns::{ManyMatcher, NaiveManyMatcher, PatternID, UnweightedManyMatcher};
 use portgraph::{NodeIndex, PortGraph, PortOffset};
@@ -17,7 +17,7 @@ pub use single_pattern::SinglePatternMatcher;
 use crate::{
     graph_traits::Node,
     patterns::{Edge, UnweightedEdge},
-    GraphNodes, Pattern, Property, Universe,
+    GraphNodes, Pattern,  Universe, NodeProperty,
 };
 
 use self::single_pattern::validate_unweighted_edge;
@@ -34,7 +34,7 @@ where
     /// Node properties
     type PNode;
     /// Edge properties
-    type PEdge: Property;
+    type PEdge: Eq + Hash;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
     fn find_rooted_matches(&self, graph: Graph, root: Node<Graph>) -> Vec<Match<'_, Self, Graph>>;
@@ -88,7 +88,7 @@ impl<'p, P, N> PatternMatch<&'p P, N> {
     }
 }
 
-impl<U: Universe, PNode: Property> PatternMatch<Pattern<U, PNode, UnweightedEdge>, NodeIndex> {
+impl<U: Universe, PNode: NodeProperty> PatternMatch<Pattern<U, PNode, UnweightedEdge>, NodeIndex> {
     pub fn as_ref(&self) -> PatternMatch<&Pattern<U, PNode, UnweightedEdge>, NodeIndex> {
         PatternMatch {
             pattern: &self.pattern,
@@ -104,7 +104,7 @@ impl<U: Universe, PNode: Property> PatternMatch<Pattern<U, PNode, UnweightedEdge
     }
 }
 
-impl<'p, U: Universe, PNode: Property>
+impl<'p, U: Universe, PNode: NodeProperty>
     PatternMatch<&'p Pattern<U, PNode, UnweightedEdge>, NodeIndex>
 {
     pub fn to_match_map<G: Borrow<PortGraph> + Copy>(

@@ -19,6 +19,16 @@ pub trait Universe: Copy + Eq + Hash {}
 
 impl<U: Copy + Eq + Hash> Universe for U {}
 
-pub trait Property: Copy + Ord + Hash {}
+pub trait EdgeProperty: Copy + Ord + Hash {
+    fn reverse(&self) -> Option<Self>;
+}
 
-impl<U: Copy + Ord + Hash> Property for U {}
+pub trait NodeProperty: Copy + Eq + Hash {}
+
+impl<U: Copy + Eq + Hash> NodeProperty for U {}
+
+impl<A: Copy + Ord + Hash> EdgeProperty for (A, A) {
+    fn reverse(&self) -> Option<Self> {
+        (self.1, self.0).into()
+    }
+}

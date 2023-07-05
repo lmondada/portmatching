@@ -115,7 +115,6 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         let stages = partition_by(predicates, |p| p.edges.traversal_stage());
         debug_assert!(!stages.contains_key(&IterationStatus::Finished));
 
-        dbg!(stages.keys());
         if stages.is_empty() {
             Vec::new()
         } else if stages.keys().len() == 1 {

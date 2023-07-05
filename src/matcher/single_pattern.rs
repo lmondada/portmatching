@@ -2,20 +2,20 @@
 //!
 //! This matcher is used as a baseline in benchmarking by repeating
 //! the matching process for each pattern separately.
-use std::borrow::Borrow;
+use std::{borrow::Borrow, hash::Hash};
 
 use bimap::{BiBTreeMap, BiMap};
 use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView};
 
 use crate::{
     patterns::{Edge, UnweightedEdge},
-    Pattern, Property, Universe,
+    EdgeProperty, NodeProperty, Pattern, Universe,
 };
 
 use super::{Match, PatternMatch, PortMatcher};
 
 /// A simple matcher for a single pattern.
-pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Property> {
+pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
     pattern: Pattern<U, PNode, PEdge>,
     edges: Vec<Edge<U, PNode, PEdge>>,
     root: U,
@@ -35,7 +35,7 @@ where
 
 // TODO: add impls of PortMatcher for weighted graphs etc
 
-impl<U: Universe, PNode: Property, PEdge: Property> SinglePatternMatcher<U, PNode, PEdge> {
+impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> SinglePatternMatcher<U, PNode, PEdge> {
     /// Create a new matcher for a single pattern.
     pub fn new(pattern: Pattern<U, PNode, PEdge>) -> Self {
         // This is our "matching recipe" -- we precompute it once and store it
@@ -53,7 +53,7 @@ impl<U: Universe, PNode: Property, PEdge: Property> SinglePatternMatcher<U, PNod
     }
 }
 
-impl<U, PNode, PEdge: Property> SinglePatternMatcher<U, PNode, PEdge>
+impl<U, PNode, PEdge: Eq + Hash> SinglePatternMatcher<U, PNode, PEdge>
 where
     U: Universe,
     PNode: Copy,
