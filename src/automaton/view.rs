@@ -19,7 +19,7 @@ impl<PNode: Clone, PEdge: Clone> ScopeAutomaton<PNode, PEdge> {
         self.graph.node_count()
     }
 
-    pub(super) fn predicate(&self, edge: OutPort) -> &EdgePredicate<PNode, PEdge, Symbol> {
+    pub(super) fn predicate(&self, edge: OutPort) -> &EdgePredicate<PNode, PEdge> {
         let OutPort(state, offset) = edge;
         let port = self.graph.output(state.0, offset).unwrap();
         let Some(transition) = self.weights[port].as_ref() else {

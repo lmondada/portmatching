@@ -10,7 +10,10 @@ use std::{
 
 use derive_more::{From, Into};
 
-use crate::{predicate::EdgePredicate, Universe};
+use crate::{
+    predicate::{EdgePredicate, Symbol, SymbolsIter},
+    Universe,
+};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) struct Line<U, PEdge> {
@@ -49,14 +52,8 @@ impl<U: Universe, PNode: Copy, PEdge: Copy> LinePattern<U, PNode, PEdge> {
         self.lines.push(Line { root, edges });
     }
 
-    pub(crate) fn edge_predicates<IS: Iterator>(
-        &self,
-        free_symbols: IS,
-    ) -> PredicatesIter<'_, U, PNode, PEdge, IS, IS::Item>
-    where
-        IS::Item: Copy,
-    {
-        PredicatesIter::new(self, free_symbols)
+    pub(crate) fn edge_predicates(&self) -> PredicatesIter<'_, U, PNode, PEdge> {
+        PredicatesIter::new(self)
     }
 
     fn n_lines(&self) -> usize {
@@ -86,39 +83,35 @@ impl<U: Universe, PNode, PEdge> Default for LinePattern<U, PNode, PEdge> {
 }
 
 #[derive(Clone)]
-pub(crate) struct PredicatesIter<'a, U: Universe, PNode, PEdge, IS, S> {
+pub(crate) struct PredicatesIter<'a, U: Universe, PNode, PEdge> {
     // Map each node to the first address where it occurs
     to_line_ind: HashMap<U, LineAddress>,
     // For each line, the first index that we have not yet visited
     // (index 0 is always discovered by some other line)
     visited_boundary: Vec<usize>,
     // The queue of next items
-    it_queue: VecDeque<EdgePredicate<PNode, PEdge, S>>,
+    it_queue: VecDeque<EdgePredicate<PNode, PEdge>>,
     // The symbols that have been assigned to each node
-    u_to_symbols: HashMap<U, S>,
-    // An infinite supply of new symbols
-    free_symbols: IS,
+    u_to_symbols: HashMap<U, Symbol>,
     // How far we have come in the traversal
     status: IterationStatus,
     // The node weights
     nodes: &'a HashMap<U, PNode>,
     // The edges
     lines: &'a Vec<Line<U, PEdge>>,
+    // The next free symbols to use
+    free_symbols: SymbolsIter,
 }
 
-impl<'a, U: Universe, PNode: Copy, PEdge: Copy, IS, S: Copy>
-    PredicatesIter<'a, U, PNode, PEdge, IS, S>
-{
-    fn new(p: &'a LinePattern<U, PNode, PEdge>, mut free_symbols: IS) -> Self
-    where
-        IS: Iterator<Item = S>,
-    {
+impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEdge> {
+    fn new(p: &'a LinePattern<U, PNode, PEdge>) -> Self {
         let lines = &p.lines;
         let nodes = &p.nodes;
         let mut to_line_ind = HashMap::new();
         let mut it_queue = VecDeque::new();
         let mut u_to_symbols = HashMap::new();
         let mut status = IterationStatus::Finished;
+        let mut free_symbols = Symbol::symbols_in_status(status);
         if let Some(root) = lines.get(0).map(|w| w.root) {
             to_line_ind.insert(root, (0, 0).into());
             // Add 0-th line to known nodes
@@ -127,9 +120,10 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy, IS, S: Copy>
                     to_line_ind.insert(u, (0, ind + 1).into());
                 }
             }
-            let root_symbol = free_symbols.next().expect("Could not get new symbol");
-            u_to_symbols.insert(root, root_symbol);
             status = IterationStatus::Skeleton(0);
+            free_symbols = Symbol::symbols_in_status(status);
+            let root_symbol = free_symbols.next().unwrap();
+            u_to_symbols.insert(root, root_symbol);
             if let Some(&root_prop) = nodes.get(&root) {
                 it_queue.push_back(EdgePredicate::NodeProperty {
                     node: root_symbol,
@@ -142,25 +136,19 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy, IS, S: Copy>
             visited_boundary: vec![1; p.n_lines()],
             it_queue,
             u_to_symbols,
-            free_symbols,
             status,
             lines,
             nodes,
+            free_symbols,
         }
     }
 
-    pub(crate) fn peek(&mut self) -> Option<EdgePredicate<PNode, PEdge, S>>
-    where
-        IS: Iterator<Item = S>,
-    {
+    pub(crate) fn peek(&mut self) -> Option<EdgePredicate<PNode, PEdge>> {
         self.fill_queue();
         self.it_queue.front().copied()
     }
 
-    pub(crate) fn traversal_stage(&mut self) -> IterationStatus
-    where
-        IS: Iterator<Item = S>,
-    {
+    pub(crate) fn traversal_stage(&mut self) -> IterationStatus {
         self.fill_queue();
         self.status
     }
@@ -169,10 +157,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy, IS, S: Copy>
         self.lines.len()
     }
 
-    fn reach_ith_root(&mut self, i: usize)
-    where
-        IS: Iterator<Item = S>,
-    {
+    fn reach_ith_root(&mut self, i: usize) {
         // Follow the path from a visited node to the root of line i
         let (j, j_ind) = self.to_line_ind[&self.lines[i].root].into();
         let boundary_ind = &mut self.visited_boundary[j];
@@ -192,10 +177,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy, IS, S: Copy>
         }
     }
 
-    fn traverse_leftover(&mut self, i: usize)
-    where
-        IS: Iterator<Item = S>,
-    {
+    fn traverse_leftover(&mut self, i: usize) {
         for ind in (self.visited_boundary[i] - 1)..self.lines[i].edges.len() {
             self.it_queue.extend(edge_predicates(
                 self.lines[i].edges[ind],
@@ -207,13 +189,12 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy, IS, S: Copy>
         self.visited_boundary[i] = self.lines[i].edges.len() + 1;
     }
 
-    fn fill_queue(&mut self)
-    where
-        IS: Iterator<Item = S>,
-    {
+    fn fill_queue(&mut self) {
         while self.it_queue.is_empty() {
             // Increment status
             self.status.increment(self.n_lines());
+            // Update free symbols to match new status
+            self.free_symbols = Symbol::symbols_in_status(self.status);
 
             match self.status {
                 IterationStatus::Skeleton(i) => {
@@ -243,6 +224,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy, IS, S: Copy>
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) enum IterationStatus {
     // We are traversing the i-th line wihtin skeleton
     Skeleton(usize),
@@ -281,15 +263,13 @@ impl IterationStatus {
     }
 }
 
-impl<'a, U, PNode, PEdge, IS> Iterator for PredicatesIter<'a, U, PNode, PEdge, IS, IS::Item>
+impl<'a, U, PNode, PEdge> Iterator for PredicatesIter<'a, U, PNode, PEdge>
 where
     U: Universe,
     PNode: Copy,
     PEdge: Copy,
-    IS: Iterator,
-    IS::Item: Copy,
 {
-    type Item = EdgePredicate<PNode, PEdge, IS::Item>;
+    type Item = EdgePredicate<PNode, PEdge>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.to_line_ind.is_empty() {
@@ -306,15 +286,12 @@ where
     }
 }
 
-fn edge_predicates<U: Universe, PNode: Copy, PEdge: Copy, IS: Iterator>(
+fn edge_predicates<U: Universe, PNode: Copy, PEdge: Copy>(
     (u, v, property): (U, U, PEdge),
-    symbols: &mut HashMap<U, IS::Item>,
+    symbols: &mut HashMap<U, Symbol>,
     nodes: &HashMap<U, PNode>,
-    mut new_symbols: IS,
-) -> Vec<EdgePredicate<PNode, PEdge, IS::Item>>
-where
-    IS::Item: Copy,
-{
+    mut new_symbols: impl Iterator<Item = Symbol>,
+) -> Vec<EdgePredicate<PNode, PEdge>> {
     let mut preds = Vec::new();
 
     let u_symb = symbols[&u];
@@ -376,74 +353,83 @@ mod tests {
             ]),
             lines: vec![l1, l2, l3],
         };
+        let symbs = [
+            Symbol::new(IterationStatus::Skeleton(0), 0),
+            Symbol::new(IterationStatus::Skeleton(0), 1),
+            Symbol::new(IterationStatus::Skeleton(0), 2),
+            Symbol::new(IterationStatus::Skeleton(1), 0),
+            Symbol::new(IterationStatus::Skeleton(1), 1),
+            Symbol::new(IterationStatus::Skeleton(2), 0),
+            Symbol::new(IterationStatus::Skeleton(2), 1),
+        ];
         assert_eq!(
-            p.edge_predicates(0..).collect::<Vec<_>>(),
+            p.edge_predicates().collect::<Vec<_>>(),
             vec![
                 EdgePredicate::NodeProperty {
-                    node: 0,
+                    node: symbs[0],
                     property: ()
                 },
                 // EdgePredicate::TraverseAlong { line: 0 },
                 EdgePredicate::LinkNewNode {
-                    node: 0,
+                    node: symbs[0],
                     property: (),
-                    new_node: 1
+                    new_node: symbs[1]
                 },
                 EdgePredicate::NodeProperty {
-                    node: 1,
+                    node: symbs[1],
                     property: ()
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 1,
+                    node: symbs[1],
                     property: (),
-                    new_node: 2
+                    new_node: symbs[2]
                 },
                 EdgePredicate::NodeProperty {
-                    node: 2,
+                    node: symbs[2],
                     property: ()
                 },
                 // EdgePredicate::TraverseAlong { line: 1 },
                 EdgePredicate::LinkNewNode {
-                    node: 2,
+                    node: symbs[2],
                     property: (),
-                    new_node: 3
+                    new_node: symbs[3]
                 },
                 EdgePredicate::NodeProperty {
-                    node: 3,
+                    node: symbs[3],
                     property: ()
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 3,
+                    node: symbs[3],
                     property: (),
-                    new_node: 4
+                    new_node: symbs[4]
                 },
                 EdgePredicate::NodeProperty {
-                    node: 4,
+                    node: symbs[4],
                     property: ()
                 },
                 // TODO: the deterministic part from here on
                 // EdgePredicate::TraverseAlong { line: 2 },
                 EdgePredicate::LinkKnownNode {
-                    node: 2,
+                    node: symbs[2],
                     property: (),
-                    known_node: 3
+                    known_node: symbs[3]
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 4,
+                    node: symbs[4],
                     property: (),
-                    new_node: 5
+                    new_node: symbs[5]
                 },
                 EdgePredicate::NodeProperty {
-                    node: 5,
+                    node: symbs[5],
                     property: ()
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 5,
+                    node: symbs[5],
                     property: (),
-                    new_node: 6
+                    new_node: symbs[6]
                 },
                 EdgePredicate::NodeProperty {
-                    node: 6,
+                    node: symbs[6],
                     property: ()
                 },
             ]
@@ -464,39 +450,47 @@ mod tests {
         // 2 -> Symb(3)
         // 4 -> Symb(4)
         // 5 -> Symb(5)
+        let symbs = [
+            Symbol::new(IterationStatus::Skeleton(0), 0),
+            Symbol::new(IterationStatus::Skeleton(2), 0),
+            Symbol::new(IterationStatus::LeftOver(0), 0),
+            Symbol::new(IterationStatus::LeftOver(0), 1),
+            Symbol::new(IterationStatus::LeftOver(1), 0),
+            Symbol::new(IterationStatus::LeftOver(2), 0),
+        ];
         assert_eq!(
-            p2.edge_predicates(0..).collect::<Vec<_>>(),
+            p2.edge_predicates().collect::<Vec<_>>(),
             vec![
                 EdgePredicate::NodeProperty {
-                    node: 0,
+                    node: symbs[0],
                     property: ()
                 },
                 // EdgePredicate::TraverseAlong { line: 1 },
                 EdgePredicate::LinkNewNode {
-                    node: 0,
+                    node: symbs[0],
                     property: 2,
-                    new_node: 1.into()
+                    new_node: symbs[1]
                 },
                 // EdgePredicate::True,
                 EdgePredicate::LinkNewNode {
-                    node: 0,
+                    node: symbs[0],
                     property: 0,
-                    new_node: 2.into()
+                    new_node: symbs[2]
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 2.into(),
+                    node: symbs[2],
                     property: 1,
-                    new_node: 3.into()
+                    new_node: symbs[3]
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 1.into(),
+                    node: symbs[1],
                     property: 3,
-                    new_node: 4.into()
+                    new_node: symbs[4]
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 1.into(),
+                    node: symbs[1],
                     property: 4,
-                    new_node: 5.into()
+                    new_node: symbs[5]
                 },
             ]
         )
@@ -509,28 +503,34 @@ mod tests {
         p2.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
         p2.add_line(2, vec![(2, 3, 0)]);
 
+        let symbs = [
+            Symbol::new(IterationStatus::Skeleton(0), 0),
+            Symbol::new(IterationStatus::Skeleton(1), 0),
+            Symbol::new(IterationStatus::Skeleton(1), 1),
+            Symbol::new(IterationStatus::LeftOver(1), 0),
+        ];
         assert_eq!(
-            p2.edge_predicates(0..).collect::<Vec<_>>(),
+            p2.edge_predicates().collect::<Vec<_>>(),
             vec![
                 EdgePredicate::NodeProperty {
-                    node: 0,
+                    node: symbs[0],
                     property: ()
                 },
                 // EdgePredicate::TraverseAlong { line: 0 },
                 EdgePredicate::LinkNewNode {
-                    node: 0,
+                    node: symbs[0],
                     property: 0,
-                    new_node: 1.into()
+                    new_node: symbs[1]
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 1.into(),
+                    node: symbs[1],
                     property: 0,
-                    new_node: 2.into()
+                    new_node: symbs[2]
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 2.into(),
+                    node: symbs[2],
                     property: 0,
-                    new_node: 3.into()
+                    new_node: symbs[3]
                 },
             ]
         )
@@ -551,39 +551,47 @@ mod tests {
         // 2 -> Symb(3)
         // 4 -> Symb(4)
         // 5 -> Symb(5)
+        let symbs = [
+            Symbol::new(IterationStatus::Skeleton(0), 0),
+            Symbol::new(IterationStatus::Skeleton(2), 0),
+            Symbol::new(IterationStatus::LeftOver(0), 0),
+            Symbol::new(IterationStatus::LeftOver(0), 1),
+            Symbol::new(IterationStatus::LeftOver(1), 0),
+            Symbol::new(IterationStatus::LeftOver(2), 0),
+        ];
         assert_eq!(
-            p2.edge_predicates(0..).collect_vec(),
+            p2.edge_predicates().collect_vec(),
             vec![
                 EdgePredicate::NodeProperty {
-                    node: 0,
+                    node: symbs[0],
                     property: ()
                 },
                 // EdgePredicate::TraverseAlong { line: 1 },
                 EdgePredicate::LinkNewNode {
-                    node: 0,
+                    node: symbs[0],
                     property: (),
-                    new_node: 1.into()
+                    new_node: symbs[1]
                 },
                 // EdgePredicate::True,
                 EdgePredicate::LinkNewNode {
-                    node: 0,
+                    node: symbs[0],
                     property: (),
-                    new_node: 2.into()
+                    new_node: symbs[2]
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 2.into(),
+                    node: symbs[2],
                     property: (),
-                    new_node: 3.into()
+                    new_node: symbs[3]
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 1.into(),
+                    node: symbs[1],
                     property: (),
-                    new_node: 4.into()
+                    new_node: symbs[4]
                 },
                 EdgePredicate::LinkNewNode {
-                    node: 1.into(),
+                    node: symbs[1],
                     property: (),
-                    new_node: 5.into()
+                    new_node: symbs[5]
                 },
             ]
         )

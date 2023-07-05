@@ -1,13 +1,43 @@
 use bimap::BiMap;
+use derive_more::{From, Into};
 
-use std::hash::Hash;
+use std::{
+    hash::Hash,
+    iter::{self, Map, Repeat, Zip},
+    ops::RangeFrom,
+};
 
-use crate::Universe;
+use crate::{patterns::IterationStatus, Universe};
+
+pub(crate) type SymbolsIter =
+    Map<Zip<Repeat<IterationStatus>, RangeFrom<usize>>, fn((IterationStatus, usize)) -> Symbol>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, From, Into, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub(crate) struct Symbol(IterationStatus, usize);
+
+impl Symbol {
+    pub(crate) fn new(status: IterationStatus, ind: usize) -> Self {
+        Self(status, ind)
+    }
+
+    fn from_tuple((status, ind): (IterationStatus, usize)) -> Self {
+        Self(status, ind)
+    }
+
+    pub(crate) fn root() -> Self {
+        Self(IterationStatus::Skeleton(0), 0)
+    }
+
+    pub(crate) fn symbols_in_status(status: IterationStatus) -> SymbolsIter {
+        iter::repeat(status).zip(0..).map(Self::from_tuple)
+    }
+}
 
 /// Predicate to control allowable transitions
 #[derive(PartialEq, Eq, Copy, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub(crate) enum EdgePredicate<PNode, PEdge, Symbol> {
+pub(crate) enum EdgePredicate<PNode, PEdge> {
     NodeProperty {
         node: Symbol,
         property: PNode,
@@ -29,19 +59,19 @@ pub(crate) enum EdgePredicate<PNode, PEdge, Symbol> {
     },
 }
 
-pub(crate) enum PredicateSatisfied<U, Symbol> {
+pub(crate) enum PredicateSatisfied<U> {
     NewSymbol(Symbol, U),
     Yes,
     No,
 }
 
-impl<PNode: Copy, PEdge: Copy, Symbol: Copy + Eq + Hash> EdgePredicate<PNode, PEdge, Symbol> {
+impl<PNode: Copy, PEdge: Copy> EdgePredicate<PNode, PEdge> {
     pub(crate) fn is_satisfied<'s, U: Universe>(
         &self,
         ass: &BiMap<Symbol, U>,
         node_prop: impl Fn(U, PNode) -> bool + 's,
         edge_prop: impl Fn(U, PEdge) -> Option<U> + 's,
-    ) -> PredicateSatisfied<U, Symbol> {
+    ) -> PredicateSatisfied<U> {
         match *self {
             EdgePredicate::NodeProperty { node, property } => {
                 let u = *ass.get_by_left(&node).unwrap();
@@ -98,14 +128,14 @@ pub(crate) enum PredicateCompatibility {
 /// Any predicate belongs to one of the following equivalence classes.
 /// All predicates within a class are compatible with eachother.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum CompatibilityType<Symbol> {
+enum CompatibilityType {
     NonDetType,
     LinkType(Symbol),
     WeightType(Symbol),
     FailType,
 }
 
-impl<Symbol: Eq + Copy> CompatibilityType<Symbol> {
+impl CompatibilityType {
     fn transition_type(&self) -> PredicateCompatibility {
         match self {
             Self::NonDetType => PredicateCompatibility::NonDeterministic,
@@ -115,7 +145,7 @@ impl<Symbol: Eq + Copy> CompatibilityType<Symbol> {
         }
     }
 
-    fn from_predicate<PNode, PEdge>(pred: &EdgePredicate<PNode, PEdge, Symbol>) -> Self {
+    fn from_predicate<PNode, PEdge>(pred: &EdgePredicate<PNode, PEdge>) -> Self {
         match pred {
             EdgePredicate::True {
                 deterministic: false,
@@ -132,7 +162,7 @@ impl<Symbol: Eq + Copy> CompatibilityType<Symbol> {
         }
     }
 
-    fn is_compatible(&self, other: CompatibilityType<Symbol>) -> bool {
+    fn is_compatible(&self, other: CompatibilityType) -> bool {
         if other == Self::FailType && matches!(self, Self::LinkType(_) | Self::WeightType(_)) {
             true
         } else if self == &Self::FailType
@@ -145,8 +175,8 @@ impl<Symbol: Eq + Copy> CompatibilityType<Symbol> {
     }
 }
 
-pub(crate) fn are_compatible_predicates<'a, PNode: 'a, PEdge: 'a, Symbol: Copy + Eq + 'a>(
-    preds: impl IntoIterator<Item = &'a EdgePredicate<PNode, PEdge, Symbol>>,
+pub(crate) fn are_compatible_predicates<'a, PNode: 'a, PEdge: 'a>(
+    preds: impl IntoIterator<Item = &'a EdgePredicate<PNode, PEdge>>,
 ) -> PredicateCompatibility {
     let mut preds = preds.into_iter().map(CompatibilityType::from_predicate);
     let Some(first) = preds.next() else {

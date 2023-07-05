@@ -6,10 +6,9 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-    automaton::{ScopeAutomaton, StateID, Symbol},
+    automaton::{ScopeAutomaton, StateID},
     patterns::{IterationStatus, LinePattern, PredicatesIter},
-    predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility},
-    utils::SharedIter,
+    predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility, Symbol},
     Universe,
 };
 
@@ -45,12 +44,11 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         let mut matcher = ScopeAutomaton::<PNode, PEdge>::new();
 
         // Convert patterns to pattern in construction
-        let free_symbols = SharedIter::new(Symbol::gen_symbols());
         let mut patterns = self
             .patterns
             .iter()
             .enumerate()
-            .map(|(i, p)| PatternInConstruction::new(p.edge_predicates(free_symbols.clone()), i))
+            .map(|(i, p)| PatternInConstruction::new(p.edge_predicates(), i))
             .collect::<Vec<_>>();
 
         // insert empty patterns at root
@@ -102,15 +100,14 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         matcher
     }
 
-    fn next_transitions<'a, IS>(
+    fn next_transitions<'a>(
         &self,
         source: StateID,
-        predicates: Vec<PatternInConstruction<'a, U, PNode, PEdge, IS>>,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge, IS>>
+        predicates: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
+    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
         PNode: Copy + Eq + Hash,
         PEdge: Copy + Eq + Hash,
-        IS: Clone + Iterator<Item = Symbol>,
     {
         let stages = partition_by(predicates, |p| p.edges.traversal_stage());
         debug_assert!(!stages.contains_key(&IterationStatus::Finished));
@@ -119,32 +116,27 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
             Vec::new()
         } else if stages.keys().len() == 1 {
             let vals = stages.into_values().next().unwrap();
-            println!("compatible case");
             self.compatible_transitions(source, vals)
         } else if stages
             .keys()
             .all(|s| matches!(s, IterationStatus::LeftOver(_)))
         {
             // In the leftover stage, only use det transitions
-            println!("Only det case");
             self.only_det_transitions(source, stages)
         } else {
             // Add a non-deterministic intermediate state
-            println!("non-det");
             self.non_det_transitions(source, stages)
         }
     }
 
-    fn add_transitions<IS>(
+    fn add_transitions(
         &self,
         matcher: &mut ScopeAutomaton<PNode, PEdge>,
-        transitions: &[TransitionInConstruction<'_, U, PNode, PEdge, IS>],
+        transitions: &[TransitionInConstruction<'_, U, PNode, PEdge>],
     ) -> Vec<Option<StateID>>
     where
         PNode: Copy + Eq + Hash,
         PEdge: Copy + Eq + Hash,
-        IS: Iterator,
-        IS::Item: Clone,
     {
         let mut new_states = vec![None; transitions.len()];
         // Enumerate them so that we can restore their ordering
@@ -178,15 +170,14 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     /// All transitions from `source` for `patterns`
     ///
     /// All predicates must be mutually exclusive, otherwise this panics.
-    fn compatible_transitions<'a, IS>(
+    fn compatible_transitions<'a>(
         &self,
         source: StateID,
-        patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge, IS>>,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge, IS>>
+        patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
+    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
         PNode: Copy + Eq + Hash,
         PEdge: Copy + Eq + Hash,
-        IS: Iterator<Item = Symbol>,
     {
         let partition = partition_by(patterns, |p| p.edges.next().expect("not finished"));
         partition
@@ -205,15 +196,14 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     /// Unlike other transition functions, this does the patterns in the children
     /// states do not necessary form a partition: patterns might be cloned up
     /// to `n` times, yielding an exponential overhead if this is called repeatedly.
-    fn only_det_transitions<'a, IS>(
+    fn only_det_transitions<'a>(
         &self,
         source: StateID,
-        patterns: HashMap<IterationStatus, Vec<PatternInConstruction<'a, U, PNode, PEdge, IS>>>,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge, IS>>
+        patterns: HashMap<IterationStatus, Vec<PatternInConstruction<'a, U, PNode, PEdge>>>,
+    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
         PNode: Copy + Eq + Hash,
         PEdge: Copy + Eq + Hash,
-        IS: Clone + Iterator<Item = Symbol>,
     {
         // Partition between the min stage and the others
         let Some(&min_stage) = patterns.keys().min_by_key(|s| match s {
@@ -257,14 +247,13 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     }
 
     /// Find out whether a state that we can reuse exists
-    fn try_reuse_det_state<IS>(
+    fn try_reuse_det_state(
         &self,
-        patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge, IS>],
+        patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge>],
     ) -> Option<StateID>
     where
         PNode: Copy + Eq + Hash,
         PEdge: Copy + Eq + Hash,
-        IS: Clone + Iterator<Item = Symbol>,
     {
         let Some(stage) = leftover_stage(patterns) else {
             panic!("Can only reuse states in the LeftOver stage")
@@ -273,15 +262,14 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         self.det_states.get(&(pattern_ids, stage)).copied()
     }
 
-    fn non_det_transitions<'a, IS>(
+    fn non_det_transitions<'a>(
         &self,
         source: StateID,
-        patterns: HashMap<IterationStatus, Vec<PatternInConstruction<'a, U, PNode, PEdge, IS>>>,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge, IS>>
+        patterns: HashMap<IterationStatus, Vec<PatternInConstruction<'a, U, PNode, PEdge>>>,
+    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
         PNode: Copy + Eq + Hash,
         PEdge: Copy + Eq + Hash,
-        IS: Clone + Iterator<Item = Symbol>,
     {
         let patterns = coarser_partition(patterns, |stage| match stage {
             &IterationStatus::Skeleton(i) => i,
@@ -303,8 +291,8 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     }
 }
 
-fn leftover_stage<U: Universe, PNode: Copy, PEdge: Copy, IS: Iterator<Item = Symbol>>(
-    patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge, IS>],
+fn leftover_stage<U: Universe, PNode: Copy, PEdge: Copy>(
+    patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge>],
 ) -> Option<usize> {
     patterns
         .iter_mut()
@@ -320,20 +308,20 @@ fn leftover_stage<U: Universe, PNode: Copy, PEdge: Copy, IS: Iterator<Item = Sym
 }
 
 #[derive(Clone)]
-struct PatternInConstruction<'a, U: Universe, PNode, PEdge, IS> {
-    edges: PredicatesIter<'a, U, PNode, PEdge, IS, Symbol>,
+struct PatternInConstruction<'a, U: Universe, PNode, PEdge> {
+    edges: PredicatesIter<'a, U, PNode, PEdge>,
     pattern_id: usize,
 }
 
-struct TransitionInConstruction<'a, U: Universe, PNode, PEdge, IS> {
+struct TransitionInConstruction<'a, U: Universe, PNode, PEdge> {
     source: StateID,
     target: Option<StateID>,
-    pred: EdgePredicate<PNode, PEdge, Symbol>,
-    patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge, IS>>,
+    pred: EdgePredicate<PNode, PEdge>,
+    patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
 }
 
-impl<'a, U: Universe, PNode: Copy, PEdge: Copy, IS> PatternInConstruction<'a, U, PNode, PEdge, IS> {
-    fn new(edges: PredicatesIter<'a, U, PNode, PEdge, IS, Symbol>, pattern_id: usize) -> Self {
+impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PatternInConstruction<'a, U, PNode, PEdge> {
+    fn new(edges: PredicatesIter<'a, U, PNode, PEdge>, pattern_id: usize) -> Self {
         Self { edges, pattern_id }
     }
 
@@ -397,6 +385,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use crate::patterns::LinePattern;
 
     use super::LineBuilder;
@@ -507,7 +497,7 @@ mod tests {
 
         let builder: LineBuilder<_, _, _> = [p1, p2, p3].into_iter().collect();
         let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 18);
+        assert_eq!(matcher.n_states(), 17);
     }
 
     #[test]

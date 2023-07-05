@@ -6,7 +6,7 @@ use portgraph::{NodeIndex, PortGraph, PortView};
 use crate::{
     matcher::{Match, PortMatcher, SinglePatternMatcher},
     patterns::UnweightedEdge,
-    Pattern,  Universe, EdgeProperty, NodeProperty,
+    EdgeProperty, NodeProperty, Pattern, Universe,
 };
 
 /// A simple matcher for matching multiple patterns.

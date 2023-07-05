@@ -8,7 +8,7 @@ impl<PNode: Copy, PEdge: Copy> ScopeAutomaton<PNode, PEdge> {
     pub(super) fn set_children(
         &mut self,
         state: StateID,
-        preds: &[EdgePredicate<PNode, PEdge, Symbol>],
+        preds: &[EdgePredicate<PNode, PEdge>],
         next_states: &[Option<StateID>],
     ) -> Vec<Option<StateID>> {
         if self.graph.num_outputs(state.0) != 0 {

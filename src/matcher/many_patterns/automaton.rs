@@ -6,7 +6,7 @@ use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView};
 use crate::{
     automaton::{LineBuilder, ScopeAutomaton},
     matcher::{Match, PatternMatch},
-    patterns::{UnweightedEdge, compatible_offsets},
+    patterns::{compatible_offsets, UnweightedEdge},
     EdgeProperty, NodeProperty, Pattern, PortMatcher, Universe,
 };
 
@@ -104,8 +104,6 @@ mod tests {
     // use glob::glob;
     // use std::fs;
 
-    use std::collections::BTreeSet;
-
     use itertools::Itertools;
 
     use portgraph::{
@@ -181,7 +179,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(matcher.find_matches(&g), vec![]);
+        // We no longer match dangling ports
+        // assert_eq!(matcher.find_matches(&g), vec![]);
+        assert_eq!(matcher.find_matches(&g).len(), 2);
     }
 
     #[test]
@@ -235,6 +235,7 @@ mod tests {
         let p1 = Pattern::from_portgraph(&p1);
         let p2 = Pattern::from_portgraph(&p2);
         let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+
         assert_eq!(matcher.find_matches(&g).len(), 3);
     }
 

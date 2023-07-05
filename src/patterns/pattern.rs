@@ -200,11 +200,11 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
                     edges.remove(&(v, rev));
                 }
                 new_edges.push((u, v, property));
+                add_new_edges(&mut to_visit, v, edges.keys());
                 let Some(&(_, new_prop)) = edges.keys().find(|(u, p)| u == &v && valid_successor(property, *p)) else {
                     break
                 };
                 curr_edge = (v, new_prop);
-                add_new_edges(&mut to_visit, v, edges.keys());
             }
             if !new_edges.is_empty() {
                 let line = Line::new(u, new_edges);
@@ -288,10 +288,23 @@ mod tests {
 
     #[test]
     fn from_pattern_simple() {
-        let mut p = Pattern::<usize, (), (usize, usize)>::new();
+        let mut p = Pattern::<_, (), _>::new();
         p.add_edge(0, 0, (0, 2));
         p.add_edge(0, 1, (1, 1));
         p.add_edge(0, 2, (2, 0));
+        p.set_root(2);
+        p.try_into_line_pattern(|(_, pout), (pin, _)| pin == pout)
+            .expect("Could not convert to line pattern");
+    }
+
+    #[test]
+    fn from_pattern2() {
+        let mut p = Pattern::<_, (), _>::new();
+        let po = |i| PortOffset::new_outgoing(i);
+        let pi = |i| PortOffset::new_incoming(i);
+        let mut add_edge = |(i, j), (k, l)| p.add_edge(i, k, (po(j), pi(l)));
+        add_edge((0, 0), (1, 0));
+        add_edge((2, 0), (1, 1));
         p.set_any_root().expect("Could not pick any root");
         p.try_into_line_pattern(|(_, pout), (pin, _)| pin == pout)
             .expect("Could not convert to line pattern");
