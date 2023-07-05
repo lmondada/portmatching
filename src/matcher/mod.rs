@@ -12,26 +12,24 @@ pub use many_patterns::{ManyMatcher, NaiveManyMatcher, PatternID, UnweightedMany
 use portgraph::PortOffset;
 pub use single_pattern::SinglePatternMatcher;
 
-use crate::{Pattern, Property, Universe};
+use crate::{graph_traits::Node, GraphNodes, Pattern, Property, Universe};
 
 /// A trait for pattern matchers.
 ///
 /// A pattern matcher is a type that can find matches of a pattern in a graph.
 /// Implement [`Matcher::find_anchored_matches`] that finds matches of all
 /// patterns anchored at a given root node.
-pub trait PortMatcher<Graph> {
-    /// Node type of the graph.
-    type N: Universe;
+pub trait PortMatcher<Graph: GraphNodes>
+where
+    Node<Graph>: Universe,
+{
     /// Node properties
     type PNode;
     /// Edge properties
     type PEdge: Property;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_rooted_matches(&self, graph: Graph, root: Self::N) -> Vec<Match<'_, Self, Graph>>;
-
-    /// All the nodes of the graph.
-    fn nodes(g: Graph) -> Vec<Self::N>;
+    fn find_rooted_matches(&self, graph: Graph, root: Node<Graph>) -> Vec<Match<'_, Self, Graph>>;
 
     /// Find matches of all patterns in `graph`.
     ///
@@ -42,7 +40,7 @@ pub trait PortMatcher<Graph> {
         Graph: Copy,
     {
         let mut matches = Vec::new();
-        for root in Self::nodes(graph) {
+        for root in <Graph as GraphNodes>::nodes(&graph) {
             matches.append(&mut self.find_rooted_matches(graph, root));
         }
         matches
@@ -50,12 +48,8 @@ pub trait PortMatcher<Graph> {
 }
 
 type Match<'p, M, G> = PatternMatch<
-    &'p Pattern<
-        <M as PortMatcher<G>>::N,
-        <M as PortMatcher<G>>::PNode,
-        <M as PortMatcher<G>>::PEdge,
-    >,
-    <M as PortMatcher<G>>::N,
+    &'p Pattern<Node<G>, <M as PortMatcher<G>>::PNode, <M as PortMatcher<G>>::PEdge>,
+    Node<G>,
 >;
 
 /// A match instance returned by a Portmatcher instance.

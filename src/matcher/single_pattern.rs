@@ -25,16 +25,11 @@ impl<G> PortMatcher<G> for SinglePatternMatcher<NodeIndex, (), UnweightedEdge>
 where
     G: Borrow<PortGraph> + Copy,
 {
-    type N = NodeIndex;
     type PNode = ();
     type PEdge = UnweightedEdge;
 
     fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<'_, Self, G>> {
         self.find_rooted_match(graph, root, validate_unweighted_edge)
-    }
-
-    fn nodes(g: G) -> Vec<Self::N> {
-        g.borrow().nodes_iter().collect()
     }
 }
 

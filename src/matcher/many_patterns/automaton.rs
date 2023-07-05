@@ -63,11 +63,10 @@ impl<'g, G> PortMatcher<G> for ManyMatcher<NodeIndex, (), UnweightedEdge>
 where
     G: Borrow<PortGraph>,
 {
-    type N = NodeIndex;
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: Self::N) -> Vec<Match<'_, Self, G>> {
+    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<'_, Self, G>> {
         // Node weights (none)
         let node_prop = |n, ()| true;
         // Check edges exist
@@ -89,10 +88,6 @@ where
                 root,
             })
             .collect()
-    }
-
-    fn nodes(g: G) -> Vec<Self::N> {
-        todo!()
     }
 }
 
