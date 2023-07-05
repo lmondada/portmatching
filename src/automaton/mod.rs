@@ -15,7 +15,7 @@ use derive_more::{From, Into};
 use portgraph::dot::DotFormat;
 use portgraph::{NodeIndex, PortGraph, PortMut, PortView, Weights};
 
-use crate::predicate::EdgePredicate;
+use crate::predicate::{EdgePredicate, Symbol};
 use crate::{PatternID, Universe};
 
 /// A state ID in a scope automaton
@@ -52,7 +52,7 @@ struct State {
 #[derive(Clone, Debug, Copy, From, Into)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 struct Transition<PNode, PEdge> {
-    predicate: EdgePredicate<PNode, PEdge, Symbol>,
+    predicate: EdgePredicate<PNode, PEdge>,
 }
 
 /// An automaton-like datastructure that follows transitions based on input and state
@@ -155,21 +155,5 @@ impl<U: Universe> AssignMap<U> {
             map,
             state_id: root_state,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, From, Into, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct Symbol(usize);
-
-type SymbolsIter = Map<RangeFrom<usize>, fn(usize) -> Symbol>;
-
-impl Symbol {
-    fn gen_symbols() -> SymbolsIter {
-        (1..).map(Symbol::from)
-    }
-
-    fn root() -> Symbol {
-        Symbol(0)
     }
 }
