@@ -79,7 +79,7 @@ fn test<'g, M>(
     exp: &Vec<PatternMatch<UnweightedPattern, NodeIndex>>,
     n_patterns: usize,
 ) where
-    M: PortMatcher<&'g PortGraph, N = NodeIndex, PNode = (), PEdge = (PortOffset, PortOffset)>,
+    M: PortMatcher<&'g PortGraph, PNode = (), PEdge = (PortOffset, PortOffset)>,
 {
     let many_matches = matcher
         .find_matches(graph)

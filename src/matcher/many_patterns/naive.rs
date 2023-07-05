@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use itertools::Itertools;
-use portgraph::{NodeIndex, PortGraph};
+use portgraph::{NodeIndex, PortGraph, PortView};
 
 use crate::{
     matcher::{Match, PortMatcher, SinglePatternMatcher},
@@ -40,19 +40,14 @@ impl<G> PortMatcher<G> for NaiveManyMatcher<NodeIndex, (), UnweightedEdge>
 where
     G: Borrow<PortGraph> + Copy,
 {
-    type N = NodeIndex;
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: Self::N) -> Vec<Match<'_, Self, G>> {
+    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<'_, Self, G>> {
         self.matchers
             .iter()
             .flat_map(|m| m.find_rooted_matches(graph, root))
             .collect()
-    }
-
-    fn nodes(g: G) -> Vec<Self::N> {
-        todo!()
     }
 }
 

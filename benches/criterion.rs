@@ -24,14 +24,14 @@ use rand::Rng;
 fn bench_matching<'g, M: PortMatcher<&'g PortGraph>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
-    patterns: &[Pattern<M::N, M::PNode, M::PEdge>],
+    patterns: &[Pattern<NodeIndex, M::PNode, M::PEdge>],
     sizes: impl Iterator<Item = usize>,
     graph: &'g PortGraph,
-    mut get_matcher: impl FnMut(Vec<Pattern<M::N, M::PNode, M::PEdge>>) -> M,
+    mut get_matcher: impl FnMut(Vec<Pattern<NodeIndex, M::PNode, M::PEdge>>) -> M,
 ) where
     M::PEdge: Property,
     M::PNode: Property,
-    M::N: Copy,
+    NodeIndex: Copy,
 {
     group.sample_size(10);
     for n in sizes {
@@ -100,11 +100,10 @@ fn bench_matching_xxl_weighted(
 fn bench_trie_construction<'g, M: PortMatcher<&'g PortGraph>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
-    patterns: &[Pattern<M::N, M::PNode, M::PEdge>],
+    patterns: &[Pattern<NodeIndex, M::PNode, M::PEdge>],
     sizes: impl Iterator<Item = usize>,
-    mut get_matcher: impl FnMut(Vec<Pattern<M::N, M::PNode, M::PEdge>>) -> M,
+    mut get_matcher: impl FnMut(Vec<Pattern<NodeIndex, M::PNode, M::PEdge>>) -> M,
 ) where
-    M::N: Copy,
     M::PNode: Copy,
     M::PEdge: Copy,
 {

@@ -2,12 +2,14 @@
 #![doc = include_str!("../README.md")]
 
 pub mod automaton;
+mod graph_traits;
 pub mod matcher;
 pub mod patterns;
 pub(crate) mod predicate;
 
 pub mod utils;
 
+pub use graph_traits::GraphNodes;
 pub use matcher::{NaiveManyMatcher, PatternID, PortMatcher, SinglePatternMatcher};
 pub use patterns::{Pattern, UnweightedPattern};
 
