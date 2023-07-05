@@ -11,7 +11,7 @@ use std::{
 use derive_more::{From, Into};
 
 use crate::{
-    predicate::{EdgePredicate, Symbol, SymbolsIter},
+    predicate::{EdgePredicate, NodeLocation, Symbol, SymbolsIter},
     Universe,
 };
 
@@ -161,11 +161,19 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
         // Follow the path from a visited node to the root of line i
         let (j, j_ind) = self.to_line_ind[&self.lines[i].root].into();
         let boundary_ind = &mut self.visited_boundary[j];
-        // if j_ind >= *boundary_ind {
-        //     // Indicate that we will be traversing `j`
-        //     self.it_queue
-        //         .push_back(EdgePredicate::TraverseAlong { line: j });
-        // }
+        if j_ind >= *boundary_ind {
+            // Indicate that we will be traversing `j` to reach the root of `i`
+            self.it_queue.push_back(EdgePredicate::NextRoot {
+                line_nb: i,
+                new_root: NodeLocation::Discover(j),
+            });
+        } else {
+            // Indicate that the root of `i` is known
+            self.it_queue.push_back(EdgePredicate::NextRoot {
+                line_nb: i,
+                new_root: NodeLocation::Exists(self.u_to_symbols[&self.lines[i].root]),
+            });
+        }
         while j_ind >= *boundary_ind {
             self.it_queue.extend(edge_predicates(
                 self.lines[j].edges[*boundary_ind - 1],
@@ -178,6 +186,10 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
     }
 
     fn traverse_leftover(&mut self, i: usize) {
+        if i == 0 {
+            // Indicate that we are moving to left overs
+            self.it_queue.push_back(EdgePredicate::True);
+        }
         for ind in (self.visited_boundary[i] - 1)..self.lines[i].edges.len() {
             self.it_queue.extend(edge_predicates(
                 self.lines[i].edges[ind],
@@ -223,7 +235,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) enum IterationStatus {
     // We are traversing the i-th line wihtin skeleton
@@ -255,7 +267,7 @@ impl IterationStatus {
         }
     }
 
-    pub(super) fn leftover_index(&self) -> Option<usize> {
+    pub(crate) fn leftover_index(&self) -> Option<usize> {
         match self {
             Self::LeftOver(i) => Some(*i),
             _ => None,
@@ -323,8 +335,6 @@ fn edge_predicates<U: Universe, PNode: Copy, PEdge: Copy>(
 mod tests {
     use itertools::Itertools;
 
-    use crate::Pattern;
-
     use super::*;
 
     #[test]
@@ -355,12 +365,12 @@ mod tests {
         };
         let symbs = [
             Symbol::new(IterationStatus::Skeleton(0), 0),
-            Symbol::new(IterationStatus::Skeleton(0), 1),
-            Symbol::new(IterationStatus::Skeleton(0), 2),
             Symbol::new(IterationStatus::Skeleton(1), 0),
             Symbol::new(IterationStatus::Skeleton(1), 1),
             Symbol::new(IterationStatus::Skeleton(2), 0),
             Symbol::new(IterationStatus::Skeleton(2), 1),
+            Symbol::new(IterationStatus::LeftOver(2), 0),
+            Symbol::new(IterationStatus::LeftOver(2), 1),
         ];
         assert_eq!(
             p.edge_predicates().collect::<Vec<_>>(),
@@ -369,7 +379,10 @@ mod tests {
                     node: symbs[0],
                     property: ()
                 },
-                // EdgePredicate::TraverseAlong { line: 0 },
+                EdgePredicate::NextRoot {
+                    line_nb: 1,
+                    new_root: NodeLocation::Discover(0)
+                },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
                     property: (),
@@ -388,7 +401,10 @@ mod tests {
                     node: symbs[2],
                     property: ()
                 },
-                // EdgePredicate::TraverseAlong { line: 1 },
+                EdgePredicate::NextRoot {
+                    line_nb: 2,
+                    new_root: NodeLocation::Discover(1)
+                },
                 EdgePredicate::LinkNewNode {
                     node: symbs[2],
                     property: (),
@@ -407,8 +423,7 @@ mod tests {
                     node: symbs[4],
                     property: ()
                 },
-                // TODO: the deterministic part from here on
-                // EdgePredicate::TraverseAlong { line: 2 },
+                EdgePredicate::True,
                 EdgePredicate::LinkKnownNode {
                     node: symbs[2],
                     property: (),
@@ -465,13 +480,20 @@ mod tests {
                     node: symbs[0],
                     property: ()
                 },
-                // EdgePredicate::TraverseAlong { line: 1 },
+                EdgePredicate::NextRoot {
+                    line_nb: 1,
+                    new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0))
+                },
+                EdgePredicate::NextRoot {
+                    line_nb: 2,
+                    new_root: NodeLocation::Discover(1)
+                },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
                     property: 2,
                     new_node: symbs[1]
                 },
-                // EdgePredicate::True,
+                EdgePredicate::True,
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
                     property: 0,
@@ -516,7 +538,10 @@ mod tests {
                     node: symbs[0],
                     property: ()
                 },
-                // EdgePredicate::TraverseAlong { line: 0 },
+                EdgePredicate::NextRoot {
+                    line_nb: 1,
+                    new_root: NodeLocation::Discover(0)
+                },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
                     property: 0,
@@ -527,6 +552,7 @@ mod tests {
                     property: 0,
                     new_node: symbs[2]
                 },
+                EdgePredicate::True,
                 EdgePredicate::LinkNewNode {
                     node: symbs[2],
                     property: 0,
@@ -566,13 +592,20 @@ mod tests {
                     node: symbs[0],
                     property: ()
                 },
-                // EdgePredicate::TraverseAlong { line: 1 },
+                EdgePredicate::NextRoot {
+                    line_nb: 1,
+                    new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0))
+                },
+                EdgePredicate::NextRoot {
+                    line_nb: 2,
+                    new_root: NodeLocation::Discover(1)
+                },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
                     property: (),
                     new_node: symbs[1]
                 },
-                // EdgePredicate::True,
+                EdgePredicate::True,
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
                     property: (),
