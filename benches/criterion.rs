@@ -185,31 +185,17 @@ fn perform_benches(c: &mut Criterion) {
         (500..=5000).step_by(500),
         &graph,
     );
-    bench_matching_xxl(
-        "Balanced Graph Trie (optimised)",
-        &mut group,
-        "optimised",
-        (500..=5000).step_by(500),
-        &graph,
-    );
     group.finish();
 
-    let mut group = c.benchmark_group("Many Patterns Matching XXL weighted");
-    bench_matching_xxl_weighted(
-        "Balanced Graph Trie",
-        &mut group,
-        "balanced",
-        (500..=5000).step_by(500),
-        &graph,
-    );
-    bench_matching_xxl_weighted(
-        "Balanced Graph Trie (optimised)",
-        &mut group,
-        "optimised",
-        (500..=5000).step_by(500),
-        &graph,
-    );
-    group.finish();
+    // let mut group = c.benchmark_group("Many Patterns Matching XXL weighted");
+    // bench_matching_xxl_weighted(
+    //     "Balanced Graph Trie",
+    //     &mut group,
+    //     "balanced",
+    //     (500..=5000).step_by(500),
+    //     &graph,
+    // );
+    // group.finish();
 }
 
 criterion_group!(benches, perform_benches);

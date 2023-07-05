@@ -8,11 +8,19 @@
 pub mod many_patterns;
 pub mod single_pattern;
 
+use std::{borrow::Borrow, collections::HashMap};
+
 pub use many_patterns::{ManyMatcher, NaiveManyMatcher, PatternID, UnweightedManyMatcher};
-use portgraph::PortOffset;
+use portgraph::{NodeIndex, PortGraph, PortOffset};
 pub use single_pattern::SinglePatternMatcher;
 
-use crate::{graph_traits::Node, GraphNodes, Pattern, Property, Universe};
+use crate::{
+    graph_traits::Node,
+    patterns::{Edge, UnweightedEdge},
+    GraphNodes, Pattern, Property, Universe,
+};
+
+use self::single_pattern::validate_unweighted_edge;
 
 /// A trait for pattern matchers.
 ///
@@ -63,10 +71,7 @@ pub struct PatternMatch<P, N> {
     /// The pattern that matches.
     pub pattern: P,
 
-    /// The root node of the match.
-    ///
-    /// The entire match can be recovered from the root mapping
-    /// using [`crate::Pattern::get_boundary`].
+    /// The root node of the match in the host graph
     pub root: N,
 }
 
@@ -80,5 +85,67 @@ impl<'p, P, N> PatternMatch<&'p P, N> {
             pattern: self.pattern.clone(),
             root: self.root,
         }
+    }
+}
+
+impl<U: Universe, PNode: Property> PatternMatch<Pattern<U, PNode, UnweightedEdge>, NodeIndex> {
+    pub fn as_ref(&self) -> PatternMatch<&Pattern<U, PNode, UnweightedEdge>, NodeIndex> {
+        PatternMatch {
+            pattern: &self.pattern,
+            root: self.root,
+        }
+    }
+
+    pub fn to_match_map<G: Borrow<PortGraph> + Copy>(
+        &self,
+        graph: G,
+    ) -> Option<HashMap<U, NodeIndex>> {
+        self.as_ref().to_match_map(graph)
+    }
+}
+
+impl<'p, U: Universe, PNode: Property>
+    PatternMatch<&'p Pattern<U, PNode, UnweightedEdge>, NodeIndex>
+{
+    pub fn to_match_map<G: Borrow<PortGraph> + Copy>(
+        &self,
+        graph: G,
+    ) -> Option<HashMap<U, NodeIndex>> {
+        Some(
+            SinglePatternMatcher::from_pattern(self.pattern.clone())
+                .get_match_map(
+                    graph,
+                    self.root,
+                    forget_node_weight(validate_unweighted_edge),
+                )?
+                .into_iter()
+                .collect(),
+        )
+    }
+}
+
+fn forget_node_weight<W, G, F>(
+    f: F,
+) -> impl Fn(Edge<NodeIndex, W, UnweightedEdge>, G) -> Option<(NodeIndex, NodeIndex)>
+where
+    F: Fn(Edge<NodeIndex, (), UnweightedEdge>, G) -> Option<(NodeIndex, NodeIndex)>,
+{
+    move |e, g| {
+        let Edge {
+            source,
+            target,
+            edge_prop,
+            ..
+        } = e;
+        f(
+            Edge {
+                source,
+                target,
+                edge_prop,
+                source_prop: None,
+                target_prop: None,
+            },
+            g,
+        )
     }
 }
