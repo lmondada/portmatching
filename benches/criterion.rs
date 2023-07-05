@@ -13,12 +13,12 @@ use itertools::Itertools;
 use portgraph::NodeIndex;
 use portgraph::PortGraph;
 use portgraph::UnmanagedDenseMap;
-use portmatching::EdgeProperty;
-use portmatching::NodeProperty;
 use portmatching::matcher::many_patterns::ManyMatcher;
 use portmatching::matcher::PortMatcher;
 use portmatching::matcher::UnweightedManyMatcher;
+use portmatching::EdgeProperty;
 use portmatching::NaiveManyMatcher;
+use portmatching::NodeProperty;
 use portmatching::Pattern;
 use rand::Rng;
 

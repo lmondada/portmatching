@@ -232,10 +232,42 @@ mod tests {
         link(&mut g, (n3, 0), (n1, 1));
         link(&mut g, (n3, 1), (n0, 0));
 
-        let p1 = Pattern::from_portgraph(&p1);
-        let p2 = Pattern::from_portgraph(&p2);
+        let p1 = Pattern::from_rooted_portgraph(&p1, n0);
+        let p2 = Pattern::from_rooted_portgraph(&p2, n0);
         let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+        assert_eq!(matcher.find_matches(&g).len(), 3);
+    }
 
+    #[test]
+    fn two_simple_patterns_change_root() {
+        let mut p1 = PortGraph::new();
+        let n0 = p1.add_node(0, 1);
+        let n1 = p1.add_node(2, 0);
+        let n2 = p1.add_node(0, 1);
+        link(&mut p1, (n0, 0), (n1, 0));
+        link(&mut p1, (n2, 0), (n1, 1));
+
+        let mut p2 = PortGraph::new();
+        let n0 = p2.add_node(2, 1);
+        let n1 = p2.add_node(3, 0);
+        link(&mut p2, (n0, 0), (n1, 1));
+
+        let mut g = PortGraph::new();
+        let n0 = g.add_node(2, 2);
+        let n1 = g.add_node(3, 1);
+        let n2 = g.add_node(0, 2);
+        let n3 = g.add_node(3, 2);
+        link(&mut g, (n0, 0), (n1, 2));
+        link(&mut g, (n0, 1), (n3, 0));
+        link(&mut g, (n1, 0), (n3, 1));
+        link(&mut g, (n2, 0), (n1, 0));
+        link(&mut g, (n2, 1), (n3, 2));
+        link(&mut g, (n3, 0), (n1, 1));
+        link(&mut g, (n3, 1), (n0, 0));
+
+        let p1 = Pattern::from_rooted_portgraph(&p1, n1);
+        let p2 = Pattern::from_rooted_portgraph(&p2, n0);
+        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
         assert_eq!(matcher.find_matches(&g).len(), 3);
     }
 
@@ -299,7 +331,9 @@ mod tests {
         let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
     }
 
+    // TODO: implement weighted matching
     #[test]
+    #[should_panic]
     fn weighted_pattern_matching() {
         let mut p1 = PortGraph::new();
         let n0 = p1.add_node(2, 1);

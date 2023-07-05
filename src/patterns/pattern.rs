@@ -138,27 +138,43 @@ impl<U: Universe, PNode, PEdge: Eq + Hash> Default for Pattern<U, PNode, PEdge> 
     }
 }
 
+fn add_nodes(pattern: &mut Pattern<NodeIndex, (), (PortOffset, PortOffset)>, g: &PortGraph) {
+    for n in g.nodes_iter() {
+        pattern.require(n, ());
+    }
+}
+
+fn add_edges(pattern: &mut Pattern<NodeIndex, (), (PortOffset, PortOffset)>, g: &PortGraph) {
+    for p in g.ports_iter() {
+        if g.port_offset(p).unwrap().direction() == Direction::Incoming {
+            continue;
+        }
+        let pout = p;
+        let Some(pin) = g.port_link(pout) else {
+            continue
+        };
+        let pout_offset = g.port_offset(pout).unwrap();
+        let pin_offset = g.port_offset(pin).unwrap();
+        let pout_node = g.port_node(pout).unwrap();
+        let pin_node = g.port_node(pin).unwrap();
+        pattern.add_edge(pout_node, pin_node, (pout_offset, pin_offset));
+    }
+}
+
 impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
     pub fn from_portgraph(g: &PortGraph) -> Self {
         let mut pattern = Self::new();
-        for n in g.nodes_iter() {
-            pattern.require(n, ());
-        }
-        for p in g.ports_iter() {
-            if g.port_offset(p).unwrap().direction() == Direction::Incoming {
-                continue;
-            }
-            let pout = p;
-            let Some(pin) = g.port_link(pout) else {
-                continue
-            };
-            let pout_offset = g.port_offset(pout).unwrap();
-            let pin_offset = g.port_offset(pin).unwrap();
-            let pout_node = g.port_node(pout).unwrap();
-            let pin_node = g.port_node(pin).unwrap();
-            pattern.add_edge(pout_node, pin_node, (pout_offset, pin_offset));
-        }
+        add_nodes(&mut pattern, g);
+        add_edges(&mut pattern, g);
         pattern.set_any_root().expect("Could not find root");
+        pattern
+    }
+
+    pub fn from_rooted_portgraph(g: &PortGraph, root: NodeIndex) -> Self {
+        let mut pattern = Self::new();
+        add_nodes(&mut pattern, g);
+        add_edges(&mut pattern, g);
+        pattern.set_root(root);
         pattern
     }
 }

@@ -53,10 +53,23 @@ pub(crate) enum EdgePredicate<PNode, PEdge> {
         known_node: Symbol,
     },
     // Always true (non-deterministic)
-    True {
-        line: usize,
-        deterministic: bool,
+    NextRoot {
+        line_nb: usize,
+        new_root: NodeLocation,
     },
+    // Always true (non-deterministic)
+    True,
+    // Always true (deterministic)
+    Fail,
+}
+
+#[derive(PartialEq, Eq, Copy, Clone, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub(crate) enum NodeLocation {
+    // The node is in an already-known location
+    Exists(Symbol),
+    // We need to explore along the i-th line to discover the node
+    Discover(usize),
 }
 
 pub(crate) enum PredicateSatisfied<U> {
@@ -111,7 +124,9 @@ impl<PNode: Copy, PEdge: Copy> EdgePredicate<PNode, PEdge> {
                     PredicateSatisfied::No
                 }
             }
-            EdgePredicate::True { .. } => PredicateSatisfied::Yes,
+            EdgePredicate::True { .. } | EdgePredicate::NextRoot { .. } | EdgePredicate::Fail => {
+                PredicateSatisfied::Yes
+            }
         }
     }
 }
@@ -147,14 +162,8 @@ impl CompatibilityType {
 
     fn from_predicate<PNode, PEdge>(pred: &EdgePredicate<PNode, PEdge>) -> Self {
         match pred {
-            EdgePredicate::True {
-                deterministic: false,
-                ..
-            } => Self::NonDetType,
-            EdgePredicate::True {
-                deterministic: true,
-                ..
-            } => Self::FailType,
+            EdgePredicate::True | EdgePredicate::NextRoot { .. } => Self::NonDetType,
+            EdgePredicate::Fail => Self::FailType,
             EdgePredicate::LinkNewNode { node, .. } | EdgePredicate::LinkKnownNode { node, .. } => {
                 Self::LinkType(*node)
             }
