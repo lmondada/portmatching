@@ -1,0 +1,3 @@
+digraph {
+0 [shape=plain label=<<table border="1"><tr><td align="text" border="0" colspan="1">State { matches: [0, 1], scope: {Symbol(Skeleton(0), 0)}, deterministic: true }[[0, 1]]</td></tr></table>>]
+}
