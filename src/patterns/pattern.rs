@@ -52,6 +52,27 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
         self.root = Some(root);
     }
 
+    pub fn dot_string(&self) -> String
+    where
+        U: std::fmt::Debug,
+        PNode: std::fmt::Debug,
+        PEdge: std::fmt::Debug,
+    {
+        let mut s = String::new();
+        s.push_str("digraph {\n");
+        for (u, property) in &self.nodes {
+            s.push_str(&format!("  {:?} [label=\"{:?}\"];\n", u, property));
+        }
+        for ((u, property), v) in &self.edges {
+            s.push_str(&format!(
+                "  {:?} -> {:?} [label=\"{:?}\"];\n",
+                u, v, property
+            ));
+        }
+        s.push_str("}\n");
+        s
+    }
+
     /// Let the pattern fix a root
     fn set_any_root(&mut self) -> Result<U, NoRootFound> {
         let all_edges: HashSet<_> = self

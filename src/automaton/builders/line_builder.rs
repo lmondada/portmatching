@@ -9,7 +9,7 @@ use crate::{
     automaton::{ScopeAutomaton, StateID},
     patterns::{IterationStatus, LinePattern, PredicatesIter},
     predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility},
-    Universe,
+    EdgeProperty, NodeProperty, Universe,
 };
 
 pub(crate) struct LineBuilder<U: Universe, PNode, PEdge> {
@@ -38,13 +38,13 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
 
     pub fn build(mut self) -> ScopeAutomaton<PNode, PEdge>
     where
-        PNode: Copy + Eq + Hash,
-        PEdge: Copy + Eq + Hash,
+        PNode: NodeProperty,
+        PEdge: NodeProperty,
     {
         let mut matcher = ScopeAutomaton::<PNode, PEdge>::new();
 
         // Convert patterns to pattern in construction
-        let mut patterns = self
+        let patterns = self
             .patterns
             .iter()
             .enumerate()
@@ -69,16 +69,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
             }
             let (patterns, stages): (Vec<_>, Vec<_>) = patterns_stages.into_iter().unzip();
             // The current stage of the iteration is the minimum of all stages
-            // Note that all Skeleton stages must be equal
-            let Some(current_stage) = stages.iter().copied().reduce(|acc, e| {
-                if let (IterationStatus::Skeleton(i), IterationStatus::Skeleton(j)) = (acc, e) {
-                    if i != j {
-                        panic!("incompatible stages");
-                    }
-                }
-                acc.min(e)
-            }) else {
-                // Nothing to do
+            let Some(&current_stage) = stages.iter().min() else {
                 continue;
             };
             // Compute the next transitions
@@ -93,10 +84,9 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
                     })
                     .zip(patterns)
                     .into_group_map();
-                self.only_det_transitions(state, stage_patterns)
+                self.only_det_predicates(state, stage_patterns)
             } else {
-                // Extract first predicate from each pattern
-                self.compatible_transitions(state, patterns)
+                self.get_compatible_predicates(state, patterns)
             };
             let new_children = self.add_transitions(&mut matcher, &transitions);
 
@@ -180,33 +170,58 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         new_states
     }
 
-    /// Consumes first predicate from each pattern and groups them by predicate
-    fn compatible_transitions<'a>(
+    /// The next predicate of each pattern
+    ///
+    /// Tries to consume the first predicate of each pattern. If there is a mix
+    /// of deterministic and non-deterministic transitions, then prioritise
+    /// non-deterministic ones and bundle all deterministc ones behind a single
+    /// True transition.
+    fn get_compatible_predicates<'a>(
         &self,
         source: StateID,
-        mut patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
+        patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
     ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
         PNode: Copy + Eq + Hash,
         PEdge: Copy + Eq + Hash,
     {
-        let predicates = patterns
-            .iter_mut()
-            .map(|p| p.edges.next().expect("Not finished"))
-            .collect_vec();
-        // Group patterns by predicate
-        predicates
+        let mut patterns = patterns
             .into_iter()
-            .zip(patterns)
-            .into_group_map()
-            .into_iter()
-            .map(|(pred, patterns)| TransitionInConstruction {
+            .map(|mut p| (p.edges.peek().expect("Not finished").transition_type(), p))
+            .into_group_map();
+        let nondet_patterns = patterns.remove(&PredicateCompatibility::NonDeterministic);
+        let det_patterns = patterns.remove(&PredicateCompatibility::Deterministic);
+        debug_assert!(patterns.is_empty());
+
+        let mut transitions = Vec::new();
+        if let Some(patterns) = nondet_patterns {
+            transitions.append(&mut create_transitions(
                 source,
-                target: None,
-                pred,
-                patterns,
-            })
-            .collect()
+                patterns
+                    .into_iter()
+                    .map(|mut p| (p.edges.next().expect("Not finished"), p)),
+            ));
+        }
+        if let Some(patterns) = det_patterns {
+            if transitions.is_empty() {
+                // No non-det, so we can just add all deterministic transitions
+                transitions.append(&mut create_transitions(
+                    source,
+                    patterns
+                        .into_iter()
+                        .map(|mut p| (p.edges.next().expect("Not finished"), p)),
+                ));
+            } else {
+                // Add a single True transition, and put all det transitions there
+                transitions.push(TransitionInConstruction {
+                    source,
+                    target: None,
+                    pred: EdgePredicate::True,
+                    patterns,
+                })
+            }
+        }
+        transitions
     }
 
     /// Force deterministic transitions
@@ -214,7 +229,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     /// Unlike other transition functions, this does the patterns in the children
     /// states do not necessary form a partition: patterns might be cloned up
     /// to `n` times, yielding an exponential overhead if this is called repeatedly.
-    fn only_det_transitions<'a>(
+    fn only_det_predicates<'a>(
         &self,
         source: StateID,
         mut patterns: HashMap<usize, Vec<PatternInConstruction<'a, U, PNode, PEdge>>>,
@@ -231,29 +246,19 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         let mut min_patterns = patterns.remove(&min_stage).unwrap();
         let mut other_patterns = patterns.into_values().flatten().collect_vec();
 
-        // For the min stage, introduce the transitions (almost) as normal
+        // For the min stage, introduce the transitions as normal
         let min_predicates = min_patterns
             .iter_mut()
             .map(|p| p.edges.next().expect("Not finished"))
             .collect_vec();
-        // Group patterns by predicate
-        let mut transitions = min_predicates
-            .into_iter()
-            .zip(min_patterns)
-            .into_group_map()
-            .into_iter()
-            .map(|(pred, mut patterns)| {
-                patterns.append(&mut other_patterns.clone());
-                TransitionInConstruction {
-                    source,
-                    target: None,
-                    pred,
-                    patterns,
-                }
-            })
-            .collect_vec();
+        let mut transitions =
+            create_transitions(source, min_predicates.into_iter().zip(min_patterns));
+        // Then add all other patterns to each possible transition
+        for t in &mut transitions {
+            t.patterns.append(&mut other_patterns.clone());
+        }
 
-        // We bucket all other stages together
+        // Finally, we add a Fail transition to all other stages together
         if !other_patterns.is_empty() {
             let next_state = self.try_reuse_det_state(&mut other_patterns);
             transitions.push(TransitionInConstruction {
@@ -325,6 +330,27 @@ fn leftover_stage<U: Universe, PNode: Copy, PEdge: Copy>(
         })
         .min()
         .flatten()
+}
+
+fn create_transitions<'a, U: Universe, PNode: NodeProperty, PEdge: NodeProperty>(
+    source: StateID,
+    iter: impl IntoIterator<
+        Item = (
+            EdgePredicate<PNode, PEdge>,
+            PatternInConstruction<'a, U, PNode, PEdge>,
+        ),
+    >,
+) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>> {
+    iter.into_iter()
+        .into_group_map()
+        .into_iter()
+        .map(|(pred, mut patterns)| TransitionInConstruction {
+            source,
+            target: None,
+            pred,
+            patterns,
+        })
+        .collect()
 }
 
 #[derive(Clone)]
@@ -405,8 +431,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use crate::patterns::LinePattern;
 
     use super::LineBuilder;

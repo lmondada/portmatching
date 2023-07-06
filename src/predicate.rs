@@ -129,9 +129,13 @@ impl<PNode: Copy, PEdge: Copy> EdgePredicate<PNode, PEdge> {
             }
         }
     }
+
+    pub(crate) fn transition_type(&self) -> PredicateCompatibility {
+        CompatibilityType::from_predicate(self).transition_type()
+    }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PredicateCompatibility {
     Deterministic,
     NonDeterministic,
