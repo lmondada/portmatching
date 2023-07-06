@@ -147,14 +147,14 @@ fn perform_benches(c: &mut Criterion) {
         .expect("Did not find any large circuit");
 
     let mut group = c.benchmark_group("Many Patterns Matching");
-    // bench_matching(
-    //     "Naive matching",
-    //     &mut group,
-    //     &patterns,
-    //     (0..=300).step_by(100),
-    //     &graph,
-    //     NaiveManyMatcher::from_patterns,
-    // );
+    bench_matching(
+        "Naive matching",
+        &mut group,
+        &patterns,
+        (0..=300).step_by(100),
+        &graph,
+        NaiveManyMatcher::from_patterns,
+    );
     bench_matching(
         "Balanced Graph Trie",
         &mut group,
@@ -180,7 +180,7 @@ fn perform_benches(c: &mut Criterion) {
         "Balanced Graph Trie",
         &mut group,
         "balanced",
-        (500..=5000).step_by(500),
+        (500..=10000).step_by(500),
         &graph,
     );
     group.finish();
