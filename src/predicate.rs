@@ -1,4 +1,4 @@
-use bimap::BiMap;
+use bimap::{BiMap, BiBTreeMap};
 use derive_more::{From, Into};
 
 use std::{
@@ -12,9 +12,9 @@ use crate::{patterns::IterationStatus, Universe};
 pub(crate) type SymbolsIter =
     Map<Zip<Repeat<IterationStatus>, RangeFrom<usize>>, fn((IterationStatus, usize)) -> Symbol>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, From, Into, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, From, Into, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub(crate) struct Symbol(IterationStatus, usize);
+pub(crate) struct Symbol(pub(crate) IterationStatus, pub(crate) usize);
 
 impl Symbol {
     pub(crate) fn new(status: IterationStatus, ind: usize) -> Self {
@@ -81,7 +81,7 @@ pub(crate) enum PredicateSatisfied<U> {
 impl<PNode: Copy, PEdge: Copy> EdgePredicate<PNode, PEdge> {
     pub(crate) fn is_satisfied<'s, U: Universe>(
         &self,
-        ass: &BiMap<Symbol, U>,
+        ass: &BiBTreeMap<Symbol, U>,
         node_prop: impl Fn(U, PNode) -> bool + 's,
         edge_prop: impl Fn(U, PEdge) -> Option<U> + 's,
     ) -> PredicateSatisfied<U> {

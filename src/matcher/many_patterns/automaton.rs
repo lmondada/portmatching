@@ -1,13 +1,13 @@
 use std::{borrow::Borrow, fmt, hash::Hash};
 
 use itertools::Itertools;
-use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView};
+use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView, SecondaryMap};
 
 use crate::{
     automaton::{LineBuilder, ScopeAutomaton},
     matcher::{Match, PatternMatch},
     patterns::{compatible_offsets, UnweightedEdge},
-    EdgeProperty, NodeProperty, Pattern, PortMatcher, Universe,
+    NodeProperty, Pattern, PortMatcher, Universe,
 };
 
 /// A graph pattern matcher using scope automata.
@@ -17,17 +17,6 @@ pub struct ManyMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
     automaton: ScopeAutomaton<PNode, PEdge>,
     patterns: Vec<Pattern<U, PNode, PEdge>>,
 }
-
-// impl<U: Universe, PNode: Property, PEdge: Property> ManyMatcher<U, PNode, PEdge> {
-//     pub fn from_line_patterns(patterns: Vec<LinePattern<U, PNode, PEdge>>) -> Self {
-//         let builder = LineBuilder::from_patterns(patterns);
-//         let automaton = builder.build();
-//         Self {
-//             automaton,
-//             patterns,
-//         }
-//     }
-// }
 
 impl<U: Universe, PNode: NodeProperty> ManyMatcher<U, PNode, UnweightedEdge> {
     pub fn from_patterns(patterns: Vec<Pattern<U, PNode, UnweightedEdge>>) -> Self {
@@ -59,15 +48,14 @@ impl<U: Universe, PNode: Copy + fmt::Debug, PEdge: Copy + Eq + Hash + fmt::Debug
 
 pub type UnweightedManyMatcher = ManyMatcher<NodeIndex, (), UnweightedEdge>;
 
-impl<'g, G, U> PortMatcher<G, U> for ManyMatcher<U, (), UnweightedEdge>
+impl<U> PortMatcher<PortGraph, U> for ManyMatcher<U, (), UnweightedEdge>
 where
-    G: Borrow<PortGraph>,
     U: Universe,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<G>> {
+    fn find_rooted_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Match<PortGraph>> {
         // Node weights (none)
         let node_prop = |_, ()| true;
         // Check edges exist
@@ -101,10 +89,50 @@ impl<U: Universe, PNode: NodeProperty> From<Vec<Pattern<U, PNode, UnweightedEdge
     }
 }
 
+impl<U, W, M> PortMatcher<(PortGraph, M), U> for ManyMatcher<U, W, UnweightedEdge>
+where
+    M: SecondaryMap<NodeIndex, W>,
+    U: Universe,
+    W: Copy + Eq,
+{
+    type PNode = W;
+    type PEdge = UnweightedEdge;
+
+    fn find_rooted_matches(
+        &self,
+        (graph, weights): &(PortGraph, M),
+        root: NodeIndex,
+    ) -> Vec<Match<(PortGraph, M)>> {
+        // Node weights (none)
+        let node_prop = |v, prop| weights.get(v) == &prop;
+        // Check edges exist
+        let edge_prop = |n, (pout, pin)| {
+            let out_port = graph.port_index(n, pout)?;
+            let in_port = graph.port_link(out_port)?;
+            if graph.port_offset(out_port).unwrap() != pout
+                || graph.port_offset(in_port).unwrap() != pin
+            {
+                return None;
+            }
+            graph.port_node(in_port)
+        };
+        self.automaton
+            .run(root, node_prop, edge_prop)
+            .map(|id| PatternMatch::new(id, root))
+            .collect()
+    }
+
+    fn get_pattern(&self, id: crate::PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
+        self.patterns.get(id.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use glob::glob;
-    use std::{collections::BTreeSet, fs};
+    // use glob::glob;
+    // use std::fs;
+
+    use std::collections::BTreeSet;
 
     use std::collections::HashSet;
 
@@ -337,7 +365,6 @@ mod tests {
 
     // TODO: implement weighted matching
     #[test]
-    #[should_panic]
     fn weighted_pattern_matching() {
         let mut p1 = PortGraph::new();
         let n0 = p1.add_node(2, 1);
@@ -354,25 +381,24 @@ mod tests {
         let mut w2 = UnmanagedDenseMap::new();
         w2[n0] = 3;
         w2[n1] = 4;
-        todo!();
-        // let p1 = Pattern::from_weighted_portgraph(&p1, w1);
-        // let p2 = Pattern::from_weighted_portgraph(&p2, w2);
-        // let matcher = vec![p1, p2].into();
-        // let mut g = PortGraph::new();
-        // let mut w = UnmanagedDenseMap::new();
-        // let n0 = g.add_node(0, 2);
-        // let n1 = g.add_node(2, 1);
-        // let n2 = g.add_node(2, 1);
-        // let n3 = g.add_node(1, 0);
-        // w[n0] = 4;
-        // w[n1] = 3;
-        // w[n2] = 2;
-        // w[n3] = 1;
-        // link(&mut g, (n0, 0), (n1, 1));
-        // link(&mut g, (n0, 1), (n1, 0));
-        // link(&mut g, (n1, 0), (n2, 0));
-        // link(&mut g, (n2, 0), (n3, 0));
-        // assert_eq!(matcher.find_weighted_matches(&g, &w).len(), 2);
+        let p1 = Pattern::from_weighted_portgraph(&p1, w1);
+        let p2 = Pattern::from_weighted_portgraph(&p2, w2);
+        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+        let mut g = PortGraph::new();
+        let mut w = UnmanagedDenseMap::new();
+        let n0 = g.add_node(0, 2);
+        let n1 = g.add_node(2, 1);
+        let n2 = g.add_node(2, 1);
+        let n3 = g.add_node(1, 0);
+        w[n0] = 4;
+        w[n1] = 3;
+        w[n2] = 2;
+        w[n3] = 1;
+        link(&mut g, (n0, 0), (n1, 1));
+        link(&mut g, (n0, 1), (n1, 0));
+        link(&mut g, (n1, 0), (n2, 0));
+        link(&mut g, (n2, 0), (n3, 0));
+        assert_eq!(matcher.find_matches(&(g, w)).len(), 2);
     }
 
     proptest! {
@@ -414,22 +440,22 @@ mod tests {
             pattern_graphs in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
-            for entry in glob("pattern_*.json").expect("glob pattern failed") {
-                if let Ok(path) = entry {
-                    fs::remove_file(path).expect("Removing file failed");
-                }
-            }
-            fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            // for entry in glob("pattern_*.json").expect("glob pattern failed") {
+            //     if let Ok(path) = entry {
+            //         fs::remove_file(path).expect("Removing file failed");
+            //     }
+            // }
+            // fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
             let patterns = pattern_graphs
                 .iter()
                 .map(|p| Pattern::from_portgraph(p))
                 .collect_vec();
-            for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
-                fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
-            }
+            // for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
+            //     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
+            // }
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
             let single_matches: BTreeSet<_> = naive.find_matches(&g).into_iter().collect();
-            fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
             let matcher = ManyMatcher::from_patterns(patterns.clone());
             let many_matches: BTreeSet<_> = matcher.find_matches(&g).into_iter().collect();
             prop_assert_eq!(many_matches, single_matches);

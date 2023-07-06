@@ -37,7 +37,7 @@ where
     type PEdge: Eq + Hash;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_rooted_matches(&self, graph: Graph, root: Node<Graph>) -> Vec<Match<Graph>>;
+    fn find_rooted_matches(&self, graph: &Graph, root: Node<Graph>) -> Vec<Match<Graph>>;
 
     fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>>;
 
@@ -45,9 +45,7 @@ where
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`PortMatcher::find_anchored_matches`] for each of them.
-    fn find_matches(&self, graph: Graph) -> Vec<Match<Graph>>
-    where
-        Graph: Copy,
+    fn find_matches(&self, graph: &Graph) -> Vec<Match<Graph>>
     {
         let mut matches = Vec::new();
         for root in <Graph as GraphNodes>::nodes(&graph) {
@@ -134,11 +132,10 @@ impl<'p, U: Universe, PNode: NodeProperty>
 }
 
 impl PatternMatch<PatternID, NodeIndex> {
-    pub fn to_match_map<M, G, U>(&self, graph: G, matcher: &M) -> Option<HashMap<U, NodeIndex>>
+    pub fn to_match_map<'g, M, U>(&self, graph: &'g PortGraph, matcher: &M) -> Option<HashMap<U, NodeIndex>>
     where
         M::PNode: NodeProperty,
-        M: PortMatcher<G, U, PEdge = UnweightedEdge>,
-        G: Borrow<PortGraph> + Copy,
+        M: PortMatcher<PortGraph, U, PEdge = UnweightedEdge>,
         U: Universe,
     {
         PatternMatch::new(matcher.get_pattern(self.pattern)?, self.root).to_match_map(graph)

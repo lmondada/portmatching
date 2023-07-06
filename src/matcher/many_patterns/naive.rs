@@ -36,15 +36,18 @@ impl<U: Universe, PNode, PEdge: Eq + Hash> Default for NaiveManyMatcher<U, PNode
     }
 }
 
-impl<G, U> PortMatcher<G, U> for NaiveManyMatcher<U, (), UnweightedEdge>
+impl<U> PortMatcher<PortGraph, U> for NaiveManyMatcher<U, (), UnweightedEdge>
 where
-    G: Borrow<PortGraph> + Copy,
     U: Universe,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<G>> {
+    fn find_rooted_matches(
+        &self,
+        graph: &PortGraph,
+        root: NodeIndex,
+    ) -> Vec<Match<PortGraph>> {
         self.matchers
             .iter()
             .enumerate()
@@ -61,7 +64,7 @@ where
 
     fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, (), UnweightedEdge>> {
         let m = self.matchers.get(id.0)?;
-        <SinglePatternMatcher<_, _, _> as PortMatcher<&PortGraph, U>>::get_pattern(m, 0.into())
+        <SinglePatternMatcher<_, _, _> as PortMatcher<PortGraph, U>>::get_pattern(m, 0.into())
     }
 }
 
