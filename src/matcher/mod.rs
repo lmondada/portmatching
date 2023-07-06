@@ -64,7 +64,7 @@ type Match<G> = PatternMatch<PatternID, Node<G>>;
 /// The PatternID indicates which pattern matches, the root indicates the
 /// location of the match, given by the unique mapping of
 ///                  pattern.root => root
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct PatternMatch<P, N> {
     /// The pattern that matches.

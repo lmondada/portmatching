@@ -4,7 +4,7 @@ use itertools::Itertools;
 use portgraph::{NodeIndex, PortGraph, PortView};
 
 use crate::{
-    matcher::{Match, PortMatcher, SinglePatternMatcher},
+    matcher::{Match, PatternMatch, PortMatcher, SinglePatternMatcher},
     patterns::UnweightedEdge,
     EdgeProperty, NodeProperty, Pattern, PatternID, Universe,
 };
@@ -47,7 +47,15 @@ where
     fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<G>> {
         self.matchers
             .iter()
-            .flat_map(|m| m.find_rooted_matches(graph, root))
+            .enumerate()
+            .flat_map(|(i, m)| {
+                m.find_rooted_matches(graph, root).into_iter().map(
+                    move |PatternMatch { root, .. }| PatternMatch {
+                        pattern: i.into(),
+                        root,
+                    },
+                )
+            })
             .collect()
     }
 

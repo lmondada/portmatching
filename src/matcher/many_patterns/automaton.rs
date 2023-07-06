@@ -103,8 +103,10 @@ impl<U: Universe, PNode: NodeProperty> From<Vec<Pattern<U, PNode, UnweightedEdge
 
 #[cfg(test)]
 mod tests {
-    // use glob::glob;
-    // use std::fs;
+    use glob::glob;
+    use std::{collections::BTreeSet, fs};
+
+    use std::collections::HashSet;
 
     use itertools::Itertools;
 
@@ -393,27 +395,14 @@ mod tests {
             patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
-            // for entry in glob("pattern_*.bin").expect("glob pattern failed") {
-            //     match entry {
-            //         Ok(path) => fs::remove_file(path).expect("Removing file failed"),
-            //         Err(_) => {},
-            //     }
-            // }
-            // for (i, p) in patterns.iter().enumerate() {
-            //     fs::write(&format!("pattern_{}.bin", i), rmp_serde::to_vec(p).unwrap()).unwrap();
-            // }
-            // fs::write("graph.bin", rmp_serde::to_vec(&g).unwrap()).unwrap();
             let patterns = patterns
                 .into_iter()
                 .map(|p| Pattern::from_portgraph(&p))
                 .collect_vec();
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
-            let single_matches = naive.find_matches(&g);
-            // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
+            let single_matches: HashSet<_>  = naive.find_matches(&g).into_iter().collect();
             let matcher = ManyMatcher::from_patterns(patterns.clone());
-            let many_matches = matcher.find_matches(&g);
-            // TODO: order should not matter
-            // prop_assert_eq!(BTreeSet::from_iter(many_matches), BTreeSet::from_iter(single_matches));
+            let many_matches: HashSet<_> = matcher.find_matches(&g).into_iter().collect();
             prop_assert_eq!(many_matches, single_matches);
         }
     }
@@ -422,29 +411,27 @@ mod tests {
         #[ignore = "a bit slow"]
         #[test]
         fn many_graphs_proptest_small(
-            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
+            pattern_graphs in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
-            // for entry in glob("pattern_*.json").expect("glob pattern failed") {
-            //     if let Ok(path) = entry {
-            //         fs::remove_file(path).expect("Removing file failed");
-            //     }
-            // }
-            // for (i, p) in patterns.iter().enumerate() {
-            //     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(p).unwrap()).unwrap();
-            // }
-            // fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
-            let patterns = patterns
-                .into_iter()
-                .map(|p| Pattern::from_portgraph(&p))
+            for entry in glob("pattern_*.json").expect("glob pattern failed") {
+                if let Ok(path) = entry {
+                    fs::remove_file(path).expect("Removing file failed");
+                }
+            }
+            fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            let patterns = pattern_graphs
+                .iter()
+                .map(|p| Pattern::from_portgraph(p))
                 .collect_vec();
+            for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
+                fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
+            }
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
-            let single_matches = naive.find_matches(&g);
-            // fs::write("results.bin", rmp_serde::to_vec(&single_matches).unwrap()).unwrap();
+            let single_matches: BTreeSet<_> = naive.find_matches(&g).into_iter().collect();
+            fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
             let matcher = ManyMatcher::from_patterns(patterns.clone());
-            let many_matches = matcher.find_matches(&g);
-            // TODO: order should not matter
-            // prop_assert_eq!(BTreeSet::from_iter(many_matches), BTreeSet::from_iter(single_matches));
+            let many_matches: BTreeSet<_> = matcher.find_matches(&g).into_iter().collect();
             prop_assert_eq!(many_matches, single_matches);
         }
     }
