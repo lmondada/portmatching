@@ -42,7 +42,7 @@ features = ["proptest", "serde"]
 
 [[example]]
 name = "large_graph"
-required-features = ["serde"]
+required-features = ["serde", "datagen"]
 
 [[example]]
 name = "optimise_graph"
