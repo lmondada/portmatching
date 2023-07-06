@@ -17,6 +17,7 @@ pub use single_pattern::SinglePatternMatcher;
 use crate::{
     graph_traits::Node,
     patterns::{Edge, UnweightedEdge},
+    utils::EmptyOr,
     GraphNodes, NodeProperty, Pattern, Universe,
 };
 
@@ -37,13 +38,16 @@ where
     type PEdge: Eq + Hash;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_rooted_matches(&self, graph: Graph, root: Node<Graph>) -> Vec<Match<'_, Self, Graph>>;
+    fn find_rooted_matches(&self, graph: Graph, root: Node<Graph>) -> Vec<Match<Graph>>;
+
+    fn get_pattern(&self, id: PatternID)
+        -> Option<&Pattern<Node<Graph>, Self::PNode, Self::PEdge>>;
 
     /// Find matches of all patterns in `graph`.
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`PortMatcher::find_anchored_matches`] for each of them.
-    fn find_matches(&self, graph: Graph) -> Vec<Match<'_, Self, Graph>>
+    fn find_matches(&self, graph: Graph) -> Vec<Match<Graph>>
     where
         Graph: Copy,
     {
@@ -55,10 +59,7 @@ where
     }
 }
 
-type Match<'p, M, G> = PatternMatch<
-    &'p Pattern<Node<G>, <M as PortMatcher<G>>::PNode, <M as PortMatcher<G>>::PEdge>,
-    Node<G>,
->;
+type Match<G> = PatternMatch<PatternID, Node<G>>;
 
 /// A match instance returned by a Portmatcher instance.
 ///
@@ -73,6 +74,16 @@ pub struct PatternMatch<P, N> {
 
     /// The root node of the match in the host graph
     pub root: N,
+}
+
+impl<'p, P, N> PatternMatch<P, N> {
+    pub fn new(pattern: P, root: N) -> Self {
+        Self { pattern, root }
+    }
+
+    pub fn from_tuple((pattern, root): (P, N)) -> Self {
+        Self { pattern, root }
+    }
 }
 
 impl<'p, P, N> PatternMatch<&'p P, N> {
@@ -121,6 +132,17 @@ impl<'p, U: Universe, PNode: NodeProperty>
                 .into_iter()
                 .collect(),
         )
+    }
+}
+
+impl PatternMatch<PatternID, NodeIndex> {
+    pub fn to_match_map<M, G>(&self, graph: G, matcher: &M) -> Option<HashMap<NodeIndex, NodeIndex>>
+    where
+        M::PNode: NodeProperty,
+        M: PortMatcher<G, PEdge = UnweightedEdge>,
+        G: Borrow<PortGraph> + Copy,
+    {
+        PatternMatch::new(matcher.get_pattern(self.pattern)?, self.root).to_match_map(graph)
     }
 }
 
