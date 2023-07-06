@@ -8,7 +8,7 @@ use itertools::{Either, Itertools};
 use crate::{
     automaton::{ScopeAutomaton, StateID},
     patterns::{IterationStatus, LinePattern, PredicatesIter},
-    predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility, Symbol},
+    predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility},
     Universe,
 };
 

@@ -66,7 +66,7 @@ where
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<'_, Self, G>> {
+    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<G>> {
         // Node weights (none)
         let node_prop = |_, ()| true;
         // Check edges exist
@@ -83,11 +83,15 @@ where
         };
         self.automaton
             .run(root, node_prop, edge_prop)
-            .map(|p_id| PatternMatch {
-                pattern: &self.patterns[p_id.0],
-                root,
-            })
+            .map(|id| PatternMatch::new(id, root))
             .collect()
+    }
+
+    fn get_pattern(
+        &self,
+        id: crate::PatternID,
+    ) -> Option<&Pattern<crate::graph_traits::Node<G>, Self::PNode, Self::PEdge>> {
+        self.patterns.get(id.0)
     }
 }
 
@@ -136,7 +140,7 @@ mod tests {
         assert_eq!(
             matcher.find_matches(&g),
             vec![PatternMatch {
-                pattern: &p,
+                pattern: 0.into(),
                 root: NodeIndex::new(0)
             }]
         );
@@ -157,7 +161,7 @@ mod tests {
         assert_eq!(
             matcher.find_matches(&g),
             vec![PatternMatch {
-                pattern: &p,
+                pattern: 0.into(),
                 root: NodeIndex::new(0)
             }]
         );

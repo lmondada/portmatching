@@ -6,7 +6,7 @@ use portgraph::{NodeIndex, PortGraph, PortView};
 use crate::{
     matcher::{Match, PortMatcher, SinglePatternMatcher},
     patterns::UnweightedEdge,
-    EdgeProperty, NodeProperty, Pattern, Universe,
+    EdgeProperty, NodeProperty, Pattern, PatternID, Universe,
 };
 
 /// A simple matcher for matching multiple patterns.
@@ -43,11 +43,16 @@ where
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<'_, Self, G>> {
+    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<G>> {
         self.matchers
             .iter()
             .flat_map(|m| m.find_rooted_matches(graph, root))
             .collect()
+    }
+
+    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<NodeIndex, (), UnweightedEdge>> {
+        let m = self.matchers.get(id.0)?;
+        <SinglePatternMatcher<_, _, _> as PortMatcher<&PortGraph>>::get_pattern(m, 0.into())
     }
 }
 

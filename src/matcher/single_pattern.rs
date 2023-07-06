@@ -9,7 +9,7 @@ use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView};
 
 use crate::{
     patterns::{Edge, UnweightedEdge},
-    EdgeProperty, NodeProperty, Pattern, Universe,
+    EdgeProperty, NodeProperty, Pattern, PatternID, Universe,
 };
 
 use super::{Match, PatternMatch, PortMatcher};
@@ -28,8 +28,15 @@ where
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<'_, Self, G>> {
+    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<G>> {
         self.find_rooted_match(graph, root, validate_unweighted_edge)
+    }
+
+    fn get_pattern(
+        &self,
+        id: crate::PatternID,
+    ) -> Option<&Pattern<crate::graph_traits::Node<G>, Self::PNode, Self::PEdge>> {
+        Some(&self.pattern)
     }
 }
 
@@ -112,7 +119,7 @@ where
         host: G,
         host_root: V,
         validate_edge: F,
-    ) -> Vec<PatternMatch<&Pattern<U, PNode, PEdge>, V>>
+    ) -> Vec<PatternMatch<PatternID, V>>
     where
         F: Fn(Edge<V, PNode, PEdge>, G) -> Option<(V, V)>,
         V: Universe,
@@ -120,7 +127,7 @@ where
     {
         if self.match_exists(host, host_root, validate_edge) {
             vec![PatternMatch {
-                pattern: &self.pattern,
+                pattern: 0.into(),
                 root: host_root,
             }]
         } else {
@@ -211,7 +218,7 @@ mod tests {
             matcher
                 .find_matches(&g)
                 .into_iter()
-                .map(|m| m.to_match_map(&g).unwrap())
+                .map(|m| m.to_match_map(&g, &matcher).unwrap())
                 .collect_vec(),
             vec![[(n0, n0), (n1, n1), (n3, n3), (n4, n4)]
                 .into_iter()
@@ -316,7 +323,7 @@ mod tests {
             .find_matches(&g)
             .into_iter()
             .map(|m| {
-                m.to_match_map(&g)
+                m.to_match_map(&g, &matcher)
                     .unwrap()
                     .values()
                     .sorted()
