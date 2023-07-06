@@ -21,22 +21,18 @@ pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
     root: U,
 }
 
-impl<G, U> PortMatcher<G, U> for SinglePatternMatcher<U, (), UnweightedEdge>
+impl<U> PortMatcher<PortGraph, U> for SinglePatternMatcher<U, (), UnweightedEdge>
 where
-    G: Borrow<PortGraph> + Copy,
     U: Universe,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<G>> {
+    fn find_rooted_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Match<PortGraph>> {
         self.find_rooted_match(graph, root, validate_unweighted_edge)
     }
 
-    fn get_pattern(
-        &self,
-        id: crate::PatternID,
-    ) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
+    fn get_pattern(&self, id: crate::PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
         Some(&self.pattern)
     }
 }
@@ -138,10 +134,7 @@ where
 }
 
 impl<U: Universe> Pattern<U, (), (PortOffset, PortOffset)> {
-    pub fn into_single_pattern_matcher<G>(self) -> impl PortMatcher<G, U>
-    where
-        G: Borrow<PortGraph> + Copy,
-    {
+    pub fn into_single_pattern_matcher(self) -> impl PortMatcher<PortGraph, U> {
         SinglePatternMatcher::new(self)
     }
 }

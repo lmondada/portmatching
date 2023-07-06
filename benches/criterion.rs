@@ -12,8 +12,9 @@ use itertools::Itertools;
 
 use portgraph::NodeIndex;
 use portgraph::PortGraph;
+use portgraph::PortOffset;
+use portgraph::PortView;
 use portgraph::UnmanagedDenseMap;
-use portmatching::Universe;
 use portmatching::matcher::many_patterns::ManyMatcher;
 use portmatching::matcher::PortMatcher;
 use portmatching::matcher::UnweightedManyMatcher;
@@ -21,19 +22,22 @@ use portmatching::EdgeProperty;
 use portmatching::NaiveManyMatcher;
 use portmatching::NodeProperty;
 use portmatching::Pattern;
+use portmatching::Universe;
 use rand::Rng;
 
-fn bench_matching<'g, U: Universe, M: PortMatcher<&'g PortGraph, U>>(
+fn bench_matching<U, M>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[Pattern<NodeIndex, M::PNode, M::PEdge>],
     sizes: impl Iterator<Item = usize>,
-    graph: &'g PortGraph,
+    graph: &PortGraph,
     mut get_matcher: impl FnMut(Vec<Pattern<NodeIndex, M::PNode, M::PEdge>>) -> M,
 ) where
     M::PEdge: EdgeProperty,
     M::PNode: NodeProperty,
     NodeIndex: Copy,
+    U: Universe,
+    M: PortMatcher<PortGraph, U>,
 {
     group.sample_size(10);
     for n in sizes {
@@ -66,12 +70,12 @@ fn bench_matching_xxl(
     }
 }
 
-#[allow(unused)]
-fn gen_weights(nodes: impl Iterator<Item = NodeIndex>) -> UnmanagedDenseMap<NodeIndex, usize> {
+fn gen_weights(graph: &PortGraph) -> UnmanagedDenseMap<NodeIndex, (usize, usize)> {
     let mut rng = rand::thread_rng();
     let mut weights = UnmanagedDenseMap::new();
-    for n in nodes {
-        weights[n] = rng.gen_range(0..8);
+    for n in graph.nodes_iter() {
+        let nump = graph.all_ports(n).count();
+        weights[n] = (nump, rng.gen_range(0..3));
     }
     weights
 }
@@ -82,24 +86,26 @@ fn bench_matching_xxl_weighted(
     group: &mut BenchmarkGroup<WallTime>,
     prefix: &str,
     sizes: impl Iterator<Item = usize>,
+    n_qubits: usize,
     graph: &PortGraph,
 ) {
-    todo!()
-    // let weights = gen_weights(graph.nodes_iter());
-    // group.sample_size(10);
-    // for size in sizes {
-    //     group.throughput(Throughput::Elements(size as u64));
-    //     let file_name = format!("datasets/xxl/tries/weighted_{prefix}_{size}.bin");
-    //     let matcher: TrieMatcher<WeightedAdjConstraint<usize>, Address, WeightedPattern<usize>> =
-    //         rmp_serde::from_read(fs::File::open(file_name).unwrap())
-    //             .expect("could not deserialize trie");
-    //     group.bench_with_input(BenchmarkId::new(name, size), &size, |b, _| {
-    //         b.iter(|| criterion::black_box(matcher.find_weighted_matches(graph, &weights)));
-    //     });
-    // }
+    let weights = gen_weights(graph);
+    let graph_weights = (graph.clone(), weights);
+    group.sample_size(10);
+    for size in sizes {
+        group.throughput(Throughput::Elements(size as u64));
+        let file_name =
+            format!("datasets/xxl/tries/{n_qubits}_qubits/weighted_{prefix}_{size}.bin");
+        let matcher: ManyMatcher<NodeIndex, (usize, usize), (PortOffset, PortOffset)> =
+            rmp_serde::from_read(fs::File::open(file_name).unwrap())
+                .expect("could not deserialize trie");
+        group.bench_with_input(BenchmarkId::new(name, size), &size, |b, _| {
+            b.iter(|| criterion::black_box(matcher.find_matches(&graph_weights)));
+        });
+    }
 }
 
-fn bench_trie_construction<'g, U: Universe, M: PortMatcher<&'g PortGraph, U>>(
+fn bench_trie_construction<U: Universe, M: PortMatcher<PortGraph, U>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[Pattern<NodeIndex, M::PNode, M::PEdge>],
@@ -146,54 +152,57 @@ fn perform_benches(c: &mut Criterion) {
         .next()
         .expect("Did not find any large circuit");
 
-    let mut group = c.benchmark_group("Many Patterns Matching");
-    bench_matching(
-        "Naive matching",
-        &mut group,
-        &patterns,
-        (0..=300).step_by(100),
-        &graph,
-        NaiveManyMatcher::from_patterns,
-    );
-    bench_matching(
-        "Balanced Graph Trie",
-        &mut group,
-        &patterns,
-        (0..=1000).step_by(100),
-        &graph,
-        ManyMatcher::from_patterns,
-    );
-    group.finish();
+    // let mut group = c.benchmark_group("Many Patterns Matching");
+    // bench_matching(
+    //     "Naive matching",
+    //     &mut group,
+    //     &patterns,
+    //     (0..=300).step_by(100),
+    //     &graph,
+    //     NaiveManyMatcher::from_patterns,
+    // );
+    // bench_matching(
+    //     "Balanced Graph Trie",
+    //     &mut group,
+    //     &patterns,
+    //     (0..=1000).step_by(100),
+    //     &graph,
+    //     ManyMatcher::from_patterns,
+    // );
+    // group.finish();
 
-    let mut group = c.benchmark_group("Trie Construction");
-    bench_trie_construction(
-        "Balanced Graph Trie",
-        &mut group,
-        &patterns,
-        (0..=300).step_by(30),
-        ManyMatcher::from_patterns,
-    );
-    group.finish();
+    // let mut group = c.benchmark_group("Trie Construction");
+    // bench_trie_construction(
+    //     "Balanced Graph Trie",
+    //     &mut group,
+    //     &patterns,
+    //     (0..=300).step_by(30),
+    //     ManyMatcher::from_patterns,
+    // );
+    // group.finish();
 
-    let mut group = c.benchmark_group("Many Patterns Matching XXL");
-    bench_matching_xxl(
-        "Balanced Graph Trie",
-        &mut group,
-        "balanced",
-        (500..=10000).step_by(500),
-        &graph,
-    );
-    group.finish();
-
-    // let mut group = c.benchmark_group("Many Patterns Matching XXL weighted");
-    // bench_matching_xxl_weighted(
+    // let mut group = c.benchmark_group("Many Patterns Matching XXL");
+    // bench_matching_xxl(
     //     "Balanced Graph Trie",
     //     &mut group,
     //     "balanced",
-    //     (500..=5000).step_by(500),
+    //     (500..=10000).step_by(500),
     //     &graph,
     // );
     // group.finish();
+
+    let mut group = c.benchmark_group("Many Patterns Matching XXL weighted");
+    for q in 2..=5 {
+        bench_matching_xxl_weighted(
+            &format!("XXL weighted ({q} qubits)"),
+            &mut group,
+            "balanced",
+            (500..=5000).step_by(500),
+            q,
+            &graph,
+        );
+    }
+    group.finish();
 }
 
 criterion_group!(benches, perform_benches);

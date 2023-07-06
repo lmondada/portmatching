@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use portgraph::{NodeIndex, PortGraph, PortView};
 
 pub type Node<G> = <G as GraphNodes>::Node;
@@ -13,12 +11,22 @@ pub trait GraphNodes {
     fn nodes(&self) -> Self::NodesIter<'_>;
 }
 
-impl<G: Borrow<PortGraph>> GraphNodes for G {
+impl GraphNodes for PortGraph {
     type Node = NodeIndex;
     type NodesIter<'a> = <PortGraph as PortView>::Nodes<'a>
     where Self: 'a;
 
     fn nodes(&self) -> Self::NodesIter<'_> {
-        self.borrow().nodes_iter()
+        self.nodes_iter()
+    }
+}
+
+impl<W> GraphNodes for (PortGraph, W) {
+    type Node = NodeIndex;
+    type NodesIter<'a> = <PortGraph as PortView>::Nodes<'a>
+    where Self: 'a;
+
+    fn nodes(&self) -> Self::NodesIter<'_> {
+        self.0.nodes_iter()
     }
 }

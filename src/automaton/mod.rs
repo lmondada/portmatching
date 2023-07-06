@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::{iter::Map, ops::RangeFrom};
 
-use bimap::BiMap;
+use bimap::{BiMap, BiBTreeMap};
 use derive_more::{From, Into};
 
 use portgraph::dot::DotFormat;
@@ -144,13 +144,13 @@ impl<PNode: Copy, PEdge: Copy> ScopeAutomaton<PNode, PEdge> {
 /// - A: A function from symbols to values
 #[derive(Clone, Debug)]
 struct AssignMap<U: Universe> {
-    map: BiMap<Symbol, U>,
+    map: BiBTreeMap<Symbol, U>,
     state_id: StateID,
 }
 
 impl<U: Universe> AssignMap<U> {
     fn new(root_state: StateID, root: U) -> Self {
-        let map = BiMap::from_iter([(Symbol::root(), root)]);
+        let map = BiBTreeMap::from_iter([(Symbol::root(), root)]);
         Self {
             map,
             state_id: root_state,

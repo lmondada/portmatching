@@ -6,18 +6,20 @@ mod graph_traits;
 pub mod matcher;
 pub mod patterns;
 pub(crate) mod predicate;
+// mod symbol_map;
 
 pub mod utils;
 
 pub use graph_traits::GraphNodes;
-pub use matcher::{NaiveManyMatcher, PatternID, PortMatcher, SinglePatternMatcher};
-pub use patterns::{Pattern, UnweightedPattern};
+pub use matcher::{ManyMatcher, NaiveManyMatcher, PatternID, PortMatcher, SinglePatternMatcher};
+pub use patterns::{Pattern, UnweightedPattern, WeightedPattern};
+// use symbol_map::SymbolMap;
 
 use std::hash::Hash;
 
-pub trait Universe: Copy + Eq + Hash {}
+pub trait Universe: Copy + Eq + Hash + Ord {}
 
-impl<U: Copy + Eq + Hash> Universe for U {}
+impl<U: Copy + Eq + Hash + Ord> Universe for U {}
 
 pub trait EdgeProperty: Copy + Ord + Hash {
     fn reverse(&self) -> Option<Self>;

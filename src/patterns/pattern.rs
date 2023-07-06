@@ -6,7 +6,7 @@ use std::{
 use super::{Line, LinePattern};
 use crate::{EdgeProperty, NodeProperty, Universe};
 use itertools::Itertools;
-use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortOffset, PortView};
+use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortOffset, PortView, SecondaryMap};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -17,6 +17,7 @@ pub struct Pattern<U: Universe, PNode, PEdge: Eq + Hash> {
 }
 
 pub type UnweightedPattern = Pattern<NodeIndex, (), UnweightedEdge>;
+pub type WeightedPattern<W> = Pattern<NodeIndex, W, UnweightedEdge>;
 
 pub(crate) type UnweightedEdge = (PortOffset, PortOffset);
 
@@ -165,7 +166,20 @@ fn add_nodes(pattern: &mut Pattern<NodeIndex, (), (PortOffset, PortOffset)>, g: 
     }
 }
 
-fn add_edges(pattern: &mut Pattern<NodeIndex, (), (PortOffset, PortOffset)>, g: &PortGraph) {
+fn add_nodes_weighted<W: NodeProperty>(
+    pattern: &mut Pattern<NodeIndex, W, (PortOffset, PortOffset)>,
+    g: &PortGraph,
+    w: impl SecondaryMap<NodeIndex, W>,
+) {
+    for n in g.nodes_iter() {
+        pattern.require(n, *w.get(n));
+    }
+}
+
+fn add_edges<W: NodeProperty>(
+    pattern: &mut Pattern<NodeIndex, W, (PortOffset, PortOffset)>,
+    g: &PortGraph,
+) {
     for p in g.ports_iter() {
         if g.port_offset(p).unwrap().direction() == Direction::Incoming {
             continue;
@@ -196,6 +210,16 @@ impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
         add_nodes(&mut pattern, g);
         add_edges(&mut pattern, g);
         pattern.set_root(root);
+        pattern
+    }
+}
+
+impl<W: NodeProperty> Pattern<NodeIndex, W, (PortOffset, PortOffset)> {
+    pub fn from_weighted_portgraph(g: &PortGraph, w: impl SecondaryMap<NodeIndex, W>) -> Self {
+        let mut pattern = Self::new();
+        add_nodes_weighted(&mut pattern, g, w);
+        add_edges(&mut pattern, g);
+        pattern.set_any_root().expect("Could not find root");
         pattern
     }
 }

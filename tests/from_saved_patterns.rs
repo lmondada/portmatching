@@ -72,9 +72,9 @@ fn load_results(dir: &Path) -> io::Result<Vec<PatternMatch<PatternID, NodeIndex>
     Err(io::Error::new(io::ErrorKind::Other, "no file found"))
 }
 
-fn test<'g, M, U>(matcher: &M, graph: &'g PortGraph, exp: &Vec<PatternMatch<PatternID, NodeIndex>>)
+fn test<M, U>(matcher: &M, graph: &PortGraph, exp: &Vec<PatternMatch<PatternID, NodeIndex>>)
 where
-    M: PortMatcher<&'g PortGraph, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
+    M: PortMatcher<PortGraph, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
     U: Universe,
 {
     let many_matches = matcher.find_matches(graph);

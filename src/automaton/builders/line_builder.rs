@@ -111,27 +111,6 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         matcher
     }
 
-    /*fn next_transitions<'a>(
-        &self,
-        source: StateID,
-        predicates: Vec<EdgePredicate<PNode, PEdge>>,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
-    where
-        PNode: Copy + Eq + Hash,
-        PEdge: Copy + Eq + Hash,
-    {
-        assert!(are_compatible_predicates(&predicates));
-        self.compatible_transitions(source, vals)
-        } else if stages
-            .keys()
-            .all(|s| matches!(s, IterationStatus::LeftOver(_)))
-        {
-        } else {
-            // Add a non-deterministic intermediate state
-            self.non_det_transitions(source, stages)
-        }
-    }*/
-
     fn add_transitions(
         &self,
         matcher: &mut ScopeAutomaton<PNode, PEdge>,
