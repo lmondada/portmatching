@@ -13,6 +13,7 @@ use itertools::Itertools;
 use portgraph::NodeIndex;
 use portgraph::PortGraph;
 use portgraph::UnmanagedDenseMap;
+use portmatching::Universe;
 use portmatching::matcher::many_patterns::ManyMatcher;
 use portmatching::matcher::PortMatcher;
 use portmatching::matcher::UnweightedManyMatcher;
@@ -22,7 +23,7 @@ use portmatching::NodeProperty;
 use portmatching::Pattern;
 use rand::Rng;
 
-fn bench_matching<'g, M: PortMatcher<&'g PortGraph>>(
+fn bench_matching<'g, U: Universe, M: PortMatcher<&'g PortGraph, U>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[Pattern<NodeIndex, M::PNode, M::PEdge>],
@@ -98,7 +99,7 @@ fn bench_matching_xxl_weighted(
     // }
 }
 
-fn bench_trie_construction<'g, M: PortMatcher<&'g PortGraph>>(
+fn bench_trie_construction<'g, U: Universe, M: PortMatcher<&'g PortGraph, U>>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
     patterns: &[Pattern<NodeIndex, M::PNode, M::PEdge>],

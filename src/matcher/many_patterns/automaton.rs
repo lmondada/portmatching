@@ -59,9 +59,10 @@ impl<U: Universe, PNode: Copy + fmt::Debug, PEdge: Copy + Eq + Hash + fmt::Debug
 
 pub type UnweightedManyMatcher = ManyMatcher<NodeIndex, (), UnweightedEdge>;
 
-impl<'g, G> PortMatcher<G> for ManyMatcher<NodeIndex, (), UnweightedEdge>
+impl<'g, G, U> PortMatcher<G, U> for ManyMatcher<U, (), UnweightedEdge>
 where
     G: Borrow<PortGraph>,
+    U: Universe,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
@@ -87,10 +88,7 @@ where
             .collect()
     }
 
-    fn get_pattern(
-        &self,
-        id: crate::PatternID,
-    ) -> Option<&Pattern<crate::graph_traits::Node<G>, Self::PNode, Self::PEdge>> {
+    fn get_pattern(&self, id: crate::PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
         self.patterns.get(id.0)
     }
 }
