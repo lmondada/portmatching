@@ -36,9 +36,10 @@ impl<U: Universe, PNode, PEdge: Eq + Hash> Default for NaiveManyMatcher<U, PNode
     }
 }
 
-impl<G> PortMatcher<G> for NaiveManyMatcher<NodeIndex, (), UnweightedEdge>
+impl<G, U> PortMatcher<G, U> for NaiveManyMatcher<U, (), UnweightedEdge>
 where
     G: Borrow<PortGraph> + Copy,
+    U: Universe,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
@@ -50,9 +51,9 @@ where
             .collect()
     }
 
-    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<NodeIndex, (), UnweightedEdge>> {
+    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, (), UnweightedEdge>> {
         let m = self.matchers.get(id.0)?;
-        <SinglePatternMatcher<_, _, _> as PortMatcher<&PortGraph>>::get_pattern(m, 0.into())
+        <SinglePatternMatcher<_, _, _> as PortMatcher<&PortGraph, U>>::get_pattern(m, 0.into())
     }
 }
 

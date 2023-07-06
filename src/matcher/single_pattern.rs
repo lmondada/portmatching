@@ -21,9 +21,10 @@ pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
     root: U,
 }
 
-impl<G> PortMatcher<G> for SinglePatternMatcher<NodeIndex, (), UnweightedEdge>
+impl<G, U> PortMatcher<G, U> for SinglePatternMatcher<U, (), UnweightedEdge>
 where
     G: Borrow<PortGraph> + Copy,
+    U: Universe,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
@@ -35,7 +36,7 @@ where
     fn get_pattern(
         &self,
         id: crate::PatternID,
-    ) -> Option<&Pattern<crate::graph_traits::Node<G>, Self::PNode, Self::PEdge>> {
+    ) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
         Some(&self.pattern)
     }
 }
@@ -136,8 +137,8 @@ where
     }
 }
 
-impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
-    pub fn into_single_pattern_matcher<G>(self) -> impl PortMatcher<G>
+impl<U: Universe> Pattern<U, (), (PortOffset, PortOffset)> {
+    pub fn into_single_pattern_matcher<G>(self) -> impl PortMatcher<G, U>
     where
         G: Borrow<PortGraph> + Copy,
     {

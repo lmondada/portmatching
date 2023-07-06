@@ -8,7 +8,7 @@ use itertools::Itertools;
 use portgraph::{NodeIndex, PortGraph, PortOffset};
 use portmatching::{
     matcher::{ManyMatcher, PatternMatch, PortMatcher},
-    UnweightedPattern,
+    PatternID, Universe, UnweightedPattern,
 };
 
 fn valid_json_file(s: &str, pattern: &str) -> bool {
@@ -58,13 +58,13 @@ fn load_graph(dir: &Path) -> io::Result<PortGraph> {
     Err(io::Error::new(io::ErrorKind::Other, "no file found"))
 }
 
-fn load_results(dir: &Path) -> io::Result<Vec<PatternMatch<UnweightedPattern, NodeIndex>>> {
+fn load_results(dir: &Path) -> io::Result<Vec<PatternMatch<PatternID, NodeIndex>>> {
     for entry in fs::read_dir(dir)? {
         let Ok(entry) = entry else { continue };
         let file_name = entry.file_name().to_str().unwrap().to_string();
         let path = entry.path();
         if valid_json_file(&file_name, "results") {
-            let res: Vec<PatternMatch<UnweightedPattern, NodeIndex>> =
+            let res: Vec<PatternMatch<PatternID, NodeIndex>> =
                 serde_json::from_reader(fs::File::open(path)?).unwrap();
             return Ok(res);
         }
@@ -73,19 +73,16 @@ fn load_results(dir: &Path) -> io::Result<Vec<PatternMatch<UnweightedPattern, No
     Err(io::Error::new(io::ErrorKind::Other, "no file found"))
 }
 
-fn test<'g, M>(
+fn test<'g, M, U>(
     matcher: &M,
     graph: &'g PortGraph,
-    exp: &Vec<PatternMatch<UnweightedPattern, NodeIndex>>,
+    exp: &Vec<PatternMatch<PatternID, NodeIndex>>,
     n_patterns: usize,
 ) where
-    M: PortMatcher<&'g PortGraph, PNode = (), PEdge = (PortOffset, PortOffset)>,
+    M: PortMatcher<&'g PortGraph, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
+    U: Universe,
 {
-    let many_matches = matcher
-        .find_matches(graph)
-        .into_iter()
-        .map(|m| m.clone_pattern())
-        .collect_vec();
+    let many_matches = matcher.find_matches(graph);
     assert_eq!(&many_matches, exp);
 }
 

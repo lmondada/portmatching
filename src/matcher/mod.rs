@@ -17,7 +17,6 @@ pub use single_pattern::SinglePatternMatcher;
 use crate::{
     graph_traits::Node,
     patterns::{Edge, UnweightedEdge},
-    utils::EmptyOr,
     GraphNodes, NodeProperty, Pattern, Universe,
 };
 
@@ -28,7 +27,7 @@ use self::single_pattern::validate_unweighted_edge;
 /// A pattern matcher is a type that can find matches of a pattern in a graph.
 /// Implement [`Matcher::find_anchored_matches`] that finds matches of all
 /// patterns anchored at a given root node.
-pub trait PortMatcher<Graph: GraphNodes>
+pub trait PortMatcher<Graph: GraphNodes, U: Universe>
 where
     Node<Graph>: Universe,
 {
@@ -40,8 +39,7 @@ where
     /// Find matches of all patterns in `graph` anchored at the given `root`.
     fn find_rooted_matches(&self, graph: Graph, root: Node<Graph>) -> Vec<Match<Graph>>;
 
-    fn get_pattern(&self, id: PatternID)
-        -> Option<&Pattern<Node<Graph>, Self::PNode, Self::PEdge>>;
+    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>>;
 
     /// Find matches of all patterns in `graph`.
     ///
@@ -136,11 +134,12 @@ impl<'p, U: Universe, PNode: NodeProperty>
 }
 
 impl PatternMatch<PatternID, NodeIndex> {
-    pub fn to_match_map<M, G>(&self, graph: G, matcher: &M) -> Option<HashMap<NodeIndex, NodeIndex>>
+    pub fn to_match_map<M, G, U>(&self, graph: G, matcher: &M) -> Option<HashMap<U, NodeIndex>>
     where
         M::PNode: NodeProperty,
-        M: PortMatcher<G, PEdge = UnweightedEdge>,
+        M: PortMatcher<G, U, PEdge = UnweightedEdge>,
         G: Borrow<PortGraph> + Copy,
+        U: Universe,
     {
         PatternMatch::new(matcher.get_pattern(self.pattern)?, self.root).to_match_map(graph)
     }

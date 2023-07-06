@@ -12,8 +12,6 @@ pub(crate) mod pre_order;
 pub use depth::is_connected;
 pub(crate) use depth::{centre, NoCentreError};
 
-mod empty_or_iter;
-pub(crate) use empty_or_iter::EmptyOr;
 // pub(crate) mod toposort;
 
 #[cfg(test)]
