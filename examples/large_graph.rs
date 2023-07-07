@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, hint::black_box};
+use std::{fs, hint::black_box, path::PathBuf};
 
 use portgraph::PortGraph;
 use portmatching::{matcher::UnweightedManyMatcher, PortMatcher};

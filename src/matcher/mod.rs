@@ -45,8 +45,7 @@ where
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`PortMatcher::find_anchored_matches`] for each of them.
-    fn find_matches(&self, graph: &Graph) -> Vec<Match<Graph>>
-    {
+    fn find_matches(&self, graph: &Graph) -> Vec<Match<Graph>> {
         let mut matches = Vec::new();
         for root in <Graph as GraphNodes>::nodes(&graph) {
             matches.append(&mut self.find_rooted_matches(graph, root));
@@ -132,7 +131,11 @@ impl<'p, U: Universe, PNode: NodeProperty>
 }
 
 impl PatternMatch<PatternID, NodeIndex> {
-    pub fn to_match_map<'g, M, U>(&self, graph: &'g PortGraph, matcher: &M) -> Option<HashMap<U, NodeIndex>>
+    pub fn to_match_map<'g, M, U>(
+        &self,
+        graph: &'g PortGraph,
+        matcher: &M,
+    ) -> Option<HashMap<U, NodeIndex>>
     where
         M::PNode: NodeProperty,
         M: PortMatcher<PortGraph, U, PEdge = UnweightedEdge>,

@@ -4,19 +4,20 @@ mod traversal;
 mod view;
 
 pub(crate) use builders::LineBuilder;
+use rustc_hash::FxHasher;
 
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::hash::BuildHasherDefault;
 use std::{iter::Map, ops::RangeFrom};
 
-use bimap::{BiMap, BiBTreeMap};
 use derive_more::{From, Into};
 
 use portgraph::dot::DotFormat;
 use portgraph::{NodeIndex, PortGraph, PortMut, PortView, Weights};
 
 use crate::predicate::{EdgePredicate, Symbol};
-use crate::{PatternID, Universe};
+use crate::{BiMap, PatternID, Universe};
 
 /// A state ID in a scope automaton
 #[derive(Clone, Copy, PartialEq, Eq, From, Into, Hash, Debug)]
@@ -144,13 +145,13 @@ impl<PNode: Copy, PEdge: Copy> ScopeAutomaton<PNode, PEdge> {
 /// - A: A function from symbols to values
 #[derive(Clone, Debug)]
 struct AssignMap<U: Universe> {
-    map: BiBTreeMap<Symbol, U>,
+    map: BiMap<Symbol, U>,
     state_id: StateID,
 }
 
 impl<U: Universe> AssignMap<U> {
     fn new(root_state: StateID, root: U) -> Self {
-        let map = BiBTreeMap::from_iter([(Symbol::root(), root)]);
+        let mut map = BiMap::from_iter([(Symbol::root(), root)]);
         Self {
             map,
             state_id: root_state,
