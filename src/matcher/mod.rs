@@ -17,7 +17,7 @@ pub use single_pattern::SinglePatternMatcher;
 use crate::{
     graph_traits::Node,
     patterns::{Edge, UnweightedEdge},
-    GraphNodes, NodeProperty, Pattern, Universe, HashMap,
+    GraphNodes, HashMap, NodeProperty, Pattern, Universe,
 };
 
 use self::single_pattern::validate_unweighted_edge;

@@ -13,7 +13,7 @@ pub mod utils;
 pub use graph_traits::GraphNodes;
 pub use matcher::{ManyMatcher, NaiveManyMatcher, PatternID, PortMatcher, SinglePatternMatcher};
 pub use patterns::{Pattern, UnweightedPattern, WeightedPattern};
-use rustc_hash::{FxHasher, FxHashSet, FxHashMap};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 // use symbol_map::SymbolMap;
 
 use std::hash::{BuildHasherDefault, Hash};
@@ -26,9 +26,9 @@ pub trait EdgeProperty: Copy + Ord + Hash {
     fn reverse(&self) -> Option<Self>;
 }
 
-pub trait NodeProperty: Copy + Eq + Hash {}
+pub trait NodeProperty: Copy + Hash + Ord {}
 
-impl<U: Copy + Eq + Hash> NodeProperty for U {}
+impl<U: Copy + Hash + Ord> NodeProperty for U {}
 
 impl<A: Copy + Ord + Hash> EdgeProperty for (A, A) {
     fn reverse(&self) -> Option<Self> {
