@@ -197,7 +197,7 @@ fn perform_benches(c: &mut Criterion) {
             &format!("XXL weighted ({q} qubits)"),
             &mut group,
             "balanced",
-            (500..=5000).step_by(500),
+            (500..=10000).step_by(500),
             q,
             &graph,
         );
