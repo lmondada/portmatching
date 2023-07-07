@@ -43,11 +43,7 @@ where
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(
-        &self,
-        graph: &PortGraph,
-        root: NodeIndex,
-    ) -> Vec<Match<PortGraph>> {
+    fn find_rooted_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Match<PortGraph>> {
         self.matchers
             .iter()
             .enumerate()

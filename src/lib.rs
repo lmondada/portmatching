@@ -13,9 +13,10 @@ pub mod utils;
 pub use graph_traits::GraphNodes;
 pub use matcher::{ManyMatcher, NaiveManyMatcher, PatternID, PortMatcher, SinglePatternMatcher};
 pub use patterns::{Pattern, UnweightedPattern, WeightedPattern};
+use rustc_hash::FxHasher;
 // use symbol_map::SymbolMap;
 
-use std::hash::Hash;
+use std::hash::{BuildHasherDefault, Hash};
 
 pub trait Universe: Copy + Eq + Hash + Ord {}
 
@@ -34,3 +35,6 @@ impl<A: Copy + Ord + Hash> EdgeProperty for (A, A) {
         (self.1, self.0).into()
     }
 }
+
+type BiMap<S, U> =
+    bimap::BiHashMap<S, U, BuildHasherDefault<FxHasher>, BuildHasherDefault<FxHasher>>;
