@@ -1,6 +1,6 @@
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque},
-    hash::Hash,
+    collections::{BTreeSet, VecDeque},
+    hash::{BuildHasher, Hash},
 };
 
 use itertools::{Either, Itertools};
@@ -9,7 +9,7 @@ use crate::{
     automaton::{ScopeAutomaton, StateID},
     patterns::{IterationStatus, LinePattern, PredicatesIter},
     predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility},
-    EdgeProperty, NodeProperty, Universe,
+    EdgeProperty, HashMap, HashSet, NodeProperty, Universe,
 };
 
 pub(crate) struct LineBuilder<U: Universe, PNode, PEdge> {
@@ -27,7 +27,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     pub fn from_patterns(patterns: Vec<LinePattern<U, PNode, PEdge>>) -> Self {
         Self {
             patterns,
-            det_states: HashMap::new(),
+            det_states: HashMap::default(),
         }
     }
 
@@ -83,7 +83,8 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
                         _ => unreachable!("finished was filtered out and skeleton is smaller"),
                     })
                     .zip(patterns)
-                    .into_group_map();
+                    .into_grouping_map()
+                    .collect();
                 self.only_det_predicates(state, stage_patterns)
             } else {
                 self.get_compatible_predicates(state, patterns)
@@ -208,10 +209,14 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     /// Unlike other transition functions, this does the patterns in the children
     /// states do not necessary form a partition: patterns might be cloned up
     /// to `n` times, yielding an exponential overhead if this is called repeatedly.
-    fn only_det_predicates<'a>(
+    fn only_det_predicates<'a, H: BuildHasher>(
         &self,
         source: StateID,
-        mut patterns: HashMap<usize, Vec<PatternInConstruction<'a, U, PNode, PEdge>>>,
+        mut patterns: std::collections::HashMap<
+            usize,
+            Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
+            H,
+        >,
     ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
         PNode: Copy + Eq + Hash,
@@ -265,34 +270,6 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         let pattern_ids = patterns.iter().map(|p| p.pattern_id).collect();
         self.det_states.get(&(pattern_ids, stage)).copied()
     }
-
-    /*fn non_det_transitions<'a>(
-        &self,
-        source: StateID,
-        patterns: HashMap<IterationStatus, Vec<PatternInConstruction<'a, U, PNode, PEdge>>>,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
-    where
-        PNode: Copy + Eq + Hash,
-        PEdge: Copy + Eq + Hash,
-    {
-        let patterns = coarser_partition(patterns, |stage| match stage {
-            &IterationStatus::Skeleton(i) => i,
-            IterationStatus::LeftOver(_) => usize::MAX,
-            IterationStatus::Finished => panic!("finished patterns should not be in the map"),
-        });
-        patterns
-            .into_iter()
-            .map(|(pred, patterns)| TransitionInConstruction {
-                source,
-                target: None,
-                pred: EdgePredicate::True {
-                    line: pred,
-                    deterministic: false,
-                },
-                patterns,
-            })
-            .collect()
-    }*/
 }
 
 fn leftover_stage<U: Universe, PNode: Copy, PEdge: Copy>(
@@ -359,7 +336,7 @@ impl<U: Universe, PNode, PEdge> Default for LineBuilder<U, PNode, PEdge> {
     fn default() -> Self {
         Self {
             patterns: Vec::new(),
-            det_states: HashMap::new(),
+            det_states: HashMap::default(),
         }
     }
 }
@@ -370,7 +347,7 @@ impl<U: Universe, PNode, PEdge> FromIterator<LinePattern<U, PNode, PEdge>>
     fn from_iter<T: IntoIterator<Item = LinePattern<U, PNode, PEdge>>>(iter: T) -> Self {
         Self {
             patterns: iter.into_iter().collect(),
-            det_states: HashMap::new(),
+            det_states: HashMap::default(),
         }
     }
 }
@@ -380,32 +357,12 @@ where
     U: Eq + Hash,
     F: for<'a> Fn(&'a mut V) -> U,
 {
-    let mut partitions = HashMap::new();
+    let mut partitions = HashMap::default();
     for mut v in iter {
         let u = f(&mut v);
         partitions.entry(u).or_insert_with(Vec::new).push(v);
     }
     partitions
-}
-
-/// Merge keys in a hashmap partition
-fn coarser_partition<U, UU, V, F: for<'a> Fn(&'a U) -> UU>(
-    partition: HashMap<U, Vec<V>>,
-    f: F,
-) -> HashMap<UU, Vec<V>>
-where
-    U: Eq + Hash,
-    UU: Eq + Hash,
-{
-    let mut new_partition = HashMap::new();
-    for (u, mut v) in partition.into_iter() {
-        let new_u = f(&u);
-        new_partition
-            .entry(new_u)
-            .or_insert_with(Vec::new)
-            .append(&mut v);
-    }
-    new_partition
 }
 
 #[cfg(test)]
