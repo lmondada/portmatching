@@ -92,7 +92,7 @@ fn main() {
                 .map(|s| s.parse::<usize>().unwrap())
                 .collect::<Vec<_>>();
             let dir = format!("{dir}/{q}_qubits/");
-            precompile(&patterns, &sizes, &dir);
+            // precompile(&patterns, &sizes, &dir);
             precompile_weighted(&weighted_patterns, &sizes, &dir);
         }
     } else {
