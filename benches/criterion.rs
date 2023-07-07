@@ -95,7 +95,7 @@ fn bench_matching_xxl_weighted(
     for size in sizes {
         group.throughput(Throughput::Elements(size as u64));
         let file_name =
-            format!("datasets/xxl/tries/{n_qubits}_qubits/weighted_{prefix}_{size}.bin");
+            format!("datasets/xxl/{n_qubits}_qubits/tries/weighted_{prefix}_{size}.bin");
         let matcher: ManyMatcher<NodeIndex, (usize, usize), (PortOffset, PortOffset)> =
             rmp_serde::from_read(fs::File::open(file_name).unwrap())
                 .expect("could not deserialize trie");
