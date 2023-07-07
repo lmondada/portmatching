@@ -162,8 +162,8 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
     ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
-        PNode: Copy + Eq + Hash,
-        PEdge: Copy + Eq + Hash,
+        PNode: NodeProperty,
+        PEdge: NodeProperty,
     {
         let mut patterns = patterns
             .into_iter()
@@ -219,8 +219,8 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         >,
     ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
-        PNode: Copy + Eq + Hash,
-        PEdge: Copy + Eq + Hash,
+        PNode: NodeProperty,
+        PEdge: NodeProperty,
     {
         // Find the min stage
         let Some(&min_stage) = patterns.keys().min() else {

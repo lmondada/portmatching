@@ -146,7 +146,7 @@ mod tests {
     use crate::{
         matcher::{ManyMatcher, PatternMatch, PortMatcher, SinglePatternMatcher},
         utils::test::gen_portgraph_connected,
-        NaiveManyMatcher, Pattern, HashSet,
+        HashSet, NaiveManyMatcher, Pattern,
     };
 
     #[test]

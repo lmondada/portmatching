@@ -1,10 +1,10 @@
 use std::{
-    collections::{VecDeque},
+    collections::{BTreeSet, VecDeque},
     hash::Hash,
 };
 
 use super::{Line, LinePattern};
-use crate::{EdgeProperty, NodeProperty, Universe, HashSet, HashMap};
+use crate::{EdgeProperty, HashMap, HashSet, NodeProperty, Universe};
 use itertools::Itertools;
 use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortOffset, PortView, SecondaryMap};
 
@@ -21,7 +21,7 @@ pub type WeightedPattern<W> = Pattern<NodeIndex, W, UnweightedEdge>;
 
 pub(crate) type UnweightedEdge = (PortOffset, PortOffset);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub(crate) struct Edge<U, PNode, PEdge> {
     pub(crate) source: Option<U>,
     pub(crate) target: Option<U>,
@@ -75,8 +75,13 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
     }
 
     /// Let the pattern fix a root
-    fn set_any_root(&mut self) -> Result<U, NoRootFound> {
-        let all_edges: HashSet<_> = self
+    ///
+    /// We require `Ord` so that this is deterministic (do not rely on hash)
+    fn set_any_root(&mut self) -> Result<U, NoRootFound>
+    where
+        U: Ord,
+    {
+        let all_edges: BTreeSet<_> = self
             .edges
             .iter()
             .map(|(&(u, property), &v)| Edge {
@@ -107,7 +112,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
     ///
     /// If no root was set, this returns `None`
     pub(crate) fn edges(&self) -> Option<Vec<Edge<U, PNode, PEdge>>> {
-        let all_edges: HashSet<_> = self
+        let all_edges: BTreeSet<_> = self
             .edges
             .iter()
             .map(|(&(u, property), &v)| Edge {
@@ -124,7 +129,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
 }
 
 fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
-    all_edges: &HashSet<Edge<U, PNode, PEdge>>,
+    all_edges: &BTreeSet<Edge<U, PNode, PEdge>>,
     root_candidate: U,
 ) -> Option<Vec<Edge<U, PNode, PEdge>>> {
     let mut known_nodes = HashSet::default();

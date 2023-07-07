@@ -15,7 +15,7 @@ use portgraph::dot::DotFormat;
 use portgraph::{NodeIndex, PortGraph, PortMut, PortView, Weights};
 
 use crate::predicate::{EdgePredicate, Symbol};
-use crate::{BiMap, PatternID, Universe, HashSet};
+use crate::{BiMap, HashSet, PatternID, Universe};
 
 /// A state ID in a scope automaton
 #[derive(Clone, Copy, PartialEq, Eq, From, Into, Hash, Debug)]
