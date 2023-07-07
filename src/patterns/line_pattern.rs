@@ -1,18 +1,10 @@
-use std::{
-    borrow::{Borrow, BorrowMut},
-    cell::RefCell,
-    collections::{HashMap, VecDeque},
-    default,
-    iter::Map,
-    mem,
-    ops::RangeFrom,
-};
+use std::collections::VecDeque;
 
 use derive_more::{From, Into};
 
 use crate::{
     predicate::{EdgePredicate, NodeLocation, Symbol, SymbolsIter},
-    Universe,
+    HashMap, Universe,
 };
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -76,7 +68,7 @@ impl<U: Universe, PNode: Copy, PEdge: Copy> LinePattern<U, PNode, PEdge> {
 impl<U: Universe, PNode, PEdge> Default for LinePattern<U, PNode, PEdge> {
     fn default() -> Self {
         Self {
-            nodes: HashMap::new(),
+            nodes: HashMap::default(),
             lines: Vec::new(),
         }
     }
@@ -107,9 +99,9 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
     fn new(p: &'a LinePattern<U, PNode, PEdge>) -> Self {
         let lines = &p.lines;
         let nodes = &p.nodes;
-        let mut to_line_ind = HashMap::new();
+        let mut to_line_ind = HashMap::default();
         let mut it_queue = VecDeque::new();
-        let mut u_to_symbols = HashMap::new();
+        let mut u_to_symbols = HashMap::default();
         let mut status = IterationStatus::Finished;
         let mut free_symbols = Symbol::symbols_in_status(status);
         if let Some(root) = lines.get(0).map(|w| w.root) {

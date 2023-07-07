@@ -8,7 +8,7 @@
 pub mod many_patterns;
 pub mod single_pattern;
 
-use std::{borrow::Borrow, collections::HashMap, hash::Hash};
+use std::{borrow::Borrow, hash::Hash};
 
 pub use many_patterns::{ManyMatcher, NaiveManyMatcher, PatternID, UnweightedManyMatcher};
 use portgraph::{NodeIndex, PortGraph, PortOffset};
@@ -17,7 +17,7 @@ pub use single_pattern::SinglePatternMatcher;
 use crate::{
     graph_traits::Node,
     patterns::{Edge, UnweightedEdge},
-    GraphNodes, NodeProperty, Pattern, Universe,
+    GraphNodes, NodeProperty, Pattern, Universe, HashMap,
 };
 
 use self::single_pattern::validate_unweighted_edge;

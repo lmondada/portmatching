@@ -134,8 +134,6 @@ mod tests {
 
     use std::collections::BTreeSet;
 
-    use std::collections::HashSet;
-
     use itertools::Itertools;
 
     use portgraph::{
@@ -148,7 +146,7 @@ mod tests {
     use crate::{
         matcher::{ManyMatcher, PatternMatch, PortMatcher, SinglePatternMatcher},
         utils::test::gen_portgraph_connected,
-        NaiveManyMatcher, Pattern,
+        NaiveManyMatcher, Pattern, HashSet,
     };
 
     #[test]

@@ -1,10 +1,10 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{VecDeque},
     hash::Hash,
 };
 
 use super::{Line, LinePattern};
-use crate::{EdgeProperty, NodeProperty, Universe};
+use crate::{EdgeProperty, NodeProperty, Universe, HashSet, HashMap};
 use itertools::Itertools;
 use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortOffset, PortView, SecondaryMap};
 
@@ -127,8 +127,8 @@ fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
     all_edges: &HashSet<Edge<U, PNode, PEdge>>,
     root_candidate: U,
 ) -> Option<Vec<Edge<U, PNode, PEdge>>> {
-    let mut known_nodes = HashSet::new();
-    let mut known_edges = HashSet::new();
+    let mut known_nodes = HashSet::default();
+    let mut known_edges = HashSet::default();
     known_nodes.insert(root_candidate);
 
     let mut edges = Vec::new();
@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(
             p.try_into_line_pattern(compatible_offsets),
             Some(LinePattern {
-                nodes: HashMap::new(),
+                nodes: HashMap::default(),
                 lines: vec![
                     Line::new(0, vec![(0, 1, (po(0), pi(1))), (1, 2, (po(1), pi(0))),]),
                     Line::new(0, vec![(0, 1, (po(1), pi(0))), (1, 2, (po(0), pi(1))),]),

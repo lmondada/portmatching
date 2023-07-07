@@ -4,9 +4,7 @@ mod traversal;
 mod view;
 
 pub(crate) use builders::LineBuilder;
-use rustc_hash::FxHasher;
 
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::BuildHasherDefault;
 use std::{iter::Map, ops::RangeFrom};
@@ -17,7 +15,7 @@ use portgraph::dot::DotFormat;
 use portgraph::{NodeIndex, PortGraph, PortMut, PortView, Weights};
 
 use crate::predicate::{EdgePredicate, Symbol};
-use crate::{BiMap, PatternID, Universe};
+use crate::{BiMap, PatternID, Universe, HashSet};
 
 /// A state ID in a scope automaton
 #[derive(Clone, Copy, PartialEq, Eq, From, Into, Hash, Debug)]
@@ -83,7 +81,7 @@ impl<PNode: Copy, PEdge: Copy> ScopeAutomaton<PNode, PEdge> {
             let mut w = Weights::new();
             w[root.0] = Some(State {
                 matches: Vec::new(),
-                scope: [Symbol::root()].into(),
+                scope: HashSet::from_iter([Symbol::root()]),
                 deterministic: true,
             });
             w

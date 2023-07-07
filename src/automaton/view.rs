@@ -1,8 +1,6 @@
-use std::collections::HashSet;
-
 use portgraph::PortView;
 
-use crate::PatternID;
+use crate::{HashSet, PatternID};
 
 use super::{EdgePredicate, OutPort, ScopeAutomaton, StateID, Symbol};
 
