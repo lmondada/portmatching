@@ -1,3 +1,15 @@
 digraph {
-0 [shape=plain label=<<table border="1"><tr><td align="text" border="0" colspan="1">State { matches: [0, 1], scope: {Symbol(Skeleton(0), 0)}, deterministic: true }[[0, 1]]</td></tr></table>>]
+0 [shape=plain label=<<table border="1"><tr><td align="text" border="0" colspan="1">State { matches: [], scope: {Symbol(Skeleton(0), 0)}, deterministic: true }</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1" >0: Transition { predicate: NodeProperty { node: Symbol(Skeleton(0), 0), property: () } }</td></tr></table>>]
+0:out0 -> 1:in0 [style=""]
+1 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1" >0</td></tr><tr><td align="text" border="0" colspan="1">State { matches: [], scope: {Symbol(Skeleton(0), 0)}, deterministic: false }</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1" >0: Transition { predicate: True }</td></tr></table>>]
+1:out0 -> 2:in0 [style=""]
+2 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="2" cellpadding="1" >0</td></tr><tr><td align="text" border="0" colspan="2">State { matches: [], scope: {Symbol(Skeleton(0), 0)}, deterministic: true }</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1" >0: Transition { predicate: LinkNewNode { node: Symbol(Skeleton(0), 0), property: (Outgoing(0), Incoming(1)), new_node: Symbol(LeftOver(0), 0) } }</td><td port="out1" align="text" colspan="1" cellpadding="1" >1: Transition { predicate: LinkNewNode { node: Symbol(Skeleton(0), 0), property: (Incoming(0), Outgoing(2)), new_node: Symbol(LeftOver(0), 0) } }</td></tr></table>>]
+2:out0 -> 3:in0 [style=""]
+2:out1 -> 4:in0 [style=""]
+3 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1" >0</td></tr><tr><td align="text" border="0" colspan="1">State { matches: [], scope: {Symbol(Skeleton(0), 0), Symbol(LeftOver(0), 0)}, deterministic: true }</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1" >0: Transition { predicate: NodeProperty { node: Symbol(LeftOver(0), 0), property: () } }</td></tr></table>>]
+3:out0 -> 5:in0 [style=""]
+4 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1" >0</td></tr><tr><td align="text" border="0" colspan="1">State { matches: [], scope: {Symbol(Skeleton(0), 0), Symbol(LeftOver(0), 0)}, deterministic: true }</td></tr><tr><td port="out0" align="text" colspan="1" cellpadding="1" >0: Transition { predicate: NodeProperty { node: Symbol(LeftOver(0), 0), property: () } }</td></tr></table>>]
+4:out0 -> 6:in0 [style=""]
+5 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1" >0</td></tr><tr><td align="text" border="0" colspan="1">State { matches: [1], scope: {Symbol(Skeleton(0), 0), Symbol(LeftOver(0), 0)}, deterministic: true }[[1]]</td></tr></table>>]
+6 [shape=plain label=<<table border="1"><tr><td port="in0" align="text" colspan="1" cellpadding="1" >0</td></tr><tr><td align="text" border="0" colspan="1">State { matches: [0], scope: {Symbol(Skeleton(0), 0), Symbol(LeftOver(0), 0)}, deterministic: true }[[0]]</td></tr></table>>]
 }
