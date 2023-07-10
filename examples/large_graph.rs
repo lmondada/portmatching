@@ -1,21 +1,20 @@
-use std::{fs, path::PathBuf};
+use std::{fs, hint::black_box, path::PathBuf};
 
 use portgraph::PortGraph;
-use portmatching::{pattern::UnweightedPattern, ManyPatternMatcher, Matcher, TrieMatcher};
+use portmatching::{matcher::UnweightedManyMatcher, PortMatcher};
 
 fn main() {
-    let path: PathBuf = ["examples", "data"].iter().collect();
-    let mut patterns = Vec::with_capacity(100);
-    for i in 0..100 {
-        let path = path.join(format!("small_circuits/pattern_{}.json", i));
-        let p: PortGraph = serde_json::from_reader(fs::File::open(&path).unwrap()).unwrap();
-        patterns.push(UnweightedPattern::from_graph(p).unwrap());
-    }
+    let path: PathBuf = ["datasets", "xxl"].iter().collect();
+
+    let file_name = path.join("tries/balanced_1000.bin");
+    let matcher: UnweightedManyMatcher = rmp_serde::from_read(fs::File::open(file_name).unwrap())
+        .expect("could not deserialize trie");
+
     let path = path.join("large_circuits/circuit_0.json");
     let graph: PortGraph = serde_json::from_reader(fs::File::open(path).unwrap()).unwrap();
 
     println!("Loaded graph and patterns");
-    let matcher = TrieMatcher::from_patterns(patterns);
-    println!("Built matcher");
-    matcher.find_matches(&graph);
+    for _ in 0..5 {
+        black_box(matcher.find_matches(&graph));
+    }
 }

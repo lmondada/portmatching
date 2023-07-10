@@ -1,5 +1,5 @@
 use portgraph::proptest::gen_portgraph;
-use portgraph::{PortGraph, PortOffset};
+use portgraph::{LinkMut, PortGraph, PortMut, PortOffset, PortView};
 use proptest::prelude::*;
 
 use super::depth::is_connected;
