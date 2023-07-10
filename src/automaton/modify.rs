@@ -81,7 +81,7 @@ impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
             .push(pattern);
     }
 
-    pub(crate) fn to_non_det(&mut self, state: StateID) {
+    pub(crate) fn make_non_det(&mut self, state: StateID) {
         if self.graph.num_outputs(state.0) > 0 {
             panic!("Cannot make state non-deterministic: has outgoing ports");
         }

@@ -1,5 +1,4 @@
-use std::{hash::Hash};
-
+use std::hash::Hash;
 
 use portgraph::{NodeIndex, PortGraph};
 
@@ -75,8 +74,4 @@ impl<U: Universe, PNode, PEdge: Eq + Hash> FromIterator<SinglePatternMatcher<U, 
 }
 
 #[cfg(test)]
-mod naive_tests {
-    
-
-    
-}
+mod naive_tests {}

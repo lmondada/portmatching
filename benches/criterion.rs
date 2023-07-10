@@ -19,6 +19,7 @@ use portmatching::matcher::many_patterns::ManyMatcher;
 use portmatching::matcher::PortMatcher;
 use portmatching::matcher::UnweightedManyMatcher;
 use portmatching::EdgeProperty;
+use portmatching::NaiveManyMatcher;
 
 use portmatching::NodeProperty;
 use portmatching::Pattern;
@@ -128,7 +129,7 @@ fn bench_trie_construction<U: Universe, M: PortMatcher<PortGraph, U>>(
 }
 
 fn perform_benches(c: &mut Criterion) {
-    let _patterns = glob::glob("datasets/small_circuits/*.json")
+    let patterns = glob::glob("datasets/small_circuits/*.json")
         .expect("cannot read small circuits directory")
         .map(|p| {
             let g = serde_json::from_reader(
@@ -152,44 +153,44 @@ fn perform_benches(c: &mut Criterion) {
         .next()
         .expect("Did not find any large circuit");
 
-    // let mut group = c.benchmark_group("Many Patterns Matching");
-    // bench_matching(
-    //     "Naive matching",
-    //     &mut group,
-    //     &patterns,
-    //     (0..=300).step_by(100),
-    //     &graph,
-    //     NaiveManyMatcher::from_patterns,
-    // );
-    // bench_matching(
-    //     "Balanced Graph Trie",
-    //     &mut group,
-    //     &patterns,
-    //     (0..=1000).step_by(100),
-    //     &graph,
-    //     ManyMatcher::from_patterns,
-    // );
-    // group.finish();
+    let mut group = c.benchmark_group("Many Patterns Matching");
+    bench_matching(
+        "Naive matching",
+        &mut group,
+        &patterns,
+        (0..=300).step_by(100),
+        &graph,
+        NaiveManyMatcher::from_patterns,
+    );
+    bench_matching(
+        "Balanced Graph Trie",
+        &mut group,
+        &patterns,
+        (0..=1000).step_by(100),
+        &graph,
+        ManyMatcher::from_patterns,
+    );
+    group.finish();
 
-    // let mut group = c.benchmark_group("Trie Construction");
-    // bench_trie_construction(
-    //     "Balanced Graph Trie",
-    //     &mut group,
-    //     &patterns,
-    //     (0..=300).step_by(30),
-    //     ManyMatcher::from_patterns,
-    // );
-    // group.finish();
+    let mut group = c.benchmark_group("Trie Construction");
+    bench_trie_construction(
+        "Balanced Graph Trie",
+        &mut group,
+        &patterns,
+        (0..=300).step_by(30),
+        ManyMatcher::from_patterns,
+    );
+    group.finish();
 
-    // let mut group = c.benchmark_group("Many Patterns Matching XXL");
-    // bench_matching_xxl(
-    //     "Balanced Graph Trie",
-    //     &mut group,
-    //     "balanced",
-    //     (500..=10000).step_by(500),
-    //     &graph,
-    // );
-    // group.finish();
+    let mut group = c.benchmark_group("Many Patterns Matching XXL");
+    bench_matching_xxl(
+        "Balanced Graph Trie",
+        &mut group,
+        "balanced",
+        (500..=10000).step_by(500),
+        &graph,
+    );
+    group.finish();
 
     let mut group = c.benchmark_group("Many Patterns Matching XXL weighted");
     for q in 2..=5 {

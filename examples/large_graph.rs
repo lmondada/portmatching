@@ -6,7 +6,7 @@ use portmatching::{matcher::UnweightedManyMatcher, PortMatcher};
 fn main() {
     let path: PathBuf = ["datasets", "xxl"].iter().collect();
 
-    let file_name = path.join(&"tries/balanced_1000.bin".to_string());
+    let file_name = path.join("tries/balanced_1000.bin");
     let matcher: UnweightedManyMatcher = rmp_serde::from_read(fs::File::open(file_name).unwrap())
         .expect("could not deserialize trie");
 

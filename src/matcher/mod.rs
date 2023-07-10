@@ -71,7 +71,7 @@ pub struct PatternMatch<P, N> {
     pub root: N,
 }
 
-impl<'p, P, N> PatternMatch<P, N> {
+impl<P, N> PatternMatch<P, N> {
     pub fn new(pattern: P, root: N) -> Self {
         Self { pattern, root }
     }

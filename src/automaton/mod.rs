@@ -7,8 +7,6 @@ pub(crate) use builders::LineBuilder;
 
 use std::fmt::Debug;
 
-
-
 use derive_more::{From, Into};
 
 use portgraph::dot::DotFormat;

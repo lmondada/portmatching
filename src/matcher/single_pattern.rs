@@ -4,7 +4,7 @@
 //! the matching process for each pattern separately.
 use std::{borrow::Borrow, hash::Hash};
 
-use bimap::{BiMap};
+use bimap::BiMap;
 use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView};
 
 use crate::{
@@ -151,11 +151,11 @@ where
     let mut flipped = false;
     let src = e.source;
     let tgt = e.target;
-    let (src, tgt) = if src.is_none() {
+    let (src, tgt) = if let Some(src) = src {
+        (src, tgt)
+    } else {
         flipped = true;
         (tgt.expect("both source and target are none"), src)
-    } else {
-        (src.unwrap(), tgt)
     };
     let (src_port, should_tgt_port) = if flipped {
         (e.edge_prop.1, e.edge_prop.0)
@@ -183,16 +183,9 @@ where
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use portgraph::{
-        LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView,
-    };
-    
+    use portgraph::{LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView};
 
-    use crate::{
-        matcher::PortMatcher,
-        utils::test::{graph},
-        Pattern,
-    };
+    use crate::{matcher::PortMatcher, utils::test::graph, Pattern};
 
     use super::SinglePatternMatcher;
 

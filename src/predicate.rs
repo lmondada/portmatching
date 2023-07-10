@@ -21,7 +21,7 @@ impl Symbol {
     }
 
     fn from_tuple((status, ind): (IterationStatus, usize)) -> Self {
-        Self(status, ind)
+        Self::new(status, ind)
     }
 
     pub(crate) fn root() -> Self {
@@ -160,19 +160,19 @@ pub(crate) enum PredicateCompatibility {
 /// All predicates within a class are compatible with eachother.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CompatibilityType<OffsetID> {
-    NonDetType,
-    LinkType(Symbol, OffsetID),
-    WeightType(Symbol),
-    FailType,
+    NonDet,
+    Link(Symbol, OffsetID),
+    Weight(Symbol),
+    Fail,
 }
 
 impl<OffsetID> CompatibilityType<OffsetID> {
     fn transition_type(&self) -> PredicateCompatibility {
         match self {
-            Self::NonDetType => PredicateCompatibility::NonDeterministic,
-            Self::LinkType(_, _) => PredicateCompatibility::Deterministic,
-            Self::WeightType(_) => PredicateCompatibility::Deterministic,
-            Self::FailType => PredicateCompatibility::Deterministic,
+            Self::NonDet => PredicateCompatibility::NonDeterministic,
+            Self::Link(_, _) => PredicateCompatibility::Deterministic,
+            Self::Weight(_) => PredicateCompatibility::Deterministic,
+            Self::Fail => PredicateCompatibility::Deterministic,
         }
     }
 
@@ -181,13 +181,13 @@ impl<OffsetID> CompatibilityType<OffsetID> {
         PEdge: EdgeProperty<OffsetID = OffsetID>,
     {
         match pred {
-            EdgePredicate::True | EdgePredicate::NextRoot { .. } => Self::NonDetType,
-            EdgePredicate::Fail => Self::FailType,
+            EdgePredicate::True | EdgePredicate::NextRoot { .. } => Self::NonDet,
+            EdgePredicate::Fail => Self::Fail,
             EdgePredicate::LinkNewNode { node, property, .. }
             | EdgePredicate::LinkKnownNode { node, property, .. } => {
-                Self::LinkType(*node, property.offset_id())
+                Self::Link(*node, property.offset_id())
             }
-            EdgePredicate::NodeProperty { node, .. } => Self::WeightType(*node),
+            EdgePredicate::NodeProperty { node, .. } => Self::Weight(*node),
         }
     }
 
@@ -195,10 +195,8 @@ impl<OffsetID> CompatibilityType<OffsetID> {
     where
         OffsetID: Eq,
     {
-        if other == Self::FailType && matches!(self, Self::LinkType(_, _) | Self::WeightType(_)) {
-            true
-        } else if self == &Self::FailType
-            && matches!(other, Self::LinkType(_, _) | Self::WeightType(_))
+        if other == Self::Fail && matches!(self, Self::Link(_, _) | Self::Weight(_))
+            || self == &Self::Fail && matches!(other, Self::Link(_, _) | Self::Weight(_))
         {
             true
         } else {
