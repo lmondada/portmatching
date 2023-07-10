@@ -10,7 +10,7 @@ pub(crate) mod pre_order;
 // pub(crate) use zero_range::ZeroRange;
 
 pub use depth::is_connected;
-pub(crate) use depth::{centre, NoCentreError};
+
 
 // pub(crate) mod toposort;
 

@@ -9,7 +9,7 @@ use crate::{
     automaton::{ScopeAutomaton, StateID},
     patterns::{IterationStatus, LinePattern, PredicatesIter},
     predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility},
-    EdgeProperty, HashMap, HashSet, NodeProperty, Universe,
+    EdgeProperty, HashMap, NodeProperty, Universe,
 };
 
 pub(crate) struct LineBuilder<U: Universe, PNode, PEdge> {
@@ -39,7 +39,8 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     pub fn build(mut self) -> ScopeAutomaton<PNode, PEdge>
     where
         PNode: NodeProperty,
-        PEdge: NodeProperty,
+        PEdge: EdgeProperty,
+        PEdge::OffsetID: Eq + Hash,
     {
         let mut matcher = ScopeAutomaton::<PNode, PEdge>::new();
 
@@ -118,12 +119,13 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         transitions: &[TransitionInConstruction<'_, U, PNode, PEdge>],
     ) -> Vec<Option<StateID>>
     where
-        PNode: Copy + Eq + Hash,
-        PEdge: Copy + Eq + Hash,
+        PNode: NodeProperty,
+        PEdge: EdgeProperty,
+        PEdge::OffsetID: Eq,
     {
         let mut new_states = vec![None; transitions.len()];
         // Enumerate them so that we can restore their ordering
-        let transitions = transitions.into_iter().enumerate();
+        let transitions = transitions.iter().enumerate();
 
         for (source, transitions) in partition_by(transitions, |(_, t)| t.source) {
             let (inds, targets, preds): (Vec<_>, Vec<_>, Vec<_>) = transitions
@@ -163,7 +165,8 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
         PNode: NodeProperty,
-        PEdge: NodeProperty,
+        PEdge: EdgeProperty,
+        PEdge::OffsetID: Hash,
     {
         let mut patterns = patterns
             .into_iter()
@@ -220,7 +223,8 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
     where
         PNode: NodeProperty,
-        PEdge: NodeProperty,
+        PEdge: EdgeProperty,
+        PEdge::OffsetID: Hash,
     {
         // Find the min stage
         let Some(&min_stage) = patterns.keys().min() else {
@@ -262,7 +266,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     ) -> Option<StateID>
     where
         PNode: Copy + Eq + Hash,
-        PEdge: Copy + Eq + Hash,
+        PEdge: EdgeProperty,
     {
         let Some(stage) = leftover_stage(patterns) else {
             panic!("Can only reuse states in the LeftOver stage")
@@ -272,7 +276,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     }
 }
 
-fn leftover_stage<U: Universe, PNode: Copy, PEdge: Copy>(
+fn leftover_stage<U: Universe, PNode: Copy, PEdge: EdgeProperty>(
     patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge>],
 ) -> Option<usize> {
     patterns
@@ -288,19 +292,25 @@ fn leftover_stage<U: Universe, PNode: Copy, PEdge: Copy>(
         .flatten()
 }
 
-fn create_transitions<'a, U: Universe, PNode: NodeProperty, PEdge: NodeProperty>(
+fn create_transitions<'a, U, PNode, PEdge>(
     source: StateID,
     iter: impl IntoIterator<
         Item = (
-            EdgePredicate<PNode, PEdge>,
+            EdgePredicate<PNode, PEdge, PEdge::OffsetID>,
             PatternInConstruction<'a, U, PNode, PEdge>,
         ),
     >,
-) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>> {
+) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
+where
+    U: Universe,
+    PNode: NodeProperty,
+    PEdge: EdgeProperty,
+    PEdge::OffsetID: Hash,
+{
     iter.into_iter()
         .into_group_map()
         .into_iter()
-        .map(|(pred, mut patterns)| TransitionInConstruction {
+        .map(|(pred, patterns)| TransitionInConstruction {
             source,
             target: None,
             pred,
@@ -310,19 +320,19 @@ fn create_transitions<'a, U: Universe, PNode: NodeProperty, PEdge: NodeProperty>
 }
 
 #[derive(Clone)]
-struct PatternInConstruction<'a, U: Universe, PNode, PEdge> {
+struct PatternInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
     edges: PredicatesIter<'a, U, PNode, PEdge>,
     pattern_id: usize,
 }
 
-struct TransitionInConstruction<'a, U: Universe, PNode, PEdge> {
+struct TransitionInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
     source: StateID,
     target: Option<StateID>,
-    pred: EdgePredicate<PNode, PEdge>,
+    pred: EdgePredicate<PNode, PEdge, PEdge::OffsetID>,
     patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
 }
 
-impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PatternInConstruction<'a, U, PNode, PEdge> {
+impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PatternInConstruction<'a, U, PNode, PEdge> {
     fn new(edges: PredicatesIter<'a, U, PNode, PEdge>, pattern_id: usize) -> Self {
         Self { edges, pattern_id }
     }
@@ -367,9 +377,21 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::patterns::LinePattern;
+    use crate::{patterns::LinePattern, EdgeProperty};
 
     use super::LineBuilder;
+
+    impl EdgeProperty for usize {
+        type OffsetID = usize;
+
+        fn reverse(&self) -> Option<Self> {
+            Some(*self)
+        }
+
+        fn offset_id(&self) -> Self::OffsetID {
+            0
+        }
+    }
 
     #[test]
     fn test_simple_build() {
@@ -383,7 +405,7 @@ mod tests {
 
         let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
         let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 6);
+        assert_eq!(matcher.n_states(), 7);
     }
 
     #[test]
@@ -417,7 +439,7 @@ mod tests {
 
         let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
         let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 17);
+        assert_eq!(matcher.n_states(), 18);
     }
 
     #[test]
@@ -435,7 +457,7 @@ mod tests {
 
         let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
         let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 14);
+        assert_eq!(matcher.n_states(), 15);
     }
 
     #[test]
@@ -452,7 +474,7 @@ mod tests {
 
         let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
         let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 12);
+        assert_eq!(matcher.n_states(), 13);
     }
 
     #[test]
@@ -477,7 +499,7 @@ mod tests {
 
         let builder: LineBuilder<_, _, _> = [p1, p2, p3].into_iter().collect();
         let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 20);
+        assert_eq!(matcher.n_states(), 21);
     }
 
     #[test]

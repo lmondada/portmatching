@@ -147,7 +147,7 @@ fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
                 let rev = e.edge_prop.reverse().is_some();
                 known_nodes.contains(&src) || (rev && known_nodes.contains(&tgt))
             })?;
-        edges.push(next_edge.clone());
+        edges.push(*next_edge);
         known_nodes.insert(next_edge.source.unwrap());
         known_nodes.insert(next_edge.target.unwrap());
         known_edges.insert(next_edge);
@@ -277,7 +277,7 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
                 lines.push(line);
             }
         }
-        edges.is_empty().then(|| LinePattern { nodes, lines })
+        edges.is_empty().then_some(LinePattern { nodes, lines })
     }
 }
 
@@ -308,8 +308,8 @@ mod tests {
     #[test]
     fn test_to_line_pattern() {
         let mut p: Pattern<_, (), _> = Default::default();
-        let po = |i| PortOffset::new_outgoing(i);
-        let pi = |i| PortOffset::new_incoming(i);
+        let po = PortOffset::new_outgoing;
+        let pi = PortOffset::new_incoming;
         p.add_edge(0, 1, (po(0), pi(1)));
         p.add_edge(1, 2, (po(1), pi(0)));
         p.add_edge(0, 1, (po(1), pi(0)));
@@ -333,8 +333,8 @@ mod tests {
     #[test]
     fn from_pattern_with_rev() {
         let mut p = Pattern::<_, (), _>::new();
-        let po = |i| PortOffset::new_outgoing(i);
-        let pi = |i| PortOffset::new_incoming(i);
+        let po = PortOffset::new_outgoing;
+        let pi = PortOffset::new_incoming;
         p.add_edge(0, 0, (po(0), pi(2)));
         p.add_edge(0, 1, (po(1), pi(1)));
         p.add_edge(2, 0, (po(0), pi(1)));
@@ -366,8 +366,8 @@ mod tests {
     #[test]
     fn from_pattern2() {
         let mut p = Pattern::<_, (), _>::new();
-        let po = |i| PortOffset::new_outgoing(i);
-        let pi = |i| PortOffset::new_incoming(i);
+        let po = PortOffset::new_outgoing;
+        let pi = PortOffset::new_incoming;
         let mut add_edge = |(i, j), (k, l)| p.add_edge(i, k, (po(j), pi(l)));
         add_edge((0, 0), (1, 0));
         add_edge((2, 0), (1, 1));

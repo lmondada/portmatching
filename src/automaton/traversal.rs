@@ -2,11 +2,11 @@ use std::collections::VecDeque;
 
 use portgraph::{LinkView, PortGraph, PortView};
 
-use crate::{predicate::PredicateSatisfied, PatternID, Universe};
+use crate::{predicate::PredicateSatisfied, EdgeProperty, PatternID, Universe};
 
 use super::{AssignMap, OutPort, ScopeAutomaton, StateID, Symbol};
 
-impl<PNode: Copy, PEdge: Copy> ScopeAutomaton<PNode, PEdge> {
+impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
     pub fn run<'s, U: Universe + 's>(
         &'s self,
         root: U,
@@ -69,7 +69,9 @@ struct Traverser<Map, A, FnN, FnE> {
     edge_prop: FnE,
 }
 
-impl<'a, Map, PNode, PEdge, FnN, FnE> Traverser<Map, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE> {
+impl<'a, Map, PNode, PEdge: EdgeProperty, FnN, FnE>
+    Traverser<Map, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
+{
     fn new(
         automaton: &'a ScopeAutomaton<PNode, PEdge>,
         ass: Map,
@@ -103,7 +105,7 @@ fn enqueue_state<U: Universe>(
     queue.push_back((node, ass))
 }
 
-impl<'a, U: Universe, PNode, PEdge, FnN, FnE> Iterator
+impl<'a, U: Universe, PNode, PEdge: EdgeProperty, FnN, FnE> Iterator
     for Traverser<AssignMap<U>, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
 where
     PNode: Copy,

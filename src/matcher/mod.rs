@@ -11,7 +11,7 @@ pub mod single_pattern;
 use std::{borrow::Borrow, hash::Hash};
 
 pub use many_patterns::{ManyMatcher, NaiveManyMatcher, PatternID, UnweightedManyMatcher};
-use portgraph::{NodeIndex, PortGraph, PortOffset};
+use portgraph::{NodeIndex, PortGraph};
 pub use single_pattern::SinglePatternMatcher;
 
 use crate::{
@@ -47,7 +47,7 @@ where
     /// calls [`PortMatcher::find_anchored_matches`] for each of them.
     fn find_matches(&self, graph: &Graph) -> Vec<Match<Graph>> {
         let mut matches = Vec::new();
-        for root in <Graph as GraphNodes>::nodes(&graph) {
+        for root in <Graph as GraphNodes>::nodes(graph) {
             matches.append(&mut self.find_rooted_matches(graph, root));
         }
         matches
@@ -131,9 +131,9 @@ impl<'p, U: Universe, PNode: NodeProperty>
 }
 
 impl PatternMatch<PatternID, NodeIndex> {
-    pub fn to_match_map<'g, M, U>(
+    pub fn to_match_map<M, U>(
         &self,
-        graph: &'g PortGraph,
+        graph: &PortGraph,
         matcher: &M,
     ) -> Option<HashMap<U, NodeIndex>>
     where
