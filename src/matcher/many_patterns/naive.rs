@@ -1,7 +1,7 @@
-use std::{borrow::Borrow, hash::Hash};
+use std::{hash::Hash};
 
-use itertools::Itertools;
-use portgraph::{NodeIndex, PortGraph, PortView};
+
+use portgraph::{NodeIndex, PortGraph};
 
 use crate::{
     matcher::{Match, PatternMatch, PortMatcher, SinglePatternMatcher},
@@ -76,7 +76,7 @@ impl<U: Universe, PNode, PEdge: Eq + Hash> FromIterator<SinglePatternMatcher<U, 
 
 #[cfg(test)]
 mod naive_tests {
-    use proptest::prelude::*;
+    
 
-    use crate::NaiveManyMatcher;
+    
 }

@@ -19,7 +19,7 @@ use portmatching::matcher::many_patterns::ManyMatcher;
 use portmatching::matcher::PortMatcher;
 use portmatching::matcher::UnweightedManyMatcher;
 use portmatching::EdgeProperty;
-use portmatching::NaiveManyMatcher;
+
 use portmatching::NodeProperty;
 use portmatching::Pattern;
 use portmatching::Universe;
@@ -128,7 +128,7 @@ fn bench_trie_construction<U: Universe, M: PortMatcher<PortGraph, U>>(
 }
 
 fn perform_benches(c: &mut Criterion) {
-    let patterns = glob::glob("datasets/small_circuits/*.json")
+    let _patterns = glob::glob("datasets/small_circuits/*.json")
         .expect("cannot read small circuits directory")
         .map(|p| {
             let g = serde_json::from_reader(

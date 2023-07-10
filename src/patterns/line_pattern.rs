@@ -4,7 +4,7 @@ use derive_more::{From, Into};
 
 use crate::{
     predicate::{EdgePredicate, NodeLocation, Symbol, SymbolsIter},
-    HashMap, Universe,
+    EdgeProperty, HashMap, Universe,
 };
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -44,7 +44,10 @@ impl<U: Universe, PNode: Copy, PEdge: Copy> LinePattern<U, PNode, PEdge> {
         self.lines.push(Line { root, edges });
     }
 
-    pub(crate) fn edge_predicates(&self) -> PredicatesIter<'_, U, PNode, PEdge> {
+    pub(crate) fn edge_predicates(&self) -> PredicatesIter<'_, U, PNode, PEdge>
+    where
+        PEdge: EdgeProperty,
+    {
         PredicatesIter::new(self)
     }
 
@@ -75,14 +78,14 @@ impl<U: Universe, PNode, PEdge> Default for LinePattern<U, PNode, PEdge> {
 }
 
 #[derive(Clone)]
-pub(crate) struct PredicatesIter<'a, U: Universe, PNode, PEdge> {
+pub(crate) struct PredicatesIter<'a, U: Universe, PNode, PEdge: EdgeProperty> {
     // Map each node to the first address where it occurs
     to_line_ind: HashMap<U, LineAddress>,
     // For each line, the first index that we have not yet visited
     // (index 0 is always discovered by some other line)
     visited_boundary: Vec<usize>,
     // The queue of next items
-    it_queue: VecDeque<EdgePredicate<PNode, PEdge>>,
+    it_queue: VecDeque<EdgePredicate<PNode, PEdge, PEdge::OffsetID>>,
     // The symbols that have been assigned to each node
     u_to_symbols: HashMap<U, Symbol>,
     // How far we have come in the traversal
@@ -95,7 +98,7 @@ pub(crate) struct PredicatesIter<'a, U: Universe, PNode, PEdge> {
     free_symbols: SymbolsIter,
 }
 
-impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEdge> {
+impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PNode, PEdge> {
     fn new(p: &'a LinePattern<U, PNode, PEdge>) -> Self {
         let lines = &p.lines;
         let nodes = &p.nodes;
@@ -108,9 +111,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
             to_line_ind.insert(root, (0, 0).into());
             // Add 0-th line to known nodes
             for (ind, &(_, u, _)) in lines[0].edges.iter().enumerate() {
-                if !to_line_ind.contains_key(&u) {
-                    to_line_ind.insert(u, (0, ind + 1).into());
-                }
+                to_line_ind.entry(u).or_insert_with(|| (0, ind + 1).into());
             }
             status = IterationStatus::Skeleton(0);
             free_symbols = Symbol::symbols_in_status(status);
@@ -120,6 +121,14 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
                 it_queue.push_back(EdgePredicate::NodeProperty {
                     node: root_symbol,
                     property: root_prop,
+                });
+            }
+            if let Some(first_prop) = lines[0].edges.get(0).map(|w| w.2) {
+                // Indicate location of first line
+                it_queue.push_back(EdgePredicate::NextRoot {
+                    line_nb: 0,
+                    new_root: NodeLocation::Exists(root_symbol),
+                    offset: first_prop.offset_id(),
                 });
             }
         }
@@ -135,7 +144,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
         }
     }
 
-    pub(crate) fn peek(&mut self) -> Option<EdgePredicate<PNode, PEdge>> {
+    pub(crate) fn peek(&mut self) -> Option<EdgePredicate<PNode, PEdge, PEdge::OffsetID>> {
         self.fill_queue();
         self.it_queue.front().copied()
     }
@@ -149,7 +158,10 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
         self.lines.len()
     }
 
-    fn reach_ith_root(&mut self, i: usize) {
+    fn reach_ith_root(&mut self, i: usize, first_prop: PEdge)
+    where
+        PEdge: EdgeProperty,
+    {
         // Follow the path from a visited node to the root of line i
         let (j, j_ind) = self.to_line_ind[&self.lines[i].root].into();
         let boundary_ind = &mut self.visited_boundary[j];
@@ -158,12 +170,14 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
             self.it_queue.push_back(EdgePredicate::NextRoot {
                 line_nb: i,
                 new_root: NodeLocation::Discover(j),
+                offset: first_prop.offset_id(),
             });
         } else {
             // Indicate that the root of `i` is known
             self.it_queue.push_back(EdgePredicate::NextRoot {
                 line_nb: i,
                 new_root: NodeLocation::Exists(self.u_to_symbols[&self.lines[i].root]),
+                offset: first_prop.offset_id(),
             });
         }
         while j_ind >= *boundary_ind {
@@ -202,16 +216,19 @@ impl<'a, U: Universe, PNode: Copy, PEdge: Copy> PredicatesIter<'a, U, PNode, PEd
 
             match self.status {
                 IterationStatus::Skeleton(i) => {
-                    if i > 0 {
-                        // Append predicates to reach the root of the i-th line
-                        self.reach_ith_root(i);
-                    }
+                    // Append predicates to reach the root of the i-th line
+                    self.reach_ith_root(
+                        i,
+                        self.lines[i]
+                            .edges
+                            .first()
+                            .expect("Cannot match empty line")
+                            .2,
+                    );
 
                     // Add i-th line to known nodes
                     for (ind, &(_, u, _)) in self.lines[i].edges.iter().enumerate() {
-                        if !self.to_line_ind.contains_key(&u) {
-                            self.to_line_ind.insert(u, (i, ind + 1).into());
-                        }
+                        self.to_line_ind.entry(u).or_insert_with(|| (i, ind + 1).into());
                     }
                 }
                 IterationStatus::LeftOver(i) => {
@@ -271,9 +288,9 @@ impl<'a, U, PNode, PEdge> Iterator for PredicatesIter<'a, U, PNode, PEdge>
 where
     U: Universe,
     PNode: Copy,
-    PEdge: Copy,
+    PEdge: EdgeProperty,
 {
-    type Item = EdgePredicate<PNode, PEdge>;
+    type Item = EdgePredicate<PNode, PEdge, PEdge::OffsetID>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.to_line_ind.is_empty() {
@@ -290,12 +307,12 @@ where
     }
 }
 
-fn edge_predicates<U: Universe, PNode: Copy, PEdge: Copy>(
+fn edge_predicates<U: Universe, PNode: Copy, PEdge: EdgeProperty>(
     (u, v, property): (U, U, PEdge),
     symbols: &mut HashMap<U, Symbol>,
     nodes: &HashMap<U, PNode>,
     mut new_symbols: impl Iterator<Item = Symbol>,
-) -> Vec<EdgePredicate<PNode, PEdge>> {
+) -> Vec<EdgePredicate<PNode, PEdge, PEdge::OffsetID>> {
     let mut preds = Vec::new();
 
     let u_symb = symbols[&u];
@@ -372,8 +389,14 @@ mod tests {
                     property: ()
                 },
                 EdgePredicate::NextRoot {
+                    line_nb: 0,
+                    new_root: NodeLocation::Exists(symbs[0]),
+                    offset: ()
+                },
+                EdgePredicate::NextRoot {
                     line_nb: 1,
-                    new_root: NodeLocation::Discover(0)
+                    new_root: NodeLocation::Discover(0),
+                    offset: ()
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
@@ -395,7 +418,8 @@ mod tests {
                 },
                 EdgePredicate::NextRoot {
                     line_nb: 2,
-                    new_root: NodeLocation::Discover(1)
+                    new_root: NodeLocation::Discover(1),
+                    offset: ()
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[2],
@@ -473,12 +497,19 @@ mod tests {
                     property: ()
                 },
                 EdgePredicate::NextRoot {
+                    line_nb: 0,
+                    new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
+                    offset: 0
+                },
+                EdgePredicate::NextRoot {
                     line_nb: 1,
-                    new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0))
+                    new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
+                    offset: 0
                 },
                 EdgePredicate::NextRoot {
                     line_nb: 2,
-                    new_root: NodeLocation::Discover(1)
+                    new_root: NodeLocation::Discover(1),
+                    offset: 0
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
@@ -531,8 +562,14 @@ mod tests {
                     property: ()
                 },
                 EdgePredicate::NextRoot {
+                    line_nb: 0,
+                    new_root: NodeLocation::Exists(symbs[0]),
+                    offset: 0
+                },
+                EdgePredicate::NextRoot {
                     line_nb: 1,
-                    new_root: NodeLocation::Discover(0)
+                    new_root: NodeLocation::Discover(0),
+                    offset: 0
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
@@ -585,12 +622,19 @@ mod tests {
                     property: ()
                 },
                 EdgePredicate::NextRoot {
+                    line_nb: 0,
+                    new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
+                    offset: ()
+                },
+                EdgePredicate::NextRoot {
                     line_nb: 1,
-                    new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0))
+                    new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
+                    offset: ()
                 },
                 EdgePredicate::NextRoot {
                     line_nb: 2,
-                    new_root: NodeLocation::Discover(1)
+                    new_root: NodeLocation::Discover(1),
+                    offset: ()
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],

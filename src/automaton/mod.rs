@@ -6,8 +6,8 @@ mod view;
 pub(crate) use builders::LineBuilder;
 
 use std::fmt::Debug;
-use std::hash::BuildHasherDefault;
-use std::{iter::Map, ops::RangeFrom};
+
+
 
 use derive_more::{From, Into};
 
@@ -15,7 +15,7 @@ use portgraph::dot::DotFormat;
 use portgraph::{NodeIndex, PortGraph, PortMut, PortView, Weights};
 
 use crate::predicate::{EdgePredicate, Symbol};
-use crate::{BiMap, HashSet, PatternID, Universe};
+use crate::{BiMap, EdgeProperty, HashSet, PatternID, Universe};
 
 /// A state ID in a scope automaton
 #[derive(Clone, Copy, PartialEq, Eq, From, Into, Hash, Debug)]
@@ -50,9 +50,34 @@ struct State {
 /// Leaving a state, we need to satisfy the predicate P
 #[derive(Clone, Debug, Copy, From, Into)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct Transition<PNode, PEdge> {
-    predicate: EdgePredicate<PNode, PEdge>,
+struct Transition<PNode, PEdge, OffsetID> {
+    predicate: EdgePredicate<PNode, PEdge, OffsetID>,
 }
+
+// #[cfg(feature = "serde")]
+// impl<PNode, PEdge> serde::Serialize for Transition<PNode, PEdge>
+// where
+//     PEdge: EdgeProperty + Debug,
+//     PNode: Debug,
+// {
+//     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+//         serializer.serialize_str(&format!("{:?}", self.predicate))
+//     }
+// }
+
+// #[cfg(feature = "serde")]
+// impl<'g, PNode, PEdge> serde::Deserialize<'g> for Transition<PNode, PEdge>
+// where
+//     PEdge: EdgeProperty + Debug,
+//     PNode: Debug,
+// {
+//     fn deserialize<D: serde::Deserializer<'g>>(deserializer: D) -> Result<Self, D::Error> {
+//         let s = String::deserialize(deserializer)?;
+//         Ok(Self {
+//             predicate: EdgePredicate::from_str(&s).map_err(serde::de::Error::custom)?,
+//         })
+//     }
+// }
 
 /// An automaton-like datastructure that follows transitions based on input and state
 ///
@@ -63,13 +88,13 @@ struct Transition<PNode, PEdge> {
 /// - SU: Functions that update scope at incoming ports
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub(crate) struct ScopeAutomaton<PNode, PEdge> {
+pub(crate) struct ScopeAutomaton<PNode, PEdge, OffsetID = <PEdge as EdgeProperty>::OffsetID> {
     graph: PortGraph,
-    weights: Weights<Option<State>, Option<Transition<PNode, PEdge>>>,
+    weights: Weights<Option<State>, Option<Transition<PNode, PEdge, OffsetID>>>,
     root: StateID,
 }
 
-impl<PNode: Copy, PEdge: Copy> ScopeAutomaton<PNode, PEdge> {
+impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
     /// A new scope automaton
     ///
     /// ## Parameters
@@ -149,7 +174,7 @@ struct AssignMap<U: Universe> {
 
 impl<U: Universe> AssignMap<U> {
     fn new(root_state: StateID, root: U) -> Self {
-        let mut map = BiMap::from_iter([(Symbol::root(), root)]);
+        let map = BiMap::from_iter([(Symbol::root(), root)]);
         Self {
             map,
             state_id: root_state,

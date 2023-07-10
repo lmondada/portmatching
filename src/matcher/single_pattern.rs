@@ -4,7 +4,7 @@
 //! the matching process for each pattern separately.
 use std::{borrow::Borrow, hash::Hash};
 
-use bimap::{BiBTreeMap, BiMap};
+use bimap::{BiMap};
 use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView};
 
 use crate::{
@@ -32,7 +32,7 @@ where
         self.find_rooted_match(graph, root, validate_unweighted_edge)
     }
 
-    fn get_pattern(&self, id: crate::PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
+    fn get_pattern(&self, _id: crate::PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
         Some(&self.pattern)
     }
 }
@@ -184,13 +184,13 @@ where
 mod tests {
     use itertools::Itertools;
     use portgraph::{
-        proptest::gen_portgraph, LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView,
+        LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView,
     };
-    use proptest::prelude::*;
+    
 
     use crate::{
         matcher::PortMatcher,
-        utils::test::{gen_portgraph_connected, graph},
+        utils::test::{graph},
         Pattern,
     };
 
@@ -200,7 +200,7 @@ mod tests {
     fn single_pattern_match_simple() {
         let g = graph();
         let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p.clone());
+        let matcher = SinglePatternMatcher::from_pattern(p);
 
         let (n0, n1, n3, n4) = (
             NodeIndex::new(0),

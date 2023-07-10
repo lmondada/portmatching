@@ -1,14 +1,14 @@
 use portgraph::{LinkMut, PortMut, PortView};
 
-use crate::{predicate::EdgePredicate, PatternID};
+use crate::{predicate::EdgePredicate, EdgeProperty, PatternID};
 
-use super::{ScopeAutomaton, State, StateID, Symbol, Transition};
+use super::{ScopeAutomaton, State, StateID, Transition};
 
-impl<PNode: Copy, PEdge: Copy> ScopeAutomaton<PNode, PEdge> {
+impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
     pub(super) fn set_children(
         &mut self,
         state: StateID,
-        preds: &[EdgePredicate<PNode, PEdge>],
+        preds: &[EdgePredicate<PNode, PEdge, PEdge::OffsetID>],
         next_states: &[Option<StateID>],
     ) -> Vec<Option<StateID>> {
         if self.graph.num_outputs(state.0) != 0 {
@@ -30,7 +30,7 @@ impl<PNode: Copy, PEdge: Copy> ScopeAutomaton<PNode, PEdge> {
         &mut self,
         parent: StateID,
         offset: usize,
-        pedge: Transition<PNode, PEdge>,
+        pedge: Transition<PNode, PEdge, PEdge::OffsetID>,
         new_state: Option<StateID>,
     ) -> Option<StateID> {
         let mut added_state = false;
@@ -60,7 +60,7 @@ impl<PNode: Copy, PEdge: Copy> ScopeAutomaton<PNode, PEdge> {
             scope: new_scope,
             deterministic: true,
         });
-        self.weights[self.graph.output(parent.0, offset).unwrap()] = Some(pedge.into());
+        self.weights[self.graph.output(parent.0, offset).unwrap()] = Some(pedge);
         added_state.then_some(new_state)
     }
 

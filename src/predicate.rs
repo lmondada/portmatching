@@ -6,7 +6,7 @@ use std::{
     ops::RangeFrom,
 };
 
-use crate::{patterns::IterationStatus, BiMap, Universe};
+use crate::{patterns::IterationStatus, BiMap, EdgeProperty, Universe};
 
 pub(crate) type SymbolsIter =
     Map<Zip<Repeat<IterationStatus>, RangeFrom<usize>>, fn((IterationStatus, usize)) -> Symbol>;
@@ -36,7 +36,7 @@ impl Symbol {
 /// Predicate to control allowable transitions
 #[derive(PartialEq, Eq, Copy, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub(crate) enum EdgePredicate<PNode, PEdge> {
+pub(crate) enum EdgePredicate<PNode, PEdge, OffsetID> {
     NodeProperty {
         node: Symbol,
         property: PNode,
@@ -55,6 +55,7 @@ pub(crate) enum EdgePredicate<PNode, PEdge> {
     NextRoot {
         line_nb: usize,
         new_root: NodeLocation,
+        offset: OffsetID,
     },
     // Always true (non-deterministic)
     True,
@@ -77,7 +78,7 @@ pub(crate) enum PredicateSatisfied<U> {
     No,
 }
 
-impl<PNode: Copy, PEdge: Copy> EdgePredicate<PNode, PEdge> {
+impl<PNode: Copy, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge::OffsetID> {
     pub(crate) fn is_satisfied<'s, U: Universe>(
         &self,
         ass: &BiMap<Symbol, U>,
@@ -129,8 +130,20 @@ impl<PNode: Copy, PEdge: Copy> EdgePredicate<PNode, PEdge> {
         }
     }
 
-    pub(crate) fn transition_type(&self) -> PredicateCompatibility {
+    pub(crate) fn transition_type(&self) -> PredicateCompatibility
+    where
+        PEdge: EdgeProperty,
+    {
         CompatibilityType::from_predicate(self).transition_type()
+    }
+
+    pub(crate) fn is_compatible(&self, other: &Self) -> bool
+    where
+        PEdge: EdgeProperty,
+    {
+        let c1 = CompatibilityType::from_predicate(self);
+        let c2 = CompatibilityType::from_predicate(other);
+        c1.is_compatible(c2)
     }
 }
 
@@ -146,39 +159,46 @@ pub(crate) enum PredicateCompatibility {
 /// Any predicate belongs to one of the following equivalence classes.
 /// All predicates within a class are compatible with eachother.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum CompatibilityType {
+enum CompatibilityType<OffsetID> {
     NonDetType,
-    LinkType(Symbol),
+    LinkType(Symbol, OffsetID),
     WeightType(Symbol),
     FailType,
 }
 
-impl CompatibilityType {
+impl<OffsetID> CompatibilityType<OffsetID> {
     fn transition_type(&self) -> PredicateCompatibility {
         match self {
             Self::NonDetType => PredicateCompatibility::NonDeterministic,
-            Self::LinkType(_) => PredicateCompatibility::Deterministic,
+            Self::LinkType(_, _) => PredicateCompatibility::Deterministic,
             Self::WeightType(_) => PredicateCompatibility::Deterministic,
             Self::FailType => PredicateCompatibility::Deterministic,
         }
     }
 
-    fn from_predicate<PNode, PEdge>(pred: &EdgePredicate<PNode, PEdge>) -> Self {
+    fn from_predicate<PNode, PEdge>(pred: &EdgePredicate<PNode, PEdge, PEdge::OffsetID>) -> Self
+    where
+        PEdge: EdgeProperty<OffsetID = OffsetID>,
+    {
         match pred {
             EdgePredicate::True | EdgePredicate::NextRoot { .. } => Self::NonDetType,
             EdgePredicate::Fail => Self::FailType,
-            EdgePredicate::LinkNewNode { node, .. } | EdgePredicate::LinkKnownNode { node, .. } => {
-                Self::LinkType(*node)
+            EdgePredicate::LinkNewNode { node, property, .. }
+            | EdgePredicate::LinkKnownNode { node, property, .. } => {
+                Self::LinkType(*node, property.offset_id())
             }
             EdgePredicate::NodeProperty { node, .. } => Self::WeightType(*node),
         }
     }
 
-    fn is_compatible(&self, other: CompatibilityType) -> bool {
-        if other == Self::FailType && matches!(self, Self::LinkType(_) | Self::WeightType(_)) {
+    fn is_compatible(&self, other: CompatibilityType<OffsetID>) -> bool
+    where
+        OffsetID: Eq,
+    {
+        if other == Self::FailType && matches!(self, Self::LinkType(_, _) | Self::WeightType(_)) {
             true
         } else if self == &Self::FailType
-            && matches!(other, Self::LinkType(_) | Self::WeightType(_))
+            && matches!(other, Self::LinkType(_, _) | Self::WeightType(_))
         {
             true
         } else {
@@ -187,10 +207,14 @@ impl CompatibilityType {
     }
 }
 
-pub(crate) fn are_compatible_predicates<'a, PNode: 'a, PEdge: 'a>(
-    preds: impl IntoIterator<Item = &'a EdgePredicate<PNode, PEdge>>,
-) -> PredicateCompatibility {
-    let mut preds = preds.into_iter().map(CompatibilityType::from_predicate);
+pub(crate) fn are_compatible_predicates<'a, PNode, PEdge>(
+    preds: impl IntoIterator<Item = &'a EdgePredicate<PNode, PEdge, PEdge::OffsetID>>,
+) -> PredicateCompatibility
+where
+    PNode: Copy + 'a,
+    PEdge: EdgeProperty + 'a,
+{
+    let mut preds = preds.into_iter();
     let Some(first) = preds.next() else {
         return PredicateCompatibility::Deterministic;
     };

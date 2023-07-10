@@ -1,20 +1,24 @@
-use std::{borrow::Borrow, fmt, hash::Hash};
+use std::{borrow::Borrow, fmt};
 
 use itertools::Itertools;
-use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView, SecondaryMap};
+use portgraph::{LinkView, NodeIndex, PortGraph, PortView, SecondaryMap};
 
 use crate::{
     automaton::{LineBuilder, ScopeAutomaton},
     matcher::{Match, PatternMatch},
     patterns::{compatible_offsets, UnweightedEdge},
-    NodeProperty, Pattern, PortMatcher, Universe,
+    EdgeProperty, NodeProperty, Pattern, PortMatcher, Universe,
 };
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ManyMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
-    automaton: ScopeAutomaton<PNode, PEdge>,
+pub struct ManyMatcher<U, PNode, PEdge, OffsetID = <PEdge as EdgeProperty>::OffsetID>
+where
+    PEdge: EdgeProperty,
+    U: Universe,
+{
+    automaton: ScopeAutomaton<PNode, PEdge, OffsetID>,
     patterns: Vec<Pattern<U, PNode, PEdge>>,
 }
 
@@ -37,7 +41,7 @@ impl<U: Universe, PNode: NodeProperty> ManyMatcher<U, PNode, UnweightedEdge> {
     }
 }
 
-impl<U: Universe, PNode: Copy + fmt::Debug, PEdge: Copy + Eq + Hash + fmt::Debug>
+impl<U: Universe, PNode: Copy + fmt::Debug, PEdge: EdgeProperty + fmt::Debug>
     ManyMatcher<U, PNode, PEdge>
 {
     /// A dotstring representation of the trie.
@@ -129,8 +133,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    // use glob::glob;
-    // use std::fs;
+    
+    
 
     use std::collections::BTreeSet;
 
@@ -154,7 +158,7 @@ mod tests {
         let mut g = PortGraph::new();
         g.add_node(0, 1);
         let p = Pattern::from_portgraph(&g);
-        let matcher = ManyMatcher::from_patterns(vec![p.clone()]);
+        let matcher = ManyMatcher::from_patterns(vec![p]);
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
         g.link_ports(
@@ -182,7 +186,7 @@ mod tests {
         )
         .unwrap();
         let p = Pattern::from_portgraph(&g);
-        let matcher = ManyMatcher::from_patterns(vec![p.clone()]);
+        let matcher = ManyMatcher::from_patterns(vec![p]);
 
         assert_eq!(
             matcher.find_matches(&g),
@@ -224,7 +228,7 @@ mod tests {
         link(&mut g, (n0, 1), (n1, 1));
         link(&mut g, (n2, 0), (n0, 1));
         let p = Pattern::from_portgraph(&g);
-        let matcher: ManyMatcher<_, _, _> = vec![p].into();
+        let _matcher: ManyMatcher<_, _, _> = vec![p].into();
     }
 
     fn link(p: &mut PortGraph, (n1, p1): (NodeIndex, usize), (n2, p2): (NodeIndex, usize)) {
@@ -358,7 +362,7 @@ mod tests {
 
         let p1 = Pattern::from_portgraph(&p1);
         let p2 = Pattern::from_portgraph(&p2);
-        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+        let _matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
     }
 
     // TODO: implement weighted matching
@@ -404,7 +408,7 @@ mod tests {
         fn single_graph_proptest(pattern in gen_portgraph_connected(10, 4, 20), g in gen_portgraph(100, 4, 200)) {
             let pattern = Pattern::from_portgraph(&pattern);
             let matcher = ManyMatcher::from_patterns(vec![pattern.clone()]);
-            let single_matcher = SinglePatternMatcher::from_pattern(pattern.clone());
+            let single_matcher = SinglePatternMatcher::from_pattern(pattern);
             let many_matches = matcher.find_matches(&g);
             let single_matches: Vec<_> = single_matcher
                 .find_matches(&g);
@@ -425,7 +429,7 @@ mod tests {
                 .collect_vec();
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
             let single_matches: HashSet<_>  = naive.find_matches(&g).into_iter().collect();
-            let matcher = ManyMatcher::from_patterns(patterns.clone());
+            let matcher = ManyMatcher::from_patterns(patterns);
             let many_matches: HashSet<_> = matcher.find_matches(&g).into_iter().collect();
             prop_assert_eq!(many_matches, single_matches);
         }
@@ -446,7 +450,7 @@ mod tests {
             // fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
             let patterns = pattern_graphs
                 .iter()
-                .map(|p| Pattern::from_portgraph(p))
+                .map(Pattern::from_portgraph)
                 .collect_vec();
             // for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
             //     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
@@ -454,7 +458,7 @@ mod tests {
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
             let single_matches: BTreeSet<_> = naive.find_matches(&g).into_iter().collect();
             // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
-            let matcher = ManyMatcher::from_patterns(patterns.clone());
+            let matcher = ManyMatcher::from_patterns(patterns);
             let many_matches: BTreeSet<_> = matcher.find_matches(&g).into_iter().collect();
             prop_assert_eq!(many_matches, single_matches);
         }

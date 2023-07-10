@@ -16,23 +16,48 @@ pub use patterns::{Pattern, UnweightedPattern, WeightedPattern};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 // use symbol_map::SymbolMap;
 
-use std::hash::{BuildHasherDefault, Hash};
+use std::{
+    fmt::Debug,
+    hash::{BuildHasherDefault, Hash},
+};
 
 pub trait Universe: Copy + Eq + Hash + Ord {}
 
 impl<U: Copy + Eq + Hash + Ord> Universe for U {}
 
-pub trait EdgeProperty: Copy + Ord + Hash {
+pub trait EdgeProperty: Copy + Ord + Hash + std::fmt::Debug {
+    type OffsetID: Eq + Copy + Debug;
+
     fn reverse(&self) -> Option<Self>;
+
+    fn offset_id(&self) -> Self::OffsetID;
 }
 
-pub trait NodeProperty: Copy + Hash + Ord {}
+pub trait NodeProperty: Copy + Hash + Ord + std::fmt::Debug {}
 
-impl<U: Copy + Hash + Ord> NodeProperty for U {}
+impl<U: Copy + Hash + Ord + std::fmt::Debug> NodeProperty for U {}
 
-impl<A: Copy + Ord + Hash> EdgeProperty for (A, A) {
+impl<A: Copy + Ord + Hash + Debug> EdgeProperty for (A, A) {
+    type OffsetID = A;
+
     fn reverse(&self) -> Option<Self> {
         (self.1, self.0).into()
+    }
+
+    fn offset_id(&self) -> Self::OffsetID {
+        self.0
+    }
+}
+
+impl EdgeProperty for () {
+    type OffsetID = ();
+
+    fn reverse(&self) -> Option<Self> {
+        ().into()
+    }
+
+    fn offset_id(&self) -> Self::OffsetID {
+        
     }
 }
 
