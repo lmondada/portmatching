@@ -136,7 +136,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
             // make source non-deterministic if necessary
             match are_compatible_predicates(&preds) {
                 PredicateCompatibility::Deterministic => {}
-                PredicateCompatibility::NonDeterministic => matcher.to_non_det(source),
+                PredicateCompatibility::NonDeterministic => matcher.make_non_det(source),
                 PredicateCompatibility::Incompatible => {
                     panic!("trying to insert non-compatible transitions");
                 }
@@ -335,10 +335,6 @@ struct TransitionInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
 impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PatternInConstruction<'a, U, PNode, PEdge> {
     fn new(edges: PredicatesIter<'a, U, PNode, PEdge>, pattern_id: usize) -> Self {
         Self { edges, pattern_id }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.edges.is_empty()
     }
 }
 

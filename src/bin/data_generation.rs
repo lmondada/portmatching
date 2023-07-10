@@ -72,7 +72,7 @@ fn main() {
         for q in 2..=5 {
             println!("Precompiling for {q} qubits");
             let pattern_path = format!("{dir}/small_circuits/{q}_qubits/pattern_*.json");
-            let (_patterns, weighted_patterns): (Vec<_>, Vec<_>) = glob::glob(&pattern_path)
+            let (patterns, weighted_patterns): (Vec<_>, Vec<_>) = glob::glob(&pattern_path)
                 .expect("cannot read small circuits directory")
                 .map(|p| {
                     let g: PortGraph = serde_json::from_reader(
@@ -92,7 +92,7 @@ fn main() {
                 .map(|s| s.parse::<usize>().unwrap())
                 .collect::<Vec<_>>();
             let dir = format!("{dir}/{q}_qubits/");
-            // precompile(&patterns, &sizes, &dir);
+            precompile(&patterns, &sizes, &dir);
             precompile_weighted(&weighted_patterns, &sizes, &dir);
         }
     } else {

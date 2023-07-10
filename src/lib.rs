@@ -1,4 +1,5 @@
-#![warn(missing_docs)]
+// TODO: reactivate this
+// #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 
 pub mod automaton;
@@ -56,9 +57,7 @@ impl EdgeProperty for () {
         ().into()
     }
 
-    fn offset_id(&self) -> Self::OffsetID {
-        
-    }
+    fn offset_id(&self) -> Self::OffsetID {}
 }
 
 type BiMap<S, U> =

@@ -21,7 +21,7 @@ impl<U, PEdge> Line<U, PEdge> {
 
 /// A pattern to match, stored line by line from the root
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(crate) struct LinePattern<U: Universe, PNode, PEdge> {
+pub struct LinePattern<U: Universe, PNode, PEdge> {
     pub(crate) nodes: HashMap<U, PNode>,
     pub(crate) lines: Vec<Line<U, PEdge>>,
 }
@@ -53,18 +53,6 @@ impl<U: Universe, PNode: Copy, PEdge: Copy> LinePattern<U, PNode, PEdge> {
 
     fn n_lines(&self) -> usize {
         self.lines.len()
-    }
-
-    fn n_edges(&self) -> usize {
-        self.lines.iter().map(|l| l.edges.len()).sum()
-    }
-
-    fn n_nodes(&self) -> usize {
-        self.nodes.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.lines.is_empty()
     }
 }
 
@@ -228,7 +216,9 @@ impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PN
 
                     // Add i-th line to known nodes
                     for (ind, &(_, u, _)) in self.lines[i].edges.iter().enumerate() {
-                        self.to_line_ind.entry(u).or_insert_with(|| (i, ind + 1).into());
+                        self.to_line_ind
+                            .entry(u)
+                            .or_insert_with(|| (i, ind + 1).into());
                     }
                 }
                 IterationStatus::LeftOver(i) => {
@@ -237,10 +227,6 @@ impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PN
                 IterationStatus::Finished => break,
             }
         }
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.lines.is_empty()
     }
 }
 
@@ -273,13 +259,6 @@ impl IterationStatus {
                 }
             }
             Self::Finished => Self::Finished,
-        }
-    }
-
-    pub(crate) fn leftover_index(&self) -> Option<usize> {
-        match self {
-            Self::LeftOver(i) => Some(*i),
-            _ => None,
         }
     }
 }
