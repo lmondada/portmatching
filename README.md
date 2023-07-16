@@ -49,4 +49,4 @@ Distributed under the MIT License. See [LICENSE][] for more information.
 
   [build_status]: https://github.com/lmondada/portmatching/workflows/Continuous%20integration/badge.svg?branch=main
   [LICENSE]: LICENCE
-  [msrv]: https://img.shields.io/badge/rust-1.69.0%2B-blue.svg?maxAge=3600
+  [msrv]: https://img.shields.io/badge/rust-1.70.0%2B-blue.svg?maxAge=3600

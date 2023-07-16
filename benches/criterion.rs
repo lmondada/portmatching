@@ -129,7 +129,7 @@ fn bench_trie_construction<U: Universe, M: PortMatcher<PortGraph, U>>(
 }
 
 fn perform_benches(c: &mut Criterion) {
-    let patterns = glob::glob("datasets/small_circuits/*.json")
+    let patterns = glob::glob("datasets/small_circuits/3_qubits/*.json")
         .expect("cannot read small circuits directory")
         .map(|p| {
             let g = serde_json::from_reader(
@@ -141,7 +141,7 @@ fn perform_benches(c: &mut Criterion) {
         })
         .collect_vec();
     // TODO: use more than one graph in benchmark
-    let graph = glob::glob("datasets/large_circuits/*.json")
+    let graph = glob::glob("datasets/large_circuits/3_qubits/*.json")
         .expect("cannot read large circuits directory")
         .map(|p| {
             serde_json::from_reader(
@@ -198,7 +198,7 @@ fn perform_benches(c: &mut Criterion) {
             &format!("XXL weighted ({q} qubits)"),
             &mut group,
             "balanced",
-            (1000..=10000).step_by(1000),
+            (500..=10000).step_by(500),
             q,
             &graph,
         );
