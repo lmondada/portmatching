@@ -29,21 +29,26 @@ the weights for each node `n` are chosen at random
 in the set `{(d, 0), (d, 1), (d, 2)}`, where `d` is the degree (arity) of
 the node `n`.
 
-#### Comparison to baseline
+Note: weighted pattern matching is much easier than unweighted, especially
+as weights fix the arity of the nodes.
+In a sense, unweighted pattern matching corresponds to the worst case.
+Optimisations to the automaton could be made to significantly speed up
+unweighted matching, but this has not been the focus.
+
+#### Comparison to baseline [unweighted]
 Pattern matching times for 0 ... 1000 patterns, `NaiveManyMatcher` vs automaton-based `ManyMatcher`.
 The plot measures matching time (ms) as a function of the number of patterns.
 
-
 ![comparison with baseline](benches/many_matchers.svg)
 
-#### Pattern matching scaling (on-line)
+#### Pattern matching scaling (on-line) [weighted]
 Matching time (ms) as a function of the number of patterns for `ManyMatcher`
 only, up to 10k patterns.
 The patterns are categorised by the number of qubits.
 
 ![pattern matching as a fn of patterns](benches/pattern_scaling.svg)
 
-#### Automaton construction time (off-line)
+#### Automaton construction time (off-line) [unweighted]
 On top of the running time plotted above, there is also a one-time cost to
 construct the automaton from the set of patterns.
 This is plotted here, again as a function of the number of patterns.
