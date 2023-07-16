@@ -24,17 +24,15 @@ matching time. However, the size (and construction cost) of the trie will scale 
 ## Example
 
 ```
-use portgraph::PortGraph;
+use portgraph::{PortGraph, PortMut};
 use portmatching::*;
-# use portmatching::pattern::InvalidPattern;
 
 let (mut g1, mut g2) = (PortGraph::new(), PortGraph::new());
 g1.add_node(0, 0);
 g2.add_node(1, 1);
-let (p1, p2) = (UnweightedPattern::from_graph(g1.clone())?, UnweightedPattern::from_graph(g2)?);
-let trie = TrieMatcher::from_patterns([p1, p2]);
+let (p1, p2) = (UnweightedPattern::from_portgraph(&g1), UnweightedPattern::from_portgraph(&g2));
+let trie = ManyMatcher::from_patterns(vec![p1, p2]);
 trie.find_matches(&g1);
-# Ok::<(), InvalidPattern>(())
 ```
 
 ## Features
@@ -51,4 +49,4 @@ Distributed under the MIT License. See [LICENSE][] for more information.
 
   [build_status]: https://github.com/lmondada/portmatching/workflows/Continuous%20integration/badge.svg?branch=main
   [LICENSE]: LICENCE
-  [msrv]: https://img.shields.io/badge/rust-1.69.0%2B-blue.svg?maxAge=3600
+  [msrv]: https://img.shields.io/badge/rust-1.70.0%2B-blue.svg?maxAge=3600

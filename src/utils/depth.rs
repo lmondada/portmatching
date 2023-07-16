@@ -1,4 +1,4 @@
-use portgraph::{NodeIndex, PortGraph};
+use portgraph::{LinkView, NodeIndex, PortGraph, PortMut, PortView};
 
 use super::pre_order::{Direction, PreOrder};
 
@@ -7,9 +7,7 @@ fn undirected_depths(graph: &PortGraph, start: NodeIndex) -> Vec<u32> {
     let mut depths = vec![u32::MAX; graph.node_capacity()];
     depths[start.index()] = 1;
     for node in preorder {
-        let neighs = graph
-            .all_links(node)
-            .filter_map(|p| graph.port_node(p.as_ref().copied()?));
+        let neighs = graph.all_neighbours(node);
         let min_depth = neighs
             .map(|neigh| depths[neigh.index()])
             .min()
@@ -34,13 +32,14 @@ pub fn is_connected(graph: &PortGraph) -> bool {
         == graph.node_count()
 }
 
+// TODO: the following might be useful in the near future
 #[derive(Debug, PartialEq, Eq)]
 pub enum NoCentreError {
-    DisconnectedGraph,
-    EmptyGraph,
+    _DisconnectedGraph,
+    _EmptyGraph,
 }
 
-pub fn centre(graph: &PortGraph) -> Result<NodeIndex, NoCentreError> {
+pub fn _centre(graph: &PortGraph) -> Result<NodeIndex, NoCentreError> {
     let mut new2old = vec![NodeIndex::new(4); graph.node_capacity()];
     let rekey = |old: NodeIndex, new: NodeIndex| {
         new2old[new.index()] = old;
@@ -49,9 +48,9 @@ pub fn centre(graph: &PortGraph) -> Result<NodeIndex, NoCentreError> {
     graph.compact_nodes(rekey);
 
     if graph.node_count() == 0 {
-        return Err(NoCentreError::EmptyGraph);
+        return Err(NoCentreError::_EmptyGraph);
     } else if !is_connected(&graph) {
-        return Err(NoCentreError::DisconnectedGraph);
+        return Err(NoCentreError::_DisconnectedGraph);
     }
 
     let centre = graph
@@ -66,8 +65,10 @@ pub fn centre(graph: &PortGraph) -> Result<NodeIndex, NoCentreError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::depth::{centre, undirected_depths, NoCentreError};
-    use crate::utils::test_utils::*;
+    use portgraph::{PortMut, PortView};
+
+    use crate::utils::depth::{_centre, undirected_depths, NoCentreError};
+    use crate::utils::test::*;
 
     #[test]
     fn depths() {
@@ -82,13 +83,13 @@ mod tests {
     fn test_centre() {
         let g = graph();
         let v2 = g.nodes_iter().nth(2).unwrap();
-        assert_eq!(centre(&g).unwrap(), v2);
+        assert_eq!(_centre(&g).unwrap(), v2);
     }
 
     #[test]
     fn test_centre_disconnected() {
         let mut g = graph();
         g.add_node(2, 2);
-        assert_eq!(centre(&g).unwrap_err(), NoCentreError::DisconnectedGraph);
+        assert_eq!(_centre(&g).unwrap_err(), NoCentreError::_DisconnectedGraph);
     }
 }
