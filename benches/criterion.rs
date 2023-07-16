@@ -141,7 +141,7 @@ fn perform_benches(c: &mut Criterion) {
         })
         .collect_vec();
     // TODO: use more than one graph in benchmark
-    let graph = glob::glob("datasets/large_circuits/3_qubits/*.json")
+    let graph = glob::glob("datasets/large_circuits/*.json")
         .expect("cannot read large circuits directory")
         .map(|p| {
             serde_json::from_reader(
@@ -155,7 +155,7 @@ fn perform_benches(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("Many Patterns Matching");
     bench_matching(
-        "Naive matching",
+        "NaiveManyMatcher (3 qubits)",
         &mut group,
         &patterns,
         (0..=300).step_by(100),
@@ -163,7 +163,7 @@ fn perform_benches(c: &mut Criterion) {
         NaiveManyMatcher::from_patterns,
     );
     bench_matching(
-        "Balanced Graph Trie",
+        "ManyMatcher (3 qubits)",
         &mut group,
         &patterns,
         (0..=1000).step_by(100),
@@ -174,17 +174,17 @@ fn perform_benches(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("Trie Construction");
     bench_trie_construction(
-        "Balanced Graph Trie",
+        "ManyMatcher (3 qubits)",
         &mut group,
         &patterns,
-        (0..=300).step_by(30),
+        (0..=1000).step_by(100),
         ManyMatcher::from_patterns,
     );
     group.finish();
 
     let mut group = c.benchmark_group("Many Patterns Matching XXL");
     bench_matching_xxl(
-        "Balanced Graph Trie",
+        "ManyMatcher (3 qubits)",
         &mut group,
         "balanced",
         (500..=10000).step_by(500),
@@ -195,7 +195,7 @@ fn perform_benches(c: &mut Criterion) {
     let mut group = c.benchmark_group("Many Patterns Matching XXL weighted");
     for q in 2..=5 {
         bench_matching_xxl_weighted(
-            &format!("XXL weighted ({q} qubits)"),
+            &format!("Weighted ManyMatcher ({q} qubits)"),
             &mut group,
             "balanced",
             (500..=10000).step_by(500),

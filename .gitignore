@@ -3,4 +3,3 @@
 /datasets
 /examples/**/*.bin
 /flamegraph.svg
-**/*.svg
