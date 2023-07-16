@@ -20,18 +20,26 @@ the [`SinglePatternMatcher`](crate::SinglePatternMatcher) to find matches
 of any of `k` patterns in time `O(kmn)`.
 
 ## Benchmarks
+For all benchmarks, inputs and patterns are random graphs with 
+quantum circuit-like structure.
+Inputs have up to 2000 nodes (gates) and 400 qubits,
+patterns have up to 30 nodes and between 2 and 5 qubits.
+For pattern matching on weighted graphs,
+the weights for each node `n` are chosen at random
+in the set `{(d, 0), (d, 1), (d, 2)}`, where `d` is the degree (arity) of
+the node `n`.
 
 #### Comparison to baseline
 Pattern matching times for 0 ... 1000 patterns, `NaiveManyMatcher` vs automaton-based `ManyMatcher`.
+The plot measures matching time (ms) as a function of the number of patterns.
+
 
 ![comparison with baseline](benches/many_matchers.svg)
 
 #### Pattern matching scaling (on-line)
-This plot measures the time (ms) it takes to perform matches for `k` patterns,
-as a function of `k`.
-Patterns and input are random graphs that are quantum circuit-like.
-Weights are chosen at random.
-The input graph has 2000 nodes, patterns have between 2 and 5 qubits and up to 30 nodes.
+Matching time (ms) as a function of the number of patterns for `ManyMatcher`
+only, up to 10k patterns.
+The patterns are categorised by the number of qubits.
 
 ![pattern matching as a fn of patterns](benches/pattern_scaling.svg)
 
