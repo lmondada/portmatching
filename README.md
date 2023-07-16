@@ -10,16 +10,37 @@ of many patterns. Patterns are preprocessed to make matching faster and
 compiled into a graph trie data structure similar to the finite automata
 used for string matching and regular expressions.
 
-The crate exports several [`Matcher`](crate::Matcher) objects that can be used for matching. In order of complexity:
--   [`SinglePatternMatcher`](crate::SinglePatternMatcher): Only supports matching a single pattern at the time, corresponds as is typically done
--   [`NaiveManyMatcher`](crate::NaiveManyMatcher): Obtained by combining multiple
-[`SinglePatternMatcher`](crate::SinglePatternMatcher) together, matching one pattern at at time. This is the baseline for benchmarking
--   [`NonDetTrieMatcher`](crate::NonDetTrieMatcher): A naive matcher similar to [`NaiveManyMatcher`](crate::NaiveManyMatcher) but stored as a graph trie
--   [`DetTrieMatcher`](crate::DetTrieMatcher): The "optimal" graph trie, in the sense
-that a minimum number of states will be traversed in the finite automaton at pattern
-matching time. However, the size (and construction cost) of the trie will scale badly.
--   [`BalancedTrieMatcher`](crate::BalancedTrieMatcher): A compromise between
-[`NonDetTrieMatcher`](crate::NonDetTrieMatcher) and [`DetTrieMatcher`](crate::DetTrieMatcher) that is expected to combine the benefits of the two strategies, especially in the case of circuit-like graphs.
+The crate exports several [`Matcher`](crate::Matcher) instances that can be used for pattern matching.
+The principal object of interest in this crate is the [`ManyMatcher`](crate::ManyMatcher) object. 
+The other [`Matcher`](crate::Matcher)s serve as baselines for benchmarking purposes.
+[`SinglePatternMatcher`](crate::SinglePatternMatcher) matches a single pattern
+in time `O(nm)` (size of the input times size of the pattern).
+The [`NaiveManyMatcher`](crate::NaiveManyMatcher) uses `k` instances of
+the [`SinglePatternMatcher`](crate::SinglePatternMatcher) to find matches
+of any of `k` patterns in time `O(kmn)`.
+
+## Benchmarks
+
+#### Comparison to baseline
+Pattern matching times for 0 ... 1000 patterns, `NaiveManyMatcher` vs automaton-based `ManyMatcher`.
+
+![comparison with baseline](benches/many_matchers.svg)
+
+#### Pattern matching scaling (on-line)
+This plot measures the time (ms) it takes to perform matches for `k` patterns,
+as a function of `k`.
+Patterns and input are random graphs that are quantum circuit-like.
+Weights are chosen at random.
+The input graph has 2000 nodes, patterns have between 2 and 5 qubits and up to 30 nodes.
+
+![pattern matching as a fn of patterns](benches/pattern_scaling.svg)
+
+#### Automaton construction time (off-line)
+On top of the running time plotted above, there is also a one-time cost to
+construct the automaton from the set of patterns.
+This is plotted here, again as a function of the number of patterns.
+
+![trie construction times](benches/trie_construction.svg)
 
 ## Example
 
@@ -37,11 +58,10 @@ trie.find_matches(&g1);
 
 ## Features
 
-Note: none of these features currently offer useful features to the end user of
-the crate. They are useful for testing and benchmarking.
+-   `serde`: Enable serialization and deserialization via serde.
+-   `datagen`: Necessary for the [`data_generation`](src/bin/data_generation.rs) binary, for benchmarking. Currently not useful to the end user of
+the crate.
 
--   `serde`: Enable serialization and deserialization via serde. Currently WIP.
--   `datagen`: Necessary for the [`data_generation`](src/bin/data_generation.rs) binary.
 
 ## License
 
