@@ -106,24 +106,33 @@ fn bench_matching_xxl_weighted(
     }
 }
 
-fn bench_trie_construction<U: Universe, M: PortMatcher<PortGraph, U>>(
+fn bench_trie_construction<
+    U: Universe,
+    M: PortMatcher<PortGraph, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
+>(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
-    patterns: &[Pattern<NodeIndex, M::PNode, M::PEdge>],
     sizes: impl Iterator<Item = usize>,
     mut get_matcher: impl FnMut(Vec<Pattern<NodeIndex, M::PNode, M::PEdge>>) -> M,
-) where
-    M::PNode: Copy,
-    M::PEdge: Copy,
-{
+) {
+    let patterns = glob::glob("datasets/xxl/small_circuits/3_qubits/*.json")
+        .expect("cannot read small circuits directory")
+        .map(|p| {
+            let g = serde_json::from_reader(
+                File::open(p.as_ref().expect("path does not exist?"))
+                    .expect("Could not open small circuit"),
+            )
+            .expect("could not serialize");
+            Pattern::from_portgraph(&g)
+        })
+        .collect_vec();
+
     group.sample_size(10);
     for n in sizes {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
             let patterns = Vec::from_iter(patterns[0..n].iter().cloned());
             b.iter(|| criterion::black_box(get_matcher(patterns.clone())));
-            // let matcher = get_matcher(patterns);
-            // b.iter(|| matcher.find_matches(graph));
         });
     }
 }
@@ -176,8 +185,7 @@ fn perform_benches(c: &mut Criterion) {
     bench_trie_construction(
         "ManyMatcher (3 qubits)",
         &mut group,
-        &patterns,
-        (0..=1000).step_by(100),
+        (0..=10000).step_by(1000),
         ManyMatcher::from_patterns,
     );
     group.finish();
