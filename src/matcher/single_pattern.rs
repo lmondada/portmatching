@@ -2,10 +2,11 @@
 //!
 //! This matcher is used as a baseline in benchmarking by repeating
 //! the matching process for each pattern separately.
-use std::{borrow::Borrow, hash::Hash};
+use std::hash::Hash;
 
 use bimap::BiMap;
-use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, PortView};
+use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
+use portgraph::{LinkView, NodeIndex, PortOffset};
 
 use crate::{
     patterns::{Edge, UnweightedEdge},
@@ -21,14 +22,15 @@ pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
     root: U,
 }
 
-impl<U> PortMatcher<PortGraph, U> for SinglePatternMatcher<U, (), UnweightedEdge>
+impl<U, G> PortMatcher<G, U> for SinglePatternMatcher<U, (), UnweightedEdge>
 where
+    G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
     U: Universe,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Match<PortGraph>> {
+    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<G>> {
         self.find_rooted_match(graph, root, validate_unweighted_edge)
     }
 
@@ -134,7 +136,10 @@ where
 }
 
 impl<U: Universe> Pattern<U, (), (PortOffset, PortOffset)> {
-    pub fn into_single_pattern_matcher(self) -> impl PortMatcher<PortGraph, U> {
+    pub fn into_single_pattern_matcher<G>(self) -> impl PortMatcher<G, U>
+    where
+        G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    {
         SinglePatternMatcher::new(self)
     }
 }
@@ -145,9 +150,8 @@ pub(crate) fn validate_unweighted_edge<G>(
     g: G,
 ) -> Option<(NodeIndex, NodeIndex)>
 where
-    G: Borrow<PortGraph>,
+    G: LinkView,
 {
-    let g = g.borrow();
     let mut flipped = false;
     let src = e.source;
     let tgt = e.target;

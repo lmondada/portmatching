@@ -6,7 +6,8 @@ use std::{
 use super::{Line, LinePattern};
 use crate::{EdgeProperty, HashMap, HashSet, NodeProperty, Universe};
 use itertools::Itertools;
-use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortOffset, PortView, SecondaryMap};
+use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
+use portgraph::{Direction, LinkView, NodeIndex, PortOffset, SecondaryMap};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -165,26 +166,33 @@ impl<U: Universe, PNode, PEdge: Eq + Hash> Default for Pattern<U, PNode, PEdge> 
     }
 }
 
-fn add_nodes(pattern: &mut Pattern<NodeIndex, (), (PortOffset, PortOffset)>, g: &PortGraph) {
-    for n in g.nodes_iter() {
+fn add_nodes<G: IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>>(
+    pattern: &mut Pattern<NodeIndex, (), (PortOffset, PortOffset)>,
+    g: G,
+) {
+    for n in g.node_identifiers() {
         pattern.require(n, ());
     }
 }
 
-fn add_nodes_weighted<W: NodeProperty>(
+fn add_nodes_weighted<G, W>(
     pattern: &mut Pattern<NodeIndex, W, (PortOffset, PortOffset)>,
-    g: &PortGraph,
+    g: G,
     w: impl SecondaryMap<NodeIndex, W>,
-) {
-    for n in g.nodes_iter() {
+) where
+    G: IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    W: NodeProperty,
+{
+    for n in g.node_identifiers() {
         pattern.require(n, *w.get(n));
     }
 }
 
-fn add_edges<W: NodeProperty>(
-    pattern: &mut Pattern<NodeIndex, W, (PortOffset, PortOffset)>,
-    g: &PortGraph,
-) {
+fn add_edges<W, G>(pattern: &mut Pattern<NodeIndex, W, (PortOffset, PortOffset)>, g: G)
+where
+    W: NodeProperty,
+    G: LinkView,
+{
     for p in g.ports_iter() {
         if g.port_offset(p).unwrap().direction() == Direction::Incoming {
             continue;
@@ -202,7 +210,10 @@ fn add_edges<W: NodeProperty>(
 }
 
 impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
-    pub fn from_portgraph(g: &PortGraph) -> Self {
+    pub fn from_portgraph<G>(g: G) -> Self
+    where
+        G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    {
         let mut pattern = Self::new();
         add_nodes(&mut pattern, g);
         add_edges(&mut pattern, g);
@@ -210,7 +221,10 @@ impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
         pattern
     }
 
-    pub fn from_rooted_portgraph(g: &PortGraph, root: NodeIndex) -> Self {
+    pub fn from_rooted_portgraph<G>(g: G, root: NodeIndex) -> Self
+    where
+        G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    {
         let mut pattern = Self::new();
         add_nodes(&mut pattern, g);
         add_edges(&mut pattern, g);
@@ -220,7 +234,10 @@ impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
 }
 
 impl<W: NodeProperty> Pattern<NodeIndex, W, (PortOffset, PortOffset)> {
-    pub fn from_weighted_portgraph(g: &PortGraph, w: impl SecondaryMap<NodeIndex, W>) -> Self {
+    pub fn from_weighted_portgraph<G>(g: G, w: impl SecondaryMap<NodeIndex, W>) -> Self
+    where
+        G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    {
         let mut pattern = Self::new();
         add_nodes_weighted(&mut pattern, g, w);
         add_edges(&mut pattern, g);
