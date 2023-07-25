@@ -38,7 +38,7 @@ fn bench_matching<'g, U, M>(
     M::PNode: NodeProperty,
     NodeIndex: Copy,
     U: Universe,
-    M: PortMatcher<&'g PortGraph, U>,
+    M: PortMatcher<&'g PortGraph, NodeIndex, U>,
 {
     group.sample_size(10);
     for n in sizes {
@@ -109,7 +109,7 @@ fn bench_matching_xxl_weighted(
 fn bench_trie_construction<
     'g,
     U: Universe,
-    M: PortMatcher<&'g PortGraph, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
+    M: PortMatcher<&'g PortGraph, NodeIndex, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
 >(
     name: &str,
     group: &mut BenchmarkGroup<WallTime>,
@@ -119,7 +119,7 @@ fn bench_trie_construction<
     let patterns = glob::glob("datasets/xxl/small_circuits/3_qubits/*.json")
         .expect("cannot read small circuits directory")
         .map(|p| {
-            let g = serde_json::from_reader(
+            let g: PortGraph = serde_json::from_reader(
                 File::open(p.as_ref().expect("path does not exist?"))
                     .expect("Could not open small circuit"),
             )
@@ -142,7 +142,7 @@ fn perform_benches(c: &mut Criterion) {
     let patterns = glob::glob("datasets/small_circuits/3_qubits/*.json")
         .expect("cannot read small circuits directory")
         .map(|p| {
-            let g = serde_json::from_reader(
+            let g: PortGraph = serde_json::from_reader(
                 File::open(p.as_ref().expect("path does not exist?"))
                     .expect("Could not open small circuit"),
             )

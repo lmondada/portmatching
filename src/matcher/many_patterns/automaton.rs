@@ -1,12 +1,11 @@
 use std::fmt;
 
 use itertools::Itertools;
-use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
 use portgraph::{LinkView, NodeIndex, SecondaryMap};
 
 use crate::{
     automaton::{LineBuilder, ScopeAutomaton},
-    matcher::{Match, Node, PatternMatch},
+    matcher::{Match, PatternMatch},
     patterns::{compatible_offsets, UnweightedEdge},
     EdgeProperty, NodeProperty, Pattern, PortMatcher, Universe, WeightedGraphRef,
 };
@@ -53,15 +52,15 @@ impl<U: Universe, PNode: Copy + fmt::Debug, PEdge: EdgeProperty + fmt::Debug>
 
 pub type UnweightedManyMatcher = ManyMatcher<NodeIndex, (), UnweightedEdge>;
 
-impl<U, G> PortMatcher<G, U> for ManyMatcher<U, (), UnweightedEdge>
+impl<U, G> PortMatcher<G, NodeIndex, U> for ManyMatcher<U, (), UnweightedEdge>
 where
     U: Universe,
-    G: GraphBase<NodeId = NodeIndex> + IntoNodeIdentifiers + LinkView,
+    G: LinkView,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: Node<G>) -> Vec<Match<G>> {
+    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
         // Node weights (none)
         let node_prop = |_, ()| true;
         // Check edges exist
@@ -94,11 +93,11 @@ impl<U: Universe, PNode: NodeProperty> From<Vec<Pattern<U, PNode, UnweightedEdge
     }
 }
 
-impl<'m, U, G, W, M> PortMatcher<WeightedGraphRef<G, &'m M>, U>
+impl<'m, U, G, W, M> PortMatcher<WeightedGraphRef<G, &'m M>, NodeIndex, U>
     for ManyMatcher<U, W, UnweightedEdge>
 where
     M: SecondaryMap<NodeIndex, W>,
-    G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    G: LinkView,
     U: Universe,
     W: Copy + Eq,
 {
@@ -109,7 +108,7 @@ where
         &self,
         graph: WeightedGraphRef<G, &'m M>,
         root: NodeIndex,
-    ) -> Vec<Match<WeightedGraphRef<G, &'m M>>> {
+    ) -> Vec<Match> {
         let (graph, weights) = graph.into();
         // Node weights (none)
         let node_prop = |v, prop| weights.get(v) == &prop;
