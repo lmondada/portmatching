@@ -11,7 +11,7 @@ rust-version = "1.70"
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-portgraph = "0.7.0"
+portgraph = { git = "https://github.com/CQCL/portgraph.git", rev = "1a59922", features = ["petgraph"] }
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 smallvec = "1.10.0"
 itertools = "0.10.5"
@@ -39,7 +39,8 @@ glob = "0.3.1"
 criterion = { version = "0.4.0", features = ["html_reports"] }
 
 [dev-dependencies.portgraph]
-version = "0.7.0"
+git = "https://github.com/CQCL/portgraph.git"
+rev = "1a59922"
 features = ["proptest", "serde"]
 
 [[example]]
