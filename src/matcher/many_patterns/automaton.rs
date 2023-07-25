@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, fmt};
+use std::fmt;
 
 use itertools::Itertools;
 use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
@@ -66,7 +66,6 @@ where
         let node_prop = |_, ()| true;
         // Check edges exist
         let edge_prop = |n, (pout, pin)| {
-            let graph = graph.borrow();
             let out_port = graph.port_index(n, pout)?;
             let in_port = graph.port_link(out_port)?;
             if graph.port_offset(out_port).unwrap() != pout
