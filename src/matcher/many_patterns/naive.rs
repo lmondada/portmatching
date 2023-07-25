@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use portgraph::{NodeIndex, PortGraph};
+use portgraph::{LinkView, NodeIndex};
 
 use crate::{
     matcher::{Match, PatternMatch, PortMatcher, SinglePatternMatcher},
@@ -35,14 +35,15 @@ impl<U: Universe, PNode, PEdge: Eq + Hash> Default for NaiveManyMatcher<U, PNode
     }
 }
 
-impl<U> PortMatcher<PortGraph, U> for NaiveManyMatcher<U, (), UnweightedEdge>
+impl<U, G> PortMatcher<G, NodeIndex, U> for NaiveManyMatcher<U, (), UnweightedEdge>
 where
     U: Universe,
+    G: LinkView + Copy,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: &PortGraph, root: NodeIndex) -> Vec<Match<PortGraph>> {
+    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
         self.matchers
             .iter()
             .enumerate()
@@ -59,7 +60,7 @@ where
 
     fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, (), UnweightedEdge>> {
         let m = self.matchers.get(id.0)?;
-        <SinglePatternMatcher<_, _, _> as PortMatcher<PortGraph, U>>::get_pattern(m, 0.into())
+        <SinglePatternMatcher<_, _, _> as PortMatcher<G, NodeIndex, U>>::get_pattern(m, 0.into())
     }
 }
 

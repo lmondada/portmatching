@@ -8,16 +8,16 @@
 pub mod many_patterns;
 pub mod single_pattern;
 
-use std::{borrow::Borrow, hash::Hash};
+use std::hash::Hash;
 
 pub use many_patterns::{ManyMatcher, NaiveManyMatcher, PatternID, UnweightedManyMatcher};
-use portgraph::{NodeIndex, PortGraph};
+use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
+use portgraph::{LinkView, NodeIndex};
 pub use single_pattern::SinglePatternMatcher;
 
 use crate::{
-    graph_traits::Node,
     patterns::{Edge, UnweightedEdge},
-    GraphNodes, HashMap, NodeProperty, Pattern, Universe,
+    HashMap, NodeProperty, Pattern, Universe,
 };
 
 use self::single_pattern::validate_unweighted_edge;
@@ -27,17 +27,14 @@ use self::single_pattern::validate_unweighted_edge;
 /// A pattern matcher is a type that can find matches of a pattern in a graph.
 /// Implement [`Matcher::find_anchored_matches`] that finds matches of all
 /// patterns anchored at a given root node.
-pub trait PortMatcher<Graph: GraphNodes, U: Universe>
-where
-    Node<Graph>: Universe,
-{
+pub trait PortMatcher<GraphRef, NodeId, U: Universe> {
     /// Node properties
     type PNode;
     /// Edge properties
     type PEdge: Eq + Hash;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_rooted_matches(&self, graph: &Graph, root: Node<Graph>) -> Vec<Match<Graph>>;
+    fn find_rooted_matches(&self, graph: GraphRef, root: NodeId) -> Vec<Match>;
 
     fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>>;
 
@@ -45,16 +42,19 @@ where
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`PortMatcher::find_anchored_matches`] for each of them.
-    fn find_matches(&self, graph: &Graph) -> Vec<Match<Graph>> {
+    fn find_matches(&self, graph: GraphRef) -> Vec<Match>
+    where
+        GraphRef: IntoNodeIdentifiers + GraphBase<NodeId = NodeId>,
+    {
         let mut matches = Vec::new();
-        for root in <Graph as GraphNodes>::nodes(graph) {
+        for root in graph.node_identifiers() {
             matches.append(&mut self.find_rooted_matches(graph, root));
         }
         matches
     }
 }
 
-type Match<G> = PatternMatch<PatternID, Node<G>>;
+type Match = PatternMatch<PatternID, NodeIndex>;
 
 /// A match instance returned by a Portmatcher instance.
 ///
@@ -102,10 +102,7 @@ impl<U: Universe, PNode: NodeProperty> PatternMatch<Pattern<U, PNode, Unweighted
         }
     }
 
-    pub fn to_match_map<G: Borrow<PortGraph> + Copy>(
-        &self,
-        graph: G,
-    ) -> Option<HashMap<U, NodeIndex>> {
+    pub fn to_match_map<G: LinkView + Copy>(&self, graph: G) -> Option<HashMap<U, NodeIndex>> {
         self.as_ref().to_match_map(graph)
     }
 }
@@ -113,10 +110,7 @@ impl<U: Universe, PNode: NodeProperty> PatternMatch<Pattern<U, PNode, Unweighted
 impl<'p, U: Universe, PNode: NodeProperty>
     PatternMatch<&'p Pattern<U, PNode, UnweightedEdge>, NodeIndex>
 {
-    pub fn to_match_map<G: Borrow<PortGraph> + Copy>(
-        &self,
-        graph: G,
-    ) -> Option<HashMap<U, NodeIndex>> {
+    pub fn to_match_map<G: LinkView + Copy>(&self, graph: G) -> Option<HashMap<U, NodeIndex>> {
         Some(
             SinglePatternMatcher::from_pattern(self.pattern.clone())
                 .get_match_map(
@@ -131,14 +125,11 @@ impl<'p, U: Universe, PNode: NodeProperty>
 }
 
 impl PatternMatch<PatternID, NodeIndex> {
-    pub fn to_match_map<M, U>(
-        &self,
-        graph: &PortGraph,
-        matcher: &M,
-    ) -> Option<HashMap<U, NodeIndex>>
+    pub fn to_match_map<G, M, U>(&self, graph: G, matcher: &M) -> Option<HashMap<U, NodeIndex>>
     where
+        G: LinkView + Copy,
         M::PNode: NodeProperty,
-        M: PortMatcher<PortGraph, U, PEdge = UnweightedEdge>,
+        M: PortMatcher<G, NodeIndex, U, PEdge = UnweightedEdge>,
         U: Universe,
     {
         PatternMatch::new(matcher.get_pattern(self.pattern)?, self.root).to_match_map(graph)

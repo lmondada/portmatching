@@ -73,9 +73,12 @@ fn load_results(dir: &Path) -> io::Result<BTreeSet<PatternMatch<PatternID, NodeI
     Err(io::Error::new(io::ErrorKind::Other, "no file found"))
 }
 
-fn test<M, U>(matcher: &M, graph: &PortGraph, exp: &BTreeSet<PatternMatch<PatternID, NodeIndex>>)
-where
-    M: PortMatcher<PortGraph, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
+fn test<'g, M, U>(
+    matcher: &M,
+    graph: &'g PortGraph,
+    exp: &BTreeSet<PatternMatch<PatternID, NodeIndex>>,
+) where
+    M: PortMatcher<&'g PortGraph, NodeIndex, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
     U: Universe,
 {
     let many_matches: BTreeSet<_> = matcher.find_matches(graph).into_iter().collect();
