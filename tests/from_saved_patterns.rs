@@ -78,7 +78,7 @@ fn test<'g, M, U>(
     graph: &'g PortGraph,
     exp: &BTreeSet<PatternMatch<PatternID, NodeIndex>>,
 ) where
-    M: PortMatcher<&'g PortGraph, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
+    M: PortMatcher<&'g PortGraph, NodeIndex, U, PNode = (), PEdge = (PortOffset, PortOffset)>,
     U: Universe,
 {
     let many_matches: BTreeSet<_> = matcher.find_matches(graph).into_iter().collect();

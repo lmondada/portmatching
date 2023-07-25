@@ -22,21 +22,19 @@ use crate::{
 
 use self::single_pattern::validate_unweighted_edge;
 
-pub(crate) type Node<G> = <G as GraphBase>::NodeId;
-
 /// A trait for pattern matchers.
 ///
 /// A pattern matcher is a type that can find matches of a pattern in a graph.
 /// Implement [`Matcher::find_anchored_matches`] that finds matches of all
 /// patterns anchored at a given root node.
-pub trait PortMatcher<Graph: IntoNodeIdentifiers, U: Universe> {
+pub trait PortMatcher<GraphRef, NodeId, U: Universe> {
     /// Node properties
     type PNode;
     /// Edge properties
     type PEdge: Eq + Hash;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_rooted_matches(&self, graph: Graph, root: Node<Graph>) -> Vec<Match<Graph>>;
+    fn find_rooted_matches(&self, graph: GraphRef, root: NodeId) -> Vec<Match>;
 
     fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>>;
 
@@ -44,7 +42,10 @@ pub trait PortMatcher<Graph: IntoNodeIdentifiers, U: Universe> {
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`PortMatcher::find_anchored_matches`] for each of them.
-    fn find_matches(&self, graph: Graph) -> Vec<Match<Graph>> {
+    fn find_matches(&self, graph: GraphRef) -> Vec<Match>
+    where
+        GraphRef: IntoNodeIdentifiers + GraphBase<NodeId = NodeId>,
+    {
         let mut matches = Vec::new();
         for root in graph.node_identifiers() {
             matches.append(&mut self.find_rooted_matches(graph, root));
@@ -53,7 +54,7 @@ pub trait PortMatcher<Graph: IntoNodeIdentifiers, U: Universe> {
     }
 }
 
-type Match<G> = PatternMatch<PatternID, Node<G>>;
+type Match = PatternMatch<PatternID, NodeIndex>;
 
 /// A match instance returned by a Portmatcher instance.
 ///
@@ -126,10 +127,9 @@ impl<'p, U: Universe, PNode: NodeProperty>
 impl PatternMatch<PatternID, NodeIndex> {
     pub fn to_match_map<G, M, U>(&self, graph: G, matcher: &M) -> Option<HashMap<U, NodeIndex>>
     where
-        G: IntoNodeIdentifiers + LinkView,
-        Node<G>: Universe,
+        G: LinkView + Copy,
         M::PNode: NodeProperty,
-        M: PortMatcher<G, U, PEdge = UnweightedEdge>,
+        M: PortMatcher<G, NodeIndex, U, PEdge = UnweightedEdge>,
         U: Universe,
     {
         PatternMatch::new(matcher.get_pattern(self.pattern)?, self.root).to_match_map(graph)

@@ -5,7 +5,6 @@
 use std::hash::Hash;
 
 use bimap::BiMap;
-use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
 use portgraph::{LinkView, NodeIndex, PortOffset};
 
 use crate::{
@@ -22,15 +21,15 @@ pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
     root: U,
 }
 
-impl<U, G> PortMatcher<G, U> for SinglePatternMatcher<U, (), UnweightedEdge>
+impl<U, G> PortMatcher<G, NodeIndex, U> for SinglePatternMatcher<U, (), UnweightedEdge>
 where
-    G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    G: LinkView + Copy,
     U: Universe,
 {
     type PNode = ();
     type PEdge = UnweightedEdge;
 
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match<G>> {
+    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
         self.find_rooted_match(graph, root, validate_unweighted_edge)
     }
 
@@ -136,10 +135,9 @@ where
 }
 
 impl<U: Universe> Pattern<U, (), (PortOffset, PortOffset)> {
-    pub fn into_single_pattern_matcher<G>(self) -> impl PortMatcher<G, U>
-    where
-        G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
-    {
+    pub fn into_single_pattern_matcher(
+        self,
+    ) -> SinglePatternMatcher<U, (), (PortOffset, PortOffset)> {
         SinglePatternMatcher::new(self)
     }
 }
