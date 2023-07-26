@@ -4,7 +4,7 @@ use derive_more::{From, Into};
 
 use crate::{
     predicate::{EdgePredicate, NodeLocation, Symbol, SymbolsIter},
-    EdgeProperty, HashMap, Universe,
+    EdgeProperty, HashMap, NodeProperty, Universe,
 };
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -31,7 +31,7 @@ pub struct LinePattern<U: Universe, PNode, PEdge> {
 #[derive(Clone, Copy, From, Into, Debug)]
 struct LineAddress(usize, usize);
 
-impl<U: Universe, PNode: Copy, PEdge: Copy> LinePattern<U, PNode, PEdge> {
+impl<U: Universe, PNode: NodeProperty, PEdge: Clone> LinePattern<U, PNode, PEdge> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -86,7 +86,9 @@ pub(crate) struct PredicatesIter<'a, U: Universe, PNode, PEdge: EdgeProperty> {
     free_symbols: SymbolsIter,
 }
 
-impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PNode, PEdge> {
+impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
+    PredicatesIter<'a, U, PNode, PEdge>
+{
     fn new(p: &'a LinePattern<U, PNode, PEdge>) -> Self {
         let lines = &p.lines;
         let nodes = &p.nodes;
@@ -105,13 +107,13 @@ impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PN
             free_symbols = Symbol::symbols_in_status(status);
             let root_symbol = free_symbols.next().unwrap();
             u_to_symbols.insert(root, root_symbol);
-            if let Some(&root_prop) = nodes.get(&root) {
+            if let Some(root_prop) = nodes.get(&root) {
                 it_queue.push_back(EdgePredicate::NodeProperty {
                     node: root_symbol,
-                    property: root_prop,
+                    property: root_prop.clone(),
                 });
             }
-            if let Some(first_prop) = lines[0].edges.get(0).map(|w| w.2) {
+            if let Some(first_prop) = lines[0].edges.get(0).map(|w| &w.2) {
                 // Indicate location of first line
                 it_queue.push_back(EdgePredicate::NextRoot {
                     line_nb: 0,
@@ -132,9 +134,9 @@ impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PN
         }
     }
 
-    pub(crate) fn peek(&mut self) -> Option<EdgePredicate<PNode, PEdge, PEdge::OffsetID>> {
+    pub(crate) fn peek(&mut self) -> Option<&EdgePredicate<PNode, PEdge, PEdge::OffsetID>> {
         self.fill_queue();
-        self.it_queue.front().copied()
+        self.it_queue.front()
     }
 
     pub(crate) fn traversal_stage(&mut self) -> IterationStatus {
@@ -146,7 +148,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PN
         self.lines.len()
     }
 
-    fn reach_ith_root(&mut self, i: usize, first_prop: PEdge)
+    fn reach_ith_root(&mut self, i: usize, first_prop: &PEdge)
     where
         PEdge: EdgeProperty,
     {
@@ -170,7 +172,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PN
         }
         while j_ind >= *boundary_ind {
             self.it_queue.extend(edge_predicates(
-                self.lines[j].edges[*boundary_ind - 1],
+                self.lines[j].edges[*boundary_ind - 1].clone(),
                 &mut self.u_to_symbols,
                 self.nodes,
                 self.free_symbols.by_ref(),
@@ -186,7 +188,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PN
         }
         for ind in (self.visited_boundary[i] - 1)..self.lines[i].edges.len() {
             self.it_queue.extend(edge_predicates(
-                self.lines[i].edges[ind],
+                self.lines[i].edges[ind].clone(),
                 &mut self.u_to_symbols,
                 self.nodes,
                 self.free_symbols.by_ref(),
@@ -207,7 +209,7 @@ impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PredicatesIter<'a, U, PN
                     // Append predicates to reach the root of the i-th line
                     self.reach_ith_root(
                         i,
-                        self.lines[i]
+                        &self.lines[i]
                             .edges
                             .first()
                             .expect("Cannot match empty line")
@@ -266,7 +268,7 @@ impl IterationStatus {
 impl<'a, U, PNode, PEdge> Iterator for PredicatesIter<'a, U, PNode, PEdge>
 where
     U: Universe,
-    PNode: Copy,
+    PNode: NodeProperty,
     PEdge: EdgeProperty,
 {
     type Item = EdgePredicate<PNode, PEdge, PEdge::OffsetID>;
@@ -286,7 +288,7 @@ where
     }
 }
 
-fn edge_predicates<U: Universe, PNode: Copy, PEdge: EdgeProperty>(
+fn edge_predicates<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
     (u, v, property): (U, U, PEdge),
     symbols: &mut HashMap<U, Symbol>,
     nodes: &HashMap<U, PNode>,
@@ -308,7 +310,7 @@ fn edge_predicates<U: Universe, PNode: Copy, PEdge: EdgeProperty>(
             property,
             new_node: v_symb,
         });
-        if let Some(&v_prop) = nodes.get(&v) {
+        if let Some(v_prop) = nodes.get(&v).cloned() {
             preds.push(EdgePredicate::NodeProperty {
                 node: v_symb,
                 property: v_prop,

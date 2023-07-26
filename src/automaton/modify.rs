@@ -4,13 +4,17 @@ use crate::{predicate::EdgePredicate, EdgeProperty, PatternID};
 
 use super::{ScopeAutomaton, State, StateID, Transition};
 
-impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
-    pub(super) fn set_children(
+impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
+    pub(super) fn set_children<I>(
         &mut self,
         state: StateID,
-        preds: &[EdgePredicate<PNode, PEdge, PEdge::OffsetID>],
+        preds: impl IntoIterator<IntoIter = I>,
         next_states: &[Option<StateID>],
-    ) -> Vec<Option<StateID>> {
+    ) -> Vec<Option<StateID>>
+    where
+        I: Iterator<Item = EdgePredicate<PNode, PEdge, PEdge::OffsetID>> + ExactSizeIterator,
+    {
+        let preds = preds.into_iter();
         if self.graph.num_outputs(state.0) != 0 {
             panic!("State already has outgoing ports");
         }
@@ -19,10 +23,9 @@ impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
 
         // Build the children
         preds
-            .iter()
             .zip(next_states)
             .enumerate()
-            .map(|(i, (&pred, &next_state))| self.add_child(state, i, pred.into(), next_state))
+            .map(|(i, (pred, &next_state))| self.add_child(state, i, pred.into(), next_state))
             .collect()
     }
 
@@ -50,7 +53,7 @@ impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
                 .clone()
                 .expect("invalid parent")
                 .scope;
-            if let EdgePredicate::LinkNewNode { new_node, .. } = pedge.into() {
+            if let EdgePredicate::LinkNewNode { new_node, .. } = pedge.clone().into() {
                 old_scope.insert(new_node);
             }
             old_scope

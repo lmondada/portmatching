@@ -92,7 +92,7 @@ pub(crate) struct ScopeAutomaton<PNode, PEdge, OffsetID = <PEdge as EdgeProperty
     root: StateID,
 }
 
-impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
+impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
     /// A new scope automaton
     ///
     /// ## Parameters

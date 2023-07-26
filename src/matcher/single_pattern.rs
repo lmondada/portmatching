@@ -44,7 +44,12 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> SinglePatternMatcher
     /// Create a new matcher for a single pattern.
     pub fn new(pattern: Pattern<U, PNode, PEdge>) -> Self {
         // This is our "matching recipe" -- we precompute it once and store it
-        let edges = pattern.edges().expect("Cannot match disconnected pattern");
+        let edges = pattern
+            .edges()
+            .expect("Cannot match disconnected pattern")
+            .into_iter()
+            .map(|e| e.to_owned_props())
+            .collect();
         let root = pattern.root().expect("Cannot match unrooted pattern");
         Self {
             pattern,
@@ -58,18 +63,18 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> SinglePatternMatcher
     }
 }
 
-impl<U, PNode, PEdge: Eq + Hash> SinglePatternMatcher<U, PNode, PEdge>
+impl<U, PNode, PEdge> SinglePatternMatcher<U, PNode, PEdge>
 where
     U: Universe,
-    PNode: Copy,
-    PEdge: Copy,
+    PNode: NodeProperty,
+    PEdge: EdgeProperty,
 {
     /// Whether `self` matches `host` anchored at `root`.
     ///
     /// Check whether each edge of the pattern is valid in the host
     fn match_exists<G, V, F>(&self, host: G, host_root: V, validate_edge: F) -> bool
     where
-        F: Fn(Edge<V, PNode, PEdge>, G) -> Option<(V, V)>,
+        F: for<'a> Fn(Edge<V, &'a PNode, &'a PEdge>, G) -> Option<(V, V)>,
         V: Universe,
         G: Copy,
     {
@@ -83,20 +88,20 @@ where
         validate_edge: F,
     ) -> Option<BiMap<U, V>>
     where
-        F: Fn(Edge<V, PNode, PEdge>, G) -> Option<(V, V)>,
+        F: for<'a> Fn(Edge<V, &'a PNode, &'a PEdge>, G) -> Option<(V, V)>,
         V: Universe,
         G: Copy,
     {
         let mut match_map = BiMap::from_iter([(self.root, host_root)]);
-        for &e in self.edges.iter() {
+        for e in self.edges.iter() {
             let src = e.source.expect("Only connected edges allowed in pattern");
             let tgt = e.target.expect("Only connected edges allowed in pattern");
             let e_in_v = Edge {
                 source: match_map.get_by_left(&src).copied(),
                 target: match_map.get_by_left(&tgt).copied(),
-                edge_prop: e.edge_prop,
-                source_prop: e.source_prop,
-                target_prop: e.target_prop,
+                edge_prop: &e.edge_prop,
+                source_prop: e.source_prop.as_ref(),
+                target_prop: e.target_prop.as_ref(),
             };
             let (new_src, new_tgt) = validate_edge(e_in_v, host)?;
             if !match_map.contains_left(&src) {
@@ -119,7 +124,7 @@ where
         validate_edge: F,
     ) -> Vec<PatternMatch<PatternID, V>>
     where
-        F: Fn(Edge<V, PNode, PEdge>, G) -> Option<(V, V)>,
+        F: for<'a> Fn(Edge<V, &'a PNode, &'a PEdge>, G) -> Option<(V, V)>,
         V: Universe,
         G: Copy,
     {
@@ -143,8 +148,8 @@ impl<U: Universe> Pattern<U, (), (PortOffset, PortOffset)> {
 }
 
 /// Check if an edge `e` is valid in a portgraph `g` without weights.
-pub(crate) fn validate_unweighted_edge<G>(
-    e: Edge<NodeIndex, (), UnweightedEdge>,
+pub(crate) fn validate_unweighted_edge<'a, G>(
+    e: Edge<NodeIndex, &'a (), &'a UnweightedEdge>,
     g: G,
 ) -> Option<(NodeIndex, NodeIndex)>
 where
@@ -162,7 +167,7 @@ where
     let (src_port, should_tgt_port) = if flipped {
         (e.edge_prop.1, e.edge_prop.0)
     } else {
-        e.edge_prop
+        *e.edge_prop
     };
     let src_port = g.port_index(src, src_port)?;
     let tgt_port = g.port_link(src_port)?;

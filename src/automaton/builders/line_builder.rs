@@ -130,7 +130,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         for (source, transitions) in partition_by(transitions, |(_, t)| t.source) {
             let (inds, targets, preds): (Vec<_>, Vec<_>, Vec<_>) = transitions
                 .into_iter()
-                .map(|(i, t)| (i, t.target, t.pred))
+                .map(|(i, t)| (i, t.target, t.pred.clone()))
                 .multiunzip();
 
             // make source non-deterministic if necessary
@@ -142,7 +142,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
                 }
             }
 
-            let added_states = matcher.set_children(source, &preds, &targets);
+            let added_states = matcher.set_children(source, preds, &targets);
 
             for (i, new_state) in inds.into_iter().zip(added_states) {
                 new_states[i] = new_state;
@@ -265,7 +265,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge>],
     ) -> Option<StateID>
     where
-        PNode: Copy + Eq + Hash,
+        PNode: NodeProperty,
         PEdge: EdgeProperty,
     {
         let Some(stage) = leftover_stage(patterns) else {
@@ -276,7 +276,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
     }
 }
 
-fn leftover_stage<U: Universe, PNode: Copy, PEdge: EdgeProperty>(
+fn leftover_stage<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
     patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge>],
 ) -> Option<usize> {
     patterns
@@ -332,7 +332,9 @@ struct TransitionInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
     patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
 }
 
-impl<'a, U: Universe, PNode: Copy, PEdge: EdgeProperty> PatternInConstruction<'a, U, PNode, PEdge> {
+impl<'a, U: Universe, PNode: Clone, PEdge: EdgeProperty>
+    PatternInConstruction<'a, U, PNode, PEdge>
+{
     fn new(edges: PredicatesIter<'a, U, PNode, PEdge>, pattern_id: usize) -> Self {
         Self { edges, pattern_id }
     }
