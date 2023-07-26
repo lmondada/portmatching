@@ -32,7 +32,7 @@ pub(crate) struct Edge<U, PNode, PEdge> {
 }
 
 impl<'a, U: Universe, PNode: Clone, PEdge: Clone> Edge<U, &'a PNode, &'a PEdge> {
-    pub(crate) fn to_owned_props(&self) -> Edge<U, PNode, PEdge> {
+    pub(crate) fn to_owned_props(self) -> Edge<U, PNode, PEdge> {
         Edge {
             source: self.source,
             target: self.target,
@@ -101,7 +101,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
                 source: Some(*u),
                 target: Some(v),
                 edge_prop: property,
-                source_prop: self.nodes.get(&u),
+                source_prop: self.nodes.get(u),
                 target_prop: self.nodes.get(&v),
             })
             .collect();
@@ -124,7 +124,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
     /// The edges of the pattern, in a connected order (if it exists)
     ///
     /// If no root was set, this returns `None`
-    pub(crate) fn edges<'a>(&'a self) -> Option<Vec<Edge<U, &'a PNode, &'a PEdge>>> {
+    pub(crate) fn edges(&self) -> Option<Vec<Edge<U, &PNode, &PEdge>>> {
         let all_edges: BTreeSet<_> = self
             .edges
             .iter()
@@ -132,7 +132,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
                 source: Some(*u),
                 target: Some(v),
                 edge_prop: property,
-                source_prop: self.nodes.get(&u),
+                source_prop: self.nodes.get(u),
                 target_prop: self.nodes.get(&v),
             })
             .collect();

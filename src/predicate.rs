@@ -87,7 +87,7 @@ impl<PNode: NodeProperty, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge
     ) -> PredicateSatisfied<U> {
         match self {
             EdgePredicate::NodeProperty { node, property } => {
-                let u = *ass.get_by_left(&node).unwrap();
+                let u = *ass.get_by_left(node).unwrap();
                 if node_prop(u, property) {
                     PredicateSatisfied::Yes
                 } else {
@@ -99,7 +99,7 @@ impl<PNode: NodeProperty, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge
                 property,
                 new_node,
             } => {
-                let u = *ass.get_by_left(&node).unwrap();
+                let u = *ass.get_by_left(node).unwrap();
                 let Some(new_u) = edge_prop(u, property) else {
                     return PredicateSatisfied::No;
                 };
@@ -114,11 +114,11 @@ impl<PNode: NodeProperty, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge
                 property,
                 known_node,
             } => {
-                let u = *ass.get_by_left(&node).unwrap();
+                let u = *ass.get_by_left(node).unwrap();
                 let Some(new_u) = edge_prop(u, property) else {
                     return PredicateSatisfied::No;
                 };
-                if ass.get_by_left(&known_node).unwrap() == &new_u {
+                if ass.get_by_left(known_node).unwrap() == &new_u {
                     PredicateSatisfied::Yes
                 } else {
                     PredicateSatisfied::No
