@@ -31,7 +31,7 @@ pub struct Edge<U, PNode, PEdge> {
     pub target_prop: Option<PNode>,
 }
 
-impl<'a, U: Universe, PNode: Clone, PEdge: EdgeProperty> Edge<U, PNode, PEdge> {
+impl<U: Universe, PNode: Clone, PEdge: EdgeProperty> Edge<U, PNode, PEdge> {
     pub(crate) fn reverse(&self) -> Option<Self>
     where
         PEdge: EdgeProperty,
@@ -130,7 +130,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
     /// to be reversed.
     ///
     /// If no root was set, this returns `None`.
-    pub(crate) fn edges(&self) -> Option<Vec<Edge<U, PNode, PEdge>>> {
+    pub fn edges(&self) -> Option<Vec<Edge<U, PNode, PEdge>>> {
         let all_edges: BTreeSet<_> = self
             .edges
             .iter()

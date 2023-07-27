@@ -92,12 +92,8 @@ pub struct ScopeAutomaton<PNode, PEdge, OffsetID = <PEdge as EdgeProperty>::Offs
     root: StateID,
 }
 
-impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
-    /// A new scope automaton
-    ///
-    /// ## Parameters
-    /// - root_scope: The scope of the root state
-    pub fn new() -> Self {
+impl<PNode: Clone, PEdge: EdgeProperty> Default for ScopeAutomaton<PNode, PEdge> {
+    fn default() -> Self {
         let mut graph = PortGraph::new();
         let root: StateID = graph.add_node(0, 0).into();
         let weights = {
@@ -114,6 +110,13 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
             weights,
             root,
         }
+    }
+}
+
+impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
+    /// A new scope automaton
+    pub fn new() -> Self {
+        Default::default()
     }
 
     pub(crate) fn str_weights(&self) -> Weights<String, String>

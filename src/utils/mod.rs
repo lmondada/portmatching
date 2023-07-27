@@ -26,9 +26,9 @@ pub(crate) fn validate_unweighted_edge<G: LinkView>(
 }
 
 /// Check if an edge `e` is valid in a weighted portgraph `g`.
-pub(crate) fn validate_weighted_node<'m, G, W, PNode>(
-    graph: WeightedGraphRef<G, &'m W>,
-) -> impl for<'a> Fn(NodeIndex, &PNode) -> bool + 'm
+pub(crate) fn validate_weighted_node<G, W, PNode>(
+    graph: WeightedGraphRef<G, &W>,
+) -> impl for<'a> Fn(NodeIndex, &PNode) -> bool + '_
 where
     W: SecondaryMap<NodeIndex, PNode>,
     PNode: Eq,
@@ -37,6 +37,6 @@ where
     move |node, node_prop| weights.get(node) == node_prop
 }
 
-pub(crate) fn always_true<'a, A, B>(_: A, _: &'a B) -> bool {
+pub(crate) fn always_true<A, B>(_: A, _: &B) -> bool {
     true
 }
