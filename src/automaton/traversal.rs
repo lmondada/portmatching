@@ -2,16 +2,16 @@ use std::collections::VecDeque;
 
 use portgraph::{LinkView, PortGraph, PortView};
 
-use crate::{predicate::PredicateSatisfied, EdgeProperty, PatternID, Universe};
+use crate::{predicate::PredicateSatisfied, EdgeProperty, NodeProperty, PatternID, Universe};
 
 use super::{AssignMap, OutPort, ScopeAutomaton, StateID, Symbol};
 
-impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
+impl<PNode: NodeProperty, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
     pub fn run<'s, U: Universe + 's>(
         &'s self,
         root: U,
-        node_prop: impl Fn(U, PNode) -> bool + 's,
-        edge_prop: impl Fn(U, PEdge) -> Option<U> + 's,
+        node_prop: impl for<'a> Fn(U, &'a PNode) -> bool + 's,
+        edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Option<U> + 's,
     ) -> impl Iterator<Item = PatternID> + 's {
         let ass = AssignMap::new(self.root, root);
         if !self.is_valid_assignment(self.root, &ass) {
@@ -25,8 +25,8 @@ impl<PNode: Copy, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         &'s self,
         state: StateID,
         ass: &'s AssignMap<U>,
-        node_prop: impl Fn(U, PNode) -> bool + 's,
-        edge_prop: impl Fn(U, PEdge) -> Option<U> + 's,
+        node_prop: impl for<'a> Fn(U, &'a PNode) -> bool + 's,
+        edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Option<U> + 's,
     ) -> impl Iterator<Item = (OutPort, Option<(Symbol, U)>)> + 's {
         self.outputs(state).filter_map(move |edge| {
             match self
@@ -108,10 +108,9 @@ fn enqueue_state<U: Universe>(
 impl<'a, U: Universe, PNode, PEdge: EdgeProperty, FnN, FnE> Iterator
     for Traverser<AssignMap<U>, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
 where
-    PNode: Copy,
-    PEdge: Copy,
-    FnN: Fn(U, PNode) -> bool,
-    FnE: Fn(U, PEdge) -> Option<U>,
+    PNode: NodeProperty,
+    FnN: for<'b> Fn(U, &'b PNode) -> bool,
+    FnE: for<'b> Fn(U, &'b PEdge) -> Option<U>,
 {
     type Item = PatternID;
 

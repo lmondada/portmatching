@@ -138,9 +138,9 @@ impl PatternMatch<PatternID, NodeIndex> {
 
 fn forget_node_weight<W, G, F>(
     f: F,
-) -> impl Fn(Edge<NodeIndex, W, UnweightedEdge>, G) -> Option<(NodeIndex, NodeIndex)>
+) -> impl for<'a> Fn(Edge<NodeIndex, &'a W, &'a UnweightedEdge>, G) -> Option<(NodeIndex, NodeIndex)>
 where
-    F: Fn(Edge<NodeIndex, (), UnweightedEdge>, G) -> Option<(NodeIndex, NodeIndex)>,
+    F: for<'a> Fn(Edge<NodeIndex, &'a (), &'a UnweightedEdge>, G) -> Option<(NodeIndex, NodeIndex)>,
 {
     move |e, g| {
         let Edge {
