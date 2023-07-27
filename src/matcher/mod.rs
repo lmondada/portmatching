@@ -16,11 +16,10 @@ use portgraph::{LinkView, NodeIndex};
 pub use single_pattern::SinglePatternMatcher;
 
 use crate::{
-    patterns::{Edge, UnweightedEdge},
+    patterns::UnweightedEdge,
+    utils::{always_true, validate_unweighted_edge},
     HashMap, NodeProperty, Pattern, Universe,
 };
-
-use self::single_pattern::validate_unweighted_edge;
 
 /// A trait for pattern matchers.
 ///
@@ -34,7 +33,11 @@ pub trait PortMatcher<GraphRef, NodeId, U: Universe> {
     type PEdge: Eq + Hash;
 
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_rooted_matches(&self, graph: GraphRef, root: NodeId) -> Vec<Match>;
+    fn find_rooted_matches(
+        &self,
+        graph: GraphRef,
+        root: NodeId,
+    ) -> Vec<PatternMatch<PatternID, NodeId>>;
 
     fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>>;
 
@@ -42,7 +45,7 @@ pub trait PortMatcher<GraphRef, NodeId, U: Universe> {
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`PortMatcher::find_anchored_matches`] for each of them.
-    fn find_matches(&self, graph: GraphRef) -> Vec<Match>
+    fn find_matches(&self, graph: GraphRef) -> Vec<PatternMatch<PatternID, NodeId>>
     where
         GraphRef: IntoNodeIdentifiers + GraphBase<NodeId = NodeId>,
     {
@@ -113,11 +116,7 @@ impl<'p, U: Universe, PNode: NodeProperty>
     pub fn to_match_map<G: LinkView + Copy>(&self, graph: G) -> Option<HashMap<U, NodeIndex>> {
         Some(
             SinglePatternMatcher::from_pattern(self.pattern.clone())
-                .get_match_map(
-                    graph,
-                    self.root,
-                    forget_node_weight(validate_unweighted_edge),
-                )?
+                .get_match_map(self.root, always_true, validate_unweighted_edge(graph))?
                 .into_iter()
                 .collect(),
         )
@@ -133,31 +132,5 @@ impl PatternMatch<PatternID, NodeIndex> {
         U: Universe,
     {
         PatternMatch::new(matcher.get_pattern(self.pattern)?, self.root).to_match_map(graph)
-    }
-}
-
-fn forget_node_weight<W, G, F>(
-    f: F,
-) -> impl for<'a> Fn(Edge<NodeIndex, &'a W, &'a UnweightedEdge>, G) -> Option<(NodeIndex, NodeIndex)>
-where
-    F: for<'a> Fn(Edge<NodeIndex, &'a (), &'a UnweightedEdge>, G) -> Option<(NodeIndex, NodeIndex)>,
-{
-    move |e, g| {
-        let Edge {
-            source,
-            target,
-            edge_prop,
-            ..
-        } = e;
-        f(
-            Edge {
-                source,
-                target,
-                edge_prop,
-                source_prop: None,
-                target_prop: None,
-            },
-            g,
-        )
     }
 }

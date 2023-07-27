@@ -23,28 +23,31 @@ pub type WeightedPattern<W> = Pattern<NodeIndex, W, UnweightedEdge>;
 pub(crate) type UnweightedEdge = (PortOffset, PortOffset);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
-pub(crate) struct Edge<U, PNode, PEdge> {
-    pub(crate) source: Option<U>,
-    pub(crate) target: Option<U>,
-    pub(crate) edge_prop: PEdge,
-    pub(crate) source_prop: Option<PNode>,
-    pub(crate) target_prop: Option<PNode>,
+pub struct Edge<U, PNode, PEdge> {
+    pub source: Option<U>,
+    pub target: Option<U>,
+    pub edge_prop: PEdge,
+    pub source_prop: Option<PNode>,
+    pub target_prop: Option<PNode>,
 }
 
-impl<'a, U: Universe, PNode: Clone, PEdge: Clone> Edge<U, &'a PNode, &'a PEdge> {
-    pub(crate) fn to_owned_props(self) -> Edge<U, PNode, PEdge> {
-        Edge {
-            source: self.source,
-            target: self.target,
-            edge_prop: self.edge_prop.clone(),
-            source_prop: self.source_prop.cloned(),
-            target_prop: self.target_prop.cloned(),
-        }
+impl<'a, U: Universe, PNode: Clone, PEdge: EdgeProperty> Edge<U, PNode, PEdge> {
+    pub(crate) fn reverse(&self) -> Option<Self>
+    where
+        PEdge: EdgeProperty,
+    {
+        Some(Self {
+            source: self.target,
+            target: self.source,
+            edge_prop: self.edge_prop.reverse()?,
+            source_prop: self.target_prop.clone(),
+            target_prop: self.source_prop.clone(),
+        })
     }
 }
 
 #[derive(Debug)]
-struct NoRootFound;
+pub struct NoRootFound;
 
 impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
     pub fn new() -> Self {
@@ -90,7 +93,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
     /// Let the pattern fix a root
     ///
     /// We require `Ord` so that this is deterministic (do not rely on hash)
-    fn set_any_root(&mut self) -> Result<U, NoRootFound>
+    pub fn set_any_root(&mut self) -> Result<U, NoRootFound>
     where
         U: Ord,
     {
@@ -100,14 +103,14 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
             .map(|((u, property), &v)| Edge {
                 source: Some(*u),
                 target: Some(v),
-                edge_prop: property,
-                source_prop: self.nodes.get(u),
-                target_prop: self.nodes.get(&v),
+                edge_prop: property.clone(),
+                source_prop: self.nodes.get(u).cloned(),
+                target_prop: self.nodes.get(&v).cloned(),
             })
             .collect();
         let root = self
             .all_nodes()
-            .find(|&root| order_edges(&all_edges, root).is_some())
+            .find(|&root| order_edges(all_edges.clone(), root).is_some())
             .ok_or(NoRootFound)?;
         self.root = Some(root);
         Ok(root)
@@ -123,47 +126,58 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
 
     /// The edges of the pattern, in a connected order (if it exists)
     ///
-    /// If no root was set, this returns `None`
-    pub(crate) fn edges(&self) -> Option<Vec<Edge<U, &PNode, &PEdge>>> {
+    /// This will clone node and edge properties as edge properties might need
+    /// to be reversed.
+    ///
+    /// If no root was set, this returns `None`.
+    pub(crate) fn edges(&self) -> Option<Vec<Edge<U, PNode, PEdge>>> {
         let all_edges: BTreeSet<_> = self
             .edges
             .iter()
             .map(|((u, property), &v)| Edge {
                 source: Some(*u),
                 target: Some(v),
-                edge_prop: property,
-                source_prop: self.nodes.get(u),
-                target_prop: self.nodes.get(&v),
+                edge_prop: property.clone(),
+                source_prop: self.nodes.get(u).cloned(),
+                target_prop: self.nodes.get(&v).cloned(),
             })
             .collect();
 
-        order_edges(&all_edges, self.root?)
+        order_edges(all_edges, self.root?)
     }
 }
 
-fn order_edges<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
-    all_edges: &BTreeSet<Edge<U, &'a PNode, &'a PEdge>>,
+fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
+    mut unvisited_edges: BTreeSet<Edge<U, PNode, PEdge>>,
     root_candidate: U,
-) -> Option<Vec<Edge<U, &'a PNode, &'a PEdge>>> {
+) -> Option<Vec<Edge<U, PNode, PEdge>>> {
     let mut known_nodes = HashSet::default();
-    let mut known_edges = HashSet::default();
     known_nodes.insert(root_candidate);
 
     let mut edges = Vec::new();
-    while edges.len() < all_edges.len() {
-        let next_edge = all_edges
-            .iter()
-            .filter(|e| !known_edges.contains(e))
-            .find(|e| {
-                let src = e.source.expect("Pattern cannot have dangling edges");
-                let tgt = e.target.expect("Pattern cannot have dangling edges");
-                let rev = e.edge_prop.reverse().is_some();
-                known_nodes.contains(&src) || (rev && known_nodes.contains(&tgt))
-            })?;
-        edges.push(*next_edge);
-        known_nodes.insert(next_edge.source.unwrap());
-        known_nodes.insert(next_edge.target.unwrap());
-        known_edges.insert(next_edge);
+    while !unvisited_edges.is_empty() {
+        let is_boundary_edge = |e: &&Edge<U, PNode, PEdge>| {
+            let src = e.source.expect("Pattern cannot have dangling edges");
+            known_nodes.contains(&src)
+        };
+        let is_rev_boundary_edge = |e: &&Edge<U, PNode, PEdge>| {
+            let Some(e) = e.reverse() else { return false; };
+            let src = e.source.expect("Pattern cannot have dangling edges");
+            known_nodes.contains(&src)
+        };
+        if let Some(next_edge) = unvisited_edges.iter().find(is_boundary_edge) {
+            let next_edge = next_edge.clone();
+            known_nodes.insert(next_edge.target.unwrap());
+            unvisited_edges.remove(&next_edge);
+            edges.push(next_edge);
+        } else if let Some(next_edge) = unvisited_edges.iter().find(is_rev_boundary_edge) {
+            let next_edge = next_edge.clone();
+            known_nodes.insert(next_edge.source.unwrap());
+            unvisited_edges.remove(&next_edge);
+            edges.push(next_edge.reverse().unwrap());
+        } else {
+            return None;
+        }
     }
     Some(edges)
 }
@@ -262,7 +276,7 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
     /// Try to convert the pattern into a line pattern
     ///
     /// Attempt every possible root and return `None` if none worked.
-    pub(crate) fn try_into_line_pattern<F: for<'a> Fn(&'a PEdge, &'a PEdge) -> bool>(
+    pub fn try_into_line_pattern<F: for<'a> Fn(&'a PEdge, &'a PEdge) -> bool>(
         self,
         valid_successor: F,
     ) -> Option<LinePattern<U, PNode, PEdge>> {
