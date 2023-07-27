@@ -26,7 +26,7 @@ pub trait Universe: Copy + Eq + Hash + Ord {}
 
 impl<U: Copy + Eq + Hash + Ord> Universe for U {}
 
-pub trait EdgeProperty: Copy + Ord + Hash + std::fmt::Debug {
+pub trait EdgeProperty: Clone + Ord + Hash + std::fmt::Debug {
     type OffsetID: Eq + Copy + Debug;
 
     fn reverse(&self) -> Option<Self>;
@@ -34,9 +34,9 @@ pub trait EdgeProperty: Copy + Ord + Hash + std::fmt::Debug {
     fn offset_id(&self) -> Self::OffsetID;
 }
 
-pub trait NodeProperty: Copy + Hash + Ord + std::fmt::Debug {}
+pub trait NodeProperty: Clone + Hash + Ord + std::fmt::Debug {}
 
-impl<U: Copy + Hash + Ord + std::fmt::Debug> NodeProperty for U {}
+impl<U: Clone + Hash + Ord + std::fmt::Debug> NodeProperty for U {}
 
 impl<A: Copy + Ord + Hash + Debug> EdgeProperty for (A, A) {
     type OffsetID = A;

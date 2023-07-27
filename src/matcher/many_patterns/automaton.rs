@@ -61,21 +61,23 @@ where
     type PEdge = UnweightedEdge;
 
     fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
-        // Node weights (none)
-        let node_prop = |_, ()| true;
-        // Check edges exist
-        let edge_prop = |n, (pout, pin)| {
-            let out_port = graph.port_index(n, pout)?;
-            let in_port = graph.port_link(out_port)?;
-            if graph.port_offset(out_port).unwrap() != pout
-                || graph.port_offset(in_port).unwrap() != pin
-            {
-                return None;
-            }
-            graph.port_node(in_port)
-        };
         self.automaton
-            .run(root, node_prop, edge_prop)
+            .run(
+                root,
+                // no node prop
+                |_, &()| true,
+                // check edge exist
+                |n, &(pout, pin)| {
+                    let out_port = graph.port_index(n, pout)?;
+                    let in_port = graph.port_link(out_port)?;
+                    if graph.port_offset(out_port).unwrap() != pout
+                        || graph.port_offset(in_port).unwrap() != pin
+                    {
+                        return None;
+                    }
+                    graph.port_node(in_port)
+                },
+            )
             .map(|id| PatternMatch::new(id, root))
             .collect()
     }
@@ -99,7 +101,7 @@ where
     M: SecondaryMap<NodeIndex, W>,
     G: LinkView,
     U: Universe,
-    W: Copy + Eq,
+    W: NodeProperty,
 {
     type PNode = W;
     type PEdge = UnweightedEdge;
@@ -110,21 +112,23 @@ where
         root: NodeIndex,
     ) -> Vec<Match> {
         let (graph, weights) = graph.into();
-        // Node weights (none)
-        let node_prop = |v, prop| weights.get(v) == &prop;
-        // Check edges exist
-        let edge_prop = |n, (pout, pin)| {
-            let out_port = graph.port_index(n, pout)?;
-            let in_port = graph.port_link(out_port)?;
-            if graph.port_offset(out_port).unwrap() != pout
-                || graph.port_offset(in_port).unwrap() != pin
-            {
-                return None;
-            }
-            graph.port_node(in_port)
-        };
         self.automaton
-            .run(root, node_prop, edge_prop)
+            .run(
+                root,
+                // Node weights (none)
+                |v, prop| weights.get(v) == prop,
+                // Check edges exist
+                |n, &(pout, pin)| {
+                    let out_port = graph.port_index(n, pout)?;
+                    let in_port = graph.port_link(out_port)?;
+                    if graph.port_offset(out_port).unwrap() != pout
+                        || graph.port_offset(in_port).unwrap() != pin
+                    {
+                        return None;
+                    }
+                    graph.port_node(in_port)
+                },
+            )
             .map(|id| PatternMatch::new(id, root))
             .collect()
     }

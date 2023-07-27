@@ -6,7 +6,7 @@ use std::{
     ops::RangeFrom,
 };
 
-use crate::{patterns::IterationStatus, BiMap, EdgeProperty, Universe};
+use crate::{patterns::IterationStatus, BiMap, EdgeProperty, NodeProperty, Universe};
 
 pub(crate) type SymbolsIter =
     Map<Zip<Repeat<IterationStatus>, RangeFrom<usize>>, fn((IterationStatus, usize)) -> Symbol>;
@@ -78,16 +78,16 @@ pub(crate) enum PredicateSatisfied<U> {
     No,
 }
 
-impl<PNode: Copy, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge::OffsetID> {
+impl<PNode: NodeProperty, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge::OffsetID> {
     pub(crate) fn is_satisfied<'s, U: Universe>(
         &self,
         ass: &BiMap<Symbol, U>,
-        node_prop: impl Fn(U, PNode) -> bool + 's,
-        edge_prop: impl Fn(U, PEdge) -> Option<U> + 's,
+        node_prop: impl for<'a> Fn(U, &'a PNode) -> bool + 's,
+        edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Option<U> + 's,
     ) -> PredicateSatisfied<U> {
-        match *self {
+        match self {
             EdgePredicate::NodeProperty { node, property } => {
-                let u = *ass.get_by_left(&node).unwrap();
+                let u = *ass.get_by_left(node).unwrap();
                 if node_prop(u, property) {
                     PredicateSatisfied::Yes
                 } else {
@@ -99,12 +99,12 @@ impl<PNode: Copy, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge::Offset
                 property,
                 new_node,
             } => {
-                let u = *ass.get_by_left(&node).unwrap();
+                let u = *ass.get_by_left(node).unwrap();
                 let Some(new_u) = edge_prop(u, property) else {
                     return PredicateSatisfied::No;
                 };
                 if ass.get_by_right(&new_u).is_none() {
-                    PredicateSatisfied::NewSymbol(new_node, new_u)
+                    PredicateSatisfied::NewSymbol(*new_node, new_u)
                 } else {
                     PredicateSatisfied::No
                 }
@@ -114,11 +114,11 @@ impl<PNode: Copy, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge::Offset
                 property,
                 known_node,
             } => {
-                let u = *ass.get_by_left(&node).unwrap();
+                let u = *ass.get_by_left(node).unwrap();
                 let Some(new_u) = edge_prop(u, property) else {
                     return PredicateSatisfied::No;
                 };
-                if ass.get_by_left(&known_node).unwrap() == &new_u {
+                if ass.get_by_left(known_node).unwrap() == &new_u {
                     PredicateSatisfied::Yes
                 } else {
                     PredicateSatisfied::No
@@ -209,7 +209,7 @@ pub(crate) fn are_compatible_predicates<'a, PNode, PEdge>(
     preds: impl IntoIterator<Item = &'a EdgePredicate<PNode, PEdge, PEdge::OffsetID>>,
 ) -> PredicateCompatibility
 where
-    PNode: Copy + 'a,
+    PNode: NodeProperty + 'a,
     PEdge: EdgeProperty + 'a,
 {
     let mut preds = preds.into_iter();
