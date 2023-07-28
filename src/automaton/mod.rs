@@ -3,7 +3,7 @@ mod modify;
 mod traversal;
 mod view;
 
-pub(crate) use builders::LineBuilder;
+pub use builders::LineBuilder;
 
 use std::fmt::Debug;
 
@@ -86,18 +86,14 @@ struct Transition<PNode, PEdge, OffsetID> {
 /// - SU: Functions that update scope at incoming ports
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub(crate) struct ScopeAutomaton<PNode, PEdge, OffsetID = <PEdge as EdgeProperty>::OffsetID> {
+pub struct ScopeAutomaton<PNode, PEdge, OffsetID = <PEdge as EdgeProperty>::OffsetID> {
     graph: PortGraph,
     weights: Weights<Option<State>, Option<Transition<PNode, PEdge, OffsetID>>>,
     root: StateID,
 }
 
-impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
-    /// A new scope automaton
-    ///
-    /// ## Parameters
-    /// - root_scope: The scope of the root state
-    pub fn new() -> Self {
+impl<PNode: Clone, PEdge: EdgeProperty> Default for ScopeAutomaton<PNode, PEdge> {
+    fn default() -> Self {
         let mut graph = PortGraph::new();
         let root: StateID = graph.add_node(0, 0).into();
         let weights = {
@@ -115,11 +111,19 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
             root,
         }
     }
+}
+
+impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
+    /// A new scope automaton
+    pub fn new() -> Self {
+        Default::default()
+    }
 
     pub(crate) fn str_weights(&self) -> Weights<String, String>
     where
         PNode: Debug,
         PEdge: Debug,
+        <PEdge as EdgeProperty>::OffsetID: Debug,
     {
         let mut str_weights = Weights::new();
         for n in self.graph.nodes_iter() {
@@ -145,6 +149,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
     where
         PNode: Debug,
         PEdge: Debug,
+        <PEdge as EdgeProperty>::OffsetID: Debug,
     {
         self.graph
             .dot_format()
