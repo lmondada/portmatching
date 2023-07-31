@@ -1,17 +1,33 @@
 [package]
 name = "portmatching"
+version = "0.2.0"
+license = "MIT"
+
+readme = "README.md"
+documentation = "https://docs.rs/portmatching/"
+repository = "https://github.com/lmondada/portmatching"
+
 description = "Fast Graph Matching for Port Graphs"
+keywords = ["data-structure", "graph", "subgraph-isomorphism"]
+categories = ["algorithms"]
+
 authors = ["Luca Mondada"]
-version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+exclude = [
+    "tests/legacy_saved_patterns/*",
+]
+
+[lib]
+bench = false
+name = "portmatching"
+path = "src/lib.rs"
 
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-portgraph = { git = "https://github.com/CQCL/portgraph.git", rev = "1a59922", features = ["petgraph"] }
+portgraph = { version = "0.7.2", features = ["petgraph"] }
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 smallvec = "1.10.0"
 itertools = "0.10.5"
@@ -39,8 +55,7 @@ glob = "0.3.1"
 criterion = { version = "0.4.0", features = ["html_reports"] }
 
 [dev-dependencies.portgraph]
-git = "https://github.com/CQCL/portgraph.git"
-rev = "1a59922"
+version = "0.7.2"
 features = ["proptest", "serde"]
 
 [[example]]
