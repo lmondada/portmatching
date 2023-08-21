@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use itertools::Itertools;
 use portgraph::{LinkView, PortGraph, PortView};
 
 use crate::{predicate::PredicateSatisfied, EdgeProperty, NodeProperty, PatternID, Universe};
@@ -90,19 +91,27 @@ impl<'a, Map, PNode, PEdge: EdgeProperty, FnN, FnE>
     }
 }
 
-fn enqueue_state<U: Universe>(
-    queue: &mut VecDeque<(StateID, AssignMap<U>)>,
-    node: StateID,
-    mut ass: AssignMap<U>,
-    new_symb: Option<(Symbol, U)>,
-) {
-    if let Some((symb, val)) = new_symb {
-        let failed = ass.map.insert(symb, val).did_overwrite();
-        if failed {
-            panic!("Tried to overwrite in assignment map");
+impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty, FnN, FnE>
+    Traverser<AssignMap<U>, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
+{
+    fn enqueue_state(
+        &mut self,
+        out_port: OutPort,
+        mut ass: AssignMap<U>,
+        new_symb: Option<(Symbol, U)>,
+    ) {
+        let next_state = next_state(&self.automaton.graph, out_port);
+        let next_scope = self.automaton.scope(next_state);
+        ass.state_id = next_state;
+        ass.map.retain(|s, _| next_scope.contains(s));
+        if let Some((symb, val)) = new_symb {
+            let failed = ass.map.insert(symb, val).did_overwrite();
+            if failed {
+                panic!("Tried to overwrite in assignment map");
+            }
         }
+        self.state_queue.push_back((next_state, ass))
     }
-    queue.push_back((node, ass))
 }
 
 impl<'a, U: Universe, PNode, PEdge: EdgeProperty, FnN, FnE> Iterator
@@ -126,21 +135,11 @@ where
             if self.automaton.is_deterministic(state) {
                 if let Some((edge, new_symb)) = transitions.next() {
                     drop(transitions);
-                    enqueue_state(
-                        &mut self.state_queue,
-                        next_state(&self.automaton.graph, edge),
-                        ass,
-                        new_symb,
-                    );
+                    self.enqueue_state(edge, ass, new_symb);
                 }
             } else {
-                for (edge, new_symb) in transitions {
-                    enqueue_state(
-                        &mut self.state_queue,
-                        next_state(&self.automaton.graph, edge),
-                        ass.clone(),
-                        new_symb,
-                    );
+                for (edge, new_symb) in transitions.collect_vec() {
+                    self.enqueue_state(edge, ass.clone(), new_symb);
                 }
             }
         }
