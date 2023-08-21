@@ -7,7 +7,9 @@ use crate::{
     automaton::{LineBuilder, ScopeAutomaton},
     matcher::{Match, PatternMatch},
     patterns::{compatible_offsets, UnweightedEdge},
-    EdgeProperty, NodeProperty, Pattern, PortMatcher, Universe, WeightedGraphRef,
+    utils::{always_true, validate_unweighted_edge, validate_weighted_node},
+    EdgeProperty, HashMap, NodeProperty, Pattern, PatternID, PortMatcher, SinglePatternMatcher,
+    Universe, WeightedGraphRef,
 };
 
 /// A graph pattern matcher using scope automata.
@@ -22,6 +24,53 @@ where
     patterns: Vec<Pattern<U, PNode, PEdge>>,
 }
 
+impl<U: Universe, PNode, PEdge: EdgeProperty> fmt::Debug for ManyMatcher<U, PNode, PEdge> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ManyMatcher {{ {} patterns }}", self.patterns.len())
+    }
+}
+
+impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> ManyMatcher<U, PNode, PEdge> {
+    pub fn new(
+        automaton: ScopeAutomaton<PNode, PEdge, <PEdge as EdgeProperty>::OffsetID>,
+        patterns: Vec<Pattern<U, PNode, PEdge>>,
+    ) -> Self {
+        Self {
+            automaton,
+            patterns,
+        }
+    }
+
+    pub fn run<N: Universe>(
+        &self,
+        root: N,
+        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
+        validate_edge: impl for<'a> Fn(N, &PEdge) -> Option<N>,
+    ) -> Vec<PatternMatch<PatternID, N>> {
+        self.automaton
+            .run(root, validate_node, validate_edge)
+            .map(|id| PatternMatch::new(id, root))
+            .collect()
+    }
+
+    pub fn get_match_map<N: Universe>(
+        &self,
+        m: PatternMatch<PatternID, N>,
+        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+    ) -> Option<HashMap<U, N>> {
+        let p = self.patterns.get(m.pattern.0).unwrap();
+        let single_matcher = SinglePatternMatcher::from_pattern(p.clone());
+        single_matcher
+            .get_match_map(m.root, validate_node, validate_edge)
+            .map(|m| m.into_iter().collect())
+    }
+
+    pub fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, PNode, PEdge>> {
+        self.patterns.get(id.0)
+    }
+}
+
 impl<U: Universe, PNode: NodeProperty> ManyMatcher<U, PNode, UnweightedEdge> {
     pub fn from_patterns(patterns: Vec<Pattern<U, PNode, UnweightedEdge>>) -> Self {
         let line_patterns = patterns
@@ -34,15 +83,16 @@ impl<U: Universe, PNode: NodeProperty> ManyMatcher<U, PNode, UnweightedEdge> {
             .collect_vec();
         let builder = LineBuilder::from_patterns(line_patterns);
         let automaton = builder.build();
-        Self {
-            automaton,
-            patterns,
-        }
+        Self::new(automaton, patterns)
     }
 }
 
-impl<U: Universe, PNode: Copy + fmt::Debug, PEdge: EdgeProperty + fmt::Debug>
-    ManyMatcher<U, PNode, PEdge>
+impl<U, PNode, PEdge> ManyMatcher<U, PNode, PEdge>
+where
+    <PEdge as EdgeProperty>::OffsetID: fmt::Debug,
+    U: Universe,
+    PNode: Copy + fmt::Debug,
+    PEdge: EdgeProperty + fmt::Debug,
 {
     /// A dotstring representation of the trie.
     pub fn dot_string(&self) -> String {
@@ -61,29 +111,17 @@ where
     type PEdge = UnweightedEdge;
 
     fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
-        self.automaton
-            .run(
-                root,
-                // no node prop
-                |_, &()| true,
-                // check edge exist
-                |n, &(pout, pin)| {
-                    let out_port = graph.port_index(n, pout)?;
-                    let in_port = graph.port_link(out_port)?;
-                    if graph.port_offset(out_port).unwrap() != pout
-                        || graph.port_offset(in_port).unwrap() != pin
-                    {
-                        return None;
-                    }
-                    graph.port_node(in_port)
-                },
-            )
-            .map(|id| PatternMatch::new(id, root))
-            .collect()
+        self.run(
+            root,
+            // no node prop
+            always_true,
+            // check edge exist
+            validate_unweighted_edge(graph),
+        )
     }
 
-    fn get_pattern(&self, id: crate::PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
-        self.patterns.get(id.0)
+    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
+        self.get_pattern(id)
     }
 }
 
@@ -99,7 +137,7 @@ impl<'m, U, G, W, M> PortMatcher<WeightedGraphRef<G, &'m M>, NodeIndex, U>
     for ManyMatcher<U, W, UnweightedEdge>
 where
     M: SecondaryMap<NodeIndex, W>,
-    G: LinkView,
+    G: LinkView + Copy,
     U: Universe,
     W: NodeProperty,
 {
@@ -108,32 +146,20 @@ where
 
     fn find_rooted_matches(
         &self,
-        graph: WeightedGraphRef<G, &'m M>,
+        weighted_graph: WeightedGraphRef<G, &'m M>,
         root: NodeIndex,
     ) -> Vec<Match> {
-        let (graph, weights) = graph.into();
-        self.automaton
-            .run(
-                root,
-                // Node weights (none)
-                |v, prop| weights.get(v) == prop,
-                // Check edges exist
-                |n, &(pout, pin)| {
-                    let out_port = graph.port_index(n, pout)?;
-                    let in_port = graph.port_link(out_port)?;
-                    if graph.port_offset(out_port).unwrap() != pout
-                        || graph.port_offset(in_port).unwrap() != pin
-                    {
-                        return None;
-                    }
-                    graph.port_node(in_port)
-                },
-            )
-            .map(|id| PatternMatch::new(id, root))
-            .collect()
+        let (graph, _) = weighted_graph.into();
+        self.run(
+            root,
+            // Node weights (none)
+            validate_weighted_node(weighted_graph),
+            // Check edges exist
+            validate_unweighted_edge(graph),
+        )
     }
 
-    fn get_pattern(&self, id: crate::PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
+    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
         self.patterns.get(id.0)
     }
 }

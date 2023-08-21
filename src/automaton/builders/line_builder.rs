@@ -12,7 +12,7 @@ use crate::{
     EdgeProperty, HashMap, NodeProperty, Universe,
 };
 
-pub(crate) struct LineBuilder<U: Universe, PNode, PEdge> {
+pub struct LineBuilder<U: Universe, PNode, PEdge> {
     patterns: Vec<LinePattern<U, PNode, PEdge>>,
     // Map from ({pattern_id} x line_nb) to automaton state
     det_states: HashMap<(BTreeSet<usize>, usize), StateID>,

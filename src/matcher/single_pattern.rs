@@ -9,6 +9,7 @@ use portgraph::{LinkView, NodeIndex, PortOffset};
 
 use crate::{
     patterns::{Edge, UnweightedEdge},
+    utils::{always_true, validate_unweighted_edge},
     EdgeProperty, NodeProperty, Pattern, PatternID, Universe,
 };
 
@@ -30,7 +31,7 @@ where
     type PEdge = UnweightedEdge;
 
     fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
-        self.find_rooted_match(graph, root, validate_unweighted_edge)
+        self.find_rooted_match(root, always_true, validate_unweighted_edge(graph))
     }
 
     fn get_pattern(&self, _id: crate::PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
@@ -44,12 +45,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> SinglePatternMatcher
     /// Create a new matcher for a single pattern.
     pub fn new(pattern: Pattern<U, PNode, PEdge>) -> Self {
         // This is our "matching recipe" -- we precompute it once and store it
-        let edges = pattern
-            .edges()
-            .expect("Cannot match disconnected pattern")
-            .into_iter()
-            .map(|e| e.to_owned_props())
-            .collect();
+        let edges = pattern.edges().expect("Cannot match disconnected pattern");
         let root = pattern.root().expect("Cannot match unrooted pattern");
         Self {
             pattern,
@@ -72,42 +68,34 @@ where
     /// Whether `self` matches `host` anchored at `root`.
     ///
     /// Check whether each edge of the pattern is valid in the host
-    fn match_exists<G, V, F>(&self, host: G, host_root: V, validate_edge: F) -> bool
-    where
-        F: for<'a> Fn(Edge<V, &'a PNode, &'a PEdge>, G) -> Option<(V, V)>,
-        V: Universe,
-        G: Copy,
-    {
-        self.get_match_map(host, host_root, validate_edge).is_some()
+    fn match_exists<N: Universe>(
+        &self,
+        host_root: N,
+        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+    ) -> bool {
+        self.get_match_map(host_root, validate_node, validate_edge)
+            .is_some()
     }
 
-    pub(crate) fn get_match_map<G, V, F>(
+    pub(crate) fn get_match_map<N: Universe>(
         &self,
-        host: G,
-        host_root: V,
-        validate_edge: F,
-    ) -> Option<BiMap<U, V>>
-    where
-        F: for<'a> Fn(Edge<V, &'a PNode, &'a PEdge>, G) -> Option<(V, V)>,
-        V: Universe,
-        G: Copy,
-    {
+        host_root: N,
+        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+    ) -> Option<BiMap<U, N>> {
         let mut match_map = BiMap::from_iter([(self.root, host_root)]);
         for e in self.edges.iter() {
             let src = e.source.expect("Only connected edges allowed in pattern");
             let tgt = e.target.expect("Only connected edges allowed in pattern");
-            let e_in_v = Edge {
-                source: match_map.get_by_left(&src).copied(),
-                target: match_map.get_by_left(&tgt).copied(),
-                edge_prop: &e.edge_prop,
-                source_prop: e.source_prop.as_ref(),
-                target_prop: e.target_prop.as_ref(),
-            };
-            let (new_src, new_tgt) = validate_edge(e_in_v, host)?;
-            if !match_map.contains_left(&src) {
-                match_map.insert_no_overwrite(src, new_src).ok()?;
+            let new_src = match_map.get_by_left(&src).copied()?;
+            let new_tgt = validate_edge(new_src, &e.edge_prop)?;
+            if let Some(target_prop) = e.target_prop.as_ref() {
+                if !validate_node(new_tgt, target_prop) {
+                    return None;
+                }
             }
-            if !match_map.contains_left(&tgt) {
+            if match_map.get_by_left(&tgt) != Some(&new_tgt) {
                 match_map.insert_no_overwrite(tgt, new_tgt).ok()?;
             }
         }
@@ -117,18 +105,13 @@ where
     /// The matches in `host` starting at `host_root`
     ///
     /// For single pattern matchers there is always at most one match
-    fn find_rooted_match<G, V, F>(
+    fn find_rooted_match<N: Universe>(
         &self,
-        host: G,
-        host_root: V,
-        validate_edge: F,
-    ) -> Vec<PatternMatch<PatternID, V>>
-    where
-        F: for<'a> Fn(Edge<V, &'a PNode, &'a PEdge>, G) -> Option<(V, V)>,
-        V: Universe,
-        G: Copy,
-    {
-        if self.match_exists(host, host_root, validate_edge) {
+        host_root: N,
+        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+    ) -> Vec<PatternMatch<PatternID, N>> {
+        if self.match_exists(host_root, validate_node, validate_edge) {
             vec![PatternMatch {
                 pattern: 0.into(),
                 root: host_root,
@@ -144,46 +127,6 @@ impl<U: Universe> Pattern<U, (), (PortOffset, PortOffset)> {
         self,
     ) -> SinglePatternMatcher<U, (), (PortOffset, PortOffset)> {
         SinglePatternMatcher::new(self)
-    }
-}
-
-/// Check if an edge `e` is valid in a portgraph `g` without weights.
-pub(crate) fn validate_unweighted_edge<'a, G>(
-    e: Edge<NodeIndex, &'a (), &'a UnweightedEdge>,
-    g: G,
-) -> Option<(NodeIndex, NodeIndex)>
-where
-    G: LinkView,
-{
-    let mut flipped = false;
-    let src = e.source;
-    let tgt = e.target;
-    let (src, tgt) = if let Some(src) = src {
-        (src, tgt)
-    } else {
-        flipped = true;
-        (tgt.expect("both source and target are none"), src)
-    };
-    let (src_port, should_tgt_port) = if flipped {
-        (e.edge_prop.1, e.edge_prop.0)
-    } else {
-        *e.edge_prop
-    };
-    let src_port = g.port_index(src, src_port)?;
-    let tgt_port = g.port_link(src_port)?;
-    if let Some(tgt) = tgt {
-        if tgt != g.port_node(tgt_port).unwrap() {
-            return None;
-        }
-    }
-    let tgt = g.port_node(tgt_port).unwrap();
-    if g.port_offset(tgt_port).unwrap() != should_tgt_port {
-        return None;
-    }
-    if flipped {
-        Some((tgt, src))
-    } else {
-        Some((src, tgt))
     }
 }
 
