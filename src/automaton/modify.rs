@@ -100,3 +100,27 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
             .deterministic = false;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{predicate::Symbol, patterns::IterationStatus};
+
+    use super::*;
+
+    /// The child state's scope should be the intersection of all possible scopes
+    #[test]
+    fn intersect_scope() {
+        let mut a = ScopeAutomaton::new();
+        a.add_ports(a.root(), 0, 2);
+        let s_root = Symbol::root();
+        let s1 = Symbol::new(IterationStatus::Finished, 0);
+        let s2 = Symbol::new(IterationStatus::Finished, 1);
+        let t1: Transition<(), (), ()> = EdgePredicate::LinkNewNode { node: s_root, property: (), new_node: s1 }.into();
+        let t2: Transition<(), (), ()> = EdgePredicate::LinkNewNode { node: s_root, property: (), new_node: s2 }.into();
+        let child = a.add_child(a.root(), 0, t1, None).unwrap();
+
+        assert_eq!(a.scope(child), &[s_root, s1].into_iter().collect());
+        a.add_child(a.root(), 1, t2, Some(child));
+        assert_eq!(a.scope(child), &[s_root].into_iter().collect());
+    }
+}
