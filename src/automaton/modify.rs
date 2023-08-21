@@ -103,7 +103,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{predicate::Symbol, patterns::IterationStatus};
+    use crate::{patterns::IterationStatus, predicate::Symbol};
 
     use super::*;
 
@@ -115,8 +115,18 @@ mod tests {
         let s_root = Symbol::root();
         let s1 = Symbol::new(IterationStatus::Finished, 0);
         let s2 = Symbol::new(IterationStatus::Finished, 1);
-        let t1: Transition<(), (), ()> = EdgePredicate::LinkNewNode { node: s_root, property: (), new_node: s1 }.into();
-        let t2: Transition<(), (), ()> = EdgePredicate::LinkNewNode { node: s_root, property: (), new_node: s2 }.into();
+        let t1: Transition<(), (), ()> = EdgePredicate::LinkNewNode {
+            node: s_root,
+            property: (),
+            new_node: s1,
+        }
+        .into();
+        let t2: Transition<(), (), ()> = EdgePredicate::LinkNewNode {
+            node: s_root,
+            property: (),
+            new_node: s2,
+        }
+        .into();
         let child = a.add_child(a.root(), 0, t1, None).unwrap();
 
         assert_eq!(a.scope(child), &[s_root, s1].into_iter().collect());
