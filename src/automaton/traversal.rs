@@ -126,7 +126,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         while self.matches_queue.is_empty() {
             let Some((state, ass)) = self.state_queue.pop_front() else {
-                break
+                break;
             };
             self.matches_queue.extend(self.automaton.matches(state));
             let mut transitions =
