@@ -78,7 +78,10 @@ where
             .is_some()
     }
 
-    pub(crate) fn get_match_map<N: Universe>(
+    /// Match the pattern and return a map from pattern nodes to host nodes
+    ///
+    /// Returns `None` if the pattern does not match.
+    pub fn get_match_map<N: Universe>(
         &self,
         host_root: N,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
