@@ -161,7 +161,9 @@ fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
             known_nodes.contains(&src)
         };
         let is_rev_boundary_edge = |e: &&Edge<U, PNode, PEdge>| {
-            let Some(e) = e.reverse() else { return false; };
+            let Some(e) = e.reverse() else {
+                return false;
+            };
             let src = e.source.expect("Pattern cannot have dangling edges");
             known_nodes.contains(&src)
         };
@@ -225,7 +227,7 @@ where
         }
         let pout = p;
         let Some(pin) = g.port_link(pout) else {
-            continue
+            continue;
         };
         let pout_offset = g.port_offset(pout).unwrap();
         let pin_offset = g.port_offset(pin).unwrap();
@@ -310,10 +312,13 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
                 }
                 new_edges.push((u, v, property.clone()));
                 add_new_edges(&mut to_visit, v, edges.keys());
-                let Some((_, new_prop)) = edges.keys()
+                let Some((_, new_prop)) = edges
+                    .keys()
                     .find(|(u, p)| u == &v && valid_successor(&property, p))
                     .cloned()
-                else { break };
+                else {
+                    break;
+                };
                 curr_edge = (v, new_prop);
             }
             if !new_edges.is_empty() {

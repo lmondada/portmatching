@@ -251,8 +251,12 @@ fn exists_two_cx_gates(circ: &PortGraph) -> bool {
             continue;
         }
         let mut next = circ.outputs(n).map(|out| circ.port_link(out));
-        let Some(next0) = next.next().unwrap() else { continue };
-        let Some(next1) = next.next().unwrap() else { continue };
+        let Some(next0) = next.next().unwrap() else {
+            continue;
+        };
+        let Some(next1) = next.next().unwrap() else {
+            continue;
+        };
         let next = [next0, next1];
         if circ.port_offset(next[0]).expect("invalid port").index() != 0 {
             continue;
