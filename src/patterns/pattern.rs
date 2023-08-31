@@ -90,6 +90,19 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
         s
     }
 
+    /// Whether the pattern has a root and is connected.
+    pub fn is_valid(&self) -> bool {
+        let Some(edges) = self.edges() else {
+            return false;
+        };
+        // edges form connected graph, now check that all nodes are connected to the edge set
+        let known_nodes = edges
+            .iter()
+            .flat_map(|e| vec![e.source, e.target])
+            .collect::<HashSet<_>>();
+        self.nodes.len() < 2 || self.nodes.iter().all(|(u, _)| known_nodes.contains(u))
+    }
+
     /// Let the pattern fix a root
     ///
     /// We require `Ord` so that this is deterministic (do not rely on hash)
