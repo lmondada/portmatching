@@ -98,7 +98,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
         // edges form connected graph, now check that all nodes are connected to the edge set
         let known_nodes = edges
             .iter()
-            .flat_map(|e| vec![e.source, e.target])
+            .flat_map(|e| [e.source, e.target].into_iter().flatten())
             .collect::<HashSet<_>>();
         self.nodes.len() < 2 || self.nodes.iter().all(|(u, _)| known_nodes.contains(u))
     }
