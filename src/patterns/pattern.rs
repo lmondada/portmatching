@@ -17,6 +17,12 @@ pub struct Pattern<U: Universe, PNode, PEdge: Eq + Hash> {
     root: Option<U>,
 }
 
+impl<U: Universe, PNode, PEdge: Eq + Hash> Pattern<U, PNode, PEdge> {
+    pub fn n_edges(&self) -> usize {
+        self.edges.len()
+    }
+}
+
 pub type UnweightedPattern = Pattern<NodeIndex, (), UnweightedEdge>;
 pub type WeightedPattern<W> = Pattern<NodeIndex, W, UnweightedEdge>;
 
