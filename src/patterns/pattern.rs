@@ -38,7 +38,7 @@ pub struct Edge<U, PNode, PEdge> {
 }
 
 impl<U: Universe, PNode: Clone, PEdge: EdgeProperty> Edge<U, PNode, PEdge> {
-    pub(crate) fn reverse(&self) -> Option<Self>
+    pub fn reverse(&self) -> Option<Self>
     where
         PEdge: EdgeProperty,
     {
