@@ -8,8 +8,8 @@ use itertools::{Either, Itertools};
 use crate::{
     automaton::{ScopeAutomaton, StateID},
     patterns::{IterationStatus, LinePattern, PredicatesIter},
-    predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility},
-    EdgeProperty, HashMap, NodeProperty, Universe,
+    predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility, Symbol},
+    EdgeProperty, HashMap, HashSet, NodeProperty, Universe,
 };
 
 pub struct LineBuilder<U: Universe, PNode, PEdge> {
@@ -128,9 +128,9 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
         let transitions = transitions.iter().enumerate();
 
         for (source, transitions) in partition_by(transitions, |(_, t)| t.source) {
-            let (inds, targets, preds): (Vec<_>, Vec<_>, Vec<_>) = transitions
+            let (inds, targets, preds, scopes): (Vec<_>, Vec<_>, Vec<_>, Vec<_>) = transitions
                 .into_iter()
-                .map(|(i, t)| (i, t.target, t.pred.clone()))
+                .map(|(i, t)| (i, t.target, t.pred.clone(), t.scope()))
                 .multiunzip();
 
             // make source non-deterministic if necessary
@@ -142,7 +142,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
                 }
             }
 
-            let added_states = matcher.set_children(source, preds, &targets);
+            let added_states = matcher.set_children(source, preds, &targets, scopes);
 
             for (i, new_state) in inds.into_iter().zip(added_states) {
                 new_states[i] = new_state;
@@ -182,7 +182,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
                 source,
                 patterns
                     .into_iter()
-                    .map(|mut p| (p.edges.next().expect("Not finished"), p)),
+                    .map(|mut p| (p.next_edge().expect("Not finished"), p)),
             ));
         }
         if let Some(patterns) = det_patterns {
@@ -192,7 +192,7 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
                     source,
                     patterns
                         .into_iter()
-                        .map(|mut p| (p.edges.next().expect("Not finished"), p)),
+                        .map(|mut p| (p.next_edge().expect("Not finished"), p)),
                 ));
             } else {
                 // Add a single True transition, and put all det transitions there
@@ -231,22 +231,59 @@ impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
             return Vec::new();
         };
         // Split patterns between min stage and other stages
-        let mut min_patterns = patterns.remove(&min_stage).unwrap();
+        let min_patterns = patterns.remove(&min_stage).unwrap();
         let mut other_patterns = patterns.into_values().flatten().collect_vec();
 
-        // For the min stage, introduce the transitions as normal
-        let min_predicates = min_patterns
+        // Introduce the transitions as normal for the minimal stage
+        // We need to be careful about the "scope" of the patterns
+        // If the scope is smaller than the total scope, then we need to add
+        // a child node to handle the smaller scope.
+        let min_scopes = min_patterns.iter().map(|p| p.scope.clone()).collect_vec();
+        let scope = min_scopes.iter().max_by_key(|s| s.len()).unwrap();
+        let (mut in_scope_patterns, mut out_scope_patterns): (Vec<_>, Vec<_>) = min_patterns
+            .iter()
+            .cloned()
+            .partition(|p| scope.is_superset(&p.scope));
+        if !out_scope_patterns.is_empty() {
+            // we need to split the predicates into two halves, because
+            // the scopes do not have a join
+            in_scope_patterns.extend(other_patterns.iter().cloned());
+            out_scope_patterns.extend(other_patterns.iter().cloned());
+            return vec![
+                TransitionInConstruction {
+                    source,
+                    target: None,
+                    pred: EdgePredicate::True,
+                    patterns: in_scope_patterns,
+                },
+                TransitionInConstruction {
+                    source,
+                    target: None,
+                    pred: EdgePredicate::True,
+                    patterns: out_scope_patterns,
+                },
+            ];
+        }
+        // We handle the predicates with maximal scope
+        let min_predicates = in_scope_patterns
             .iter_mut()
-            .map(|p| p.edges.next().expect("Not finished"))
+            .map(|p| p.next_edge().expect("Not finished"))
             .collect_vec();
         let mut transitions =
-            create_transitions(source, min_predicates.into_iter().zip(min_patterns));
+            create_transitions(source, min_predicates.into_iter().zip(in_scope_patterns));
         // Then add all other patterns to each possible transition
         for t in &mut transitions {
             t.patterns.append(&mut other_patterns.clone());
         }
 
         // Finally, we add a Fail transition to all other stages together
+        // Also add patterns with smaller scope
+        other_patterns.extend(
+            min_patterns
+                .into_iter()
+                // The scope is contained, so just check the size
+                .filter(|p| p.scope.len() < scope.len()),
+        );
         if !other_patterns.is_empty() {
             let next_state = self.try_reuse_det_state(&mut other_patterns);
             transitions.push(TransitionInConstruction {
@@ -321,8 +358,13 @@ where
 
 #[derive(Clone)]
 struct PatternInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
+    /// Predicates of the pattern yet to be inserted
     edges: PredicatesIter<'a, U, PNode, PEdge>,
+    /// Pattern ID
     pattern_id: usize,
+    /// The scope required to interpret the predicates
+    /// This is initially empty, but is updated as predicates are consumed
+    scope: HashSet<Symbol>,
 }
 
 struct TransitionInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
@@ -332,11 +374,35 @@ struct TransitionInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
     patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
 }
 
+impl<'a, U: Universe, PNode, PEdge: EdgeProperty> TransitionInConstruction<'a, U, PNode, PEdge> {
+    fn scope(&self) -> HashSet<Symbol> {
+        self.patterns
+            .iter()
+            .flat_map(|p| p.scope.iter().copied())
+            .collect()
+    }
+}
+
 impl<'a, U: Universe, PNode: Clone, PEdge: EdgeProperty>
     PatternInConstruction<'a, U, PNode, PEdge>
 {
     fn new(edges: PredicatesIter<'a, U, PNode, PEdge>, pattern_id: usize) -> Self {
-        Self { edges, pattern_id }
+        Self {
+            edges,
+            pattern_id,
+            scope: [Symbol::root()].into_iter().collect(),
+        }
+    }
+
+    fn next_edge(&mut self) -> Option<EdgePredicate<PNode, PEdge, PEdge::OffsetID>>
+    where
+        PNode: NodeProperty,
+    {
+        let edge = self.edges.next()?;
+        if let EdgePredicate::LinkNewNode { new_node, .. } = edge {
+            self.scope.insert(new_node);
+        }
+        Some(edge)
     }
 }
 
@@ -497,7 +563,7 @@ mod tests {
 
         let builder: LineBuilder<_, _, _> = [p1, p2, p3].into_iter().collect();
         let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 21);
+        assert_eq!(matcher.n_states(), 23);
     }
 
     #[test]
