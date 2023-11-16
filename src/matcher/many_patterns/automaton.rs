@@ -166,6 +166,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use glob::glob;
+    use std::fs;
 
     use std::collections::BTreeSet;
 
@@ -183,6 +185,8 @@ mod tests {
         utils::test::gen_portgraph_connected,
         HashSet, NaiveManyMatcher, Pattern,
     };
+
+    const DBG_DUMP_FILES: bool = false;
 
     #[test]
     fn single_pattern_loop_link() {
@@ -451,15 +455,31 @@ mod tests {
         #[ignore = "a bit slow"]
         #[test]
         fn many_graphs_proptest(
-            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
+            pattern_graphs in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
-            let patterns = patterns
-                .into_iter()
-                .map(|p| Pattern::from_portgraph(&p))
+            if DBG_DUMP_FILES {
+                for entry in glob("pattern_*.json").expect("glob pattern failed") {
+                    if let Ok(path) = entry {
+                        fs::remove_file(path).expect("Removing file failed");
+                    }
+                }
+                fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            }
+            let patterns = pattern_graphs
+                .iter()
+                .map(Pattern::from_portgraph)
                 .collect_vec();
+            if DBG_DUMP_FILES {
+                for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
+                    fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
+                }
+            }
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
             let single_matches: HashSet<_>  = naive.find_matches(&g).into_iter().collect();
+            if DBG_DUMP_FILES {
+                fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            }
             let matcher = ManyMatcher::from_patterns(patterns);
             let many_matches: HashSet<_> = matcher.find_matches(&g).into_iter().collect();
             prop_assert_eq!(many_matches, single_matches);
@@ -473,22 +493,28 @@ mod tests {
             pattern_graphs in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
-            // for entry in glob("pattern_*.json").expect("glob pattern failed") {
-            //     if let Ok(path) = entry {
-            //         fs::remove_file(path).expect("Removing file failed");
-            //     }
-            // }
-            // fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            if DBG_DUMP_FILES {
+                for entry in glob("pattern_*.json").expect("glob pattern failed") {
+                    if let Ok(path) = entry {
+                        fs::remove_file(path).expect("Removing file failed");
+                    }
+                }
+                fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            }
             let patterns = pattern_graphs
                 .iter()
                 .map(Pattern::from_portgraph)
                 .collect_vec();
-            // for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
-            //     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
-            // }
+            if DBG_DUMP_FILES {
+                for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
+                    fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
+                }
+            }
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
             let single_matches: BTreeSet<_> = naive.find_matches(&g).into_iter().collect();
-            // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            if DBG_DUMP_FILES {
+                fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            }
             let matcher = ManyMatcher::from_patterns(patterns);
             let many_matches: BTreeSet<_> = matcher.find_matches(&g).into_iter().collect();
             prop_assert_eq!(many_matches, single_matches);
