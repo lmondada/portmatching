@@ -182,7 +182,6 @@ mod tests {
     #[cfg(feature = "serde")]
     use std::fs;
 
-
     use crate::{
         matcher::{ManyMatcher, PatternMatch, PortMatcher, SinglePatternMatcher},
         utils::test::gen_portgraph_connected,
