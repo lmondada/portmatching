@@ -356,7 +356,7 @@ fn add_new_edges<'a, U: Universe + 'a, PEdge: EdgeProperty + 'a>(
 ) {
     let mut node_edges = edges
         .into_iter()
-        .filter(|&(u, _)| u == node)
+        .filter(|&&(u, _)| u == node)
         .cloned()
         .collect_vec();
     node_edges.sort_unstable_by_key(|(_, prop)| prop.clone());
