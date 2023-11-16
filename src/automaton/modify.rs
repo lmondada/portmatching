@@ -1,6 +1,10 @@
+use itertools::izip;
 use portgraph::{LinkMut, PortMut, PortView};
 
-use crate::{predicate::EdgePredicate, EdgeProperty, PatternID};
+use crate::{
+    predicate::{EdgePredicate, Symbol},
+    EdgeProperty, HashSet, PatternID,
+};
 
 use super::{ScopeAutomaton, State, StateID, Transition};
 
@@ -10,6 +14,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         state: StateID,
         preds: impl IntoIterator<IntoIter = I>,
         next_states: &[Option<StateID>],
+        next_scopes: Vec<HashSet<Symbol>>,
     ) -> Vec<Option<StateID>>
     where
         I: Iterator<Item = EdgePredicate<PNode, PEdge, PEdge::OffsetID>> + ExactSizeIterator,
@@ -22,10 +27,11 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         self.add_ports(state, 0, preds.len());
 
         // Build the children
-        preds
-            .zip(next_states)
+        izip!(preds, next_states, next_scopes)
             .enumerate()
-            .map(|(i, (pred, &next_state))| self.add_child(state, i, pred.into(), next_state))
+            .map(|(i, (pred, &next_state, next_scope))| {
+                self.add_child(state, i, pred.into(), next_state, Some(next_scope))
+            })
             .collect()
     }
 
@@ -35,6 +41,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         offset: usize,
         pedge: Transition<PNode, PEdge, PEdge::OffsetID>,
         new_state: Option<StateID>,
+        new_scope: Option<HashSet<Symbol>>,
     ) -> Option<StateID> {
         let mut added_state = false;
         let (new_state_id, new_offset) = if let Some(new_state) = new_state {
@@ -48,7 +55,8 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         self.graph
             .link_nodes(parent.0, offset, new_state_id.0, new_offset)
             .expect("Could not add child at offset p");
-        let new_scope = {
+        let new_scope = new_scope.unwrap_or_else(|| {
+            // By default, take scope of parent and add symbol if necessary
             let mut old_scope = self.weights[parent.0]
                 .clone()
                 .expect("invalid parent")
@@ -57,7 +65,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
                 old_scope.insert(new_node);
             }
             old_scope
-        };
+        });
         let new_state = if let Some(mut new_state) = self.weights[new_state_id.0].take() {
             new_state.scope.retain(|k| new_scope.contains(k));
             new_state
@@ -127,10 +135,10 @@ mod tests {
             new_node: s2,
         }
         .into();
-        let child = a.add_child(a.root(), 0, t1, None).unwrap();
+        let child = a.add_child(a.root(), 0, t1, None, None).unwrap();
 
         assert_eq!(a.scope(child), &[s_root, s1].into_iter().collect());
-        a.add_child(a.root(), 1, t2, Some(child));
+        a.add_child(a.root(), 1, t2, Some(child), None);
         assert_eq!(a.scope(child), &[s_root].into_iter().collect());
     }
 }
