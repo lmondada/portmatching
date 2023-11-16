@@ -166,9 +166,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use glob::glob;
-    use std::fs;
-
     use std::collections::BTreeSet;
 
     use itertools::Itertools;
@@ -179,6 +176,12 @@ mod tests {
     };
 
     use proptest::prelude::*;
+
+    #[cfg(feature = "serde")]
+    use glob::glob;
+    #[cfg(feature = "serde")]
+    use std::fs;
+
 
     use crate::{
         matcher::{ManyMatcher, PatternMatch, PortMatcher, SinglePatternMatcher},
@@ -458,11 +461,14 @@ mod tests {
             pattern_graphs in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
+            #[cfg(not(feature = "serde"))]
             if DBG_DUMP_FILES {
-                for entry in glob("pattern_*.json").expect("glob pattern failed") {
-                    if let Ok(path) = entry {
-                        fs::remove_file(path).expect("Removing file failed");
-                    }
+                println!("Warning: serde feature not enabled, cannot dump files");
+            }
+            #[cfg(feature = "serde")]
+            if DBG_DUMP_FILES {
+                for path in glob("pattern_*.json").expect("glob pattern failed").flatten() {
+                    fs::remove_file(path).expect("Removing file failed");
                 }
                 fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
             }
@@ -470,6 +476,7 @@ mod tests {
                 .iter()
                 .map(Pattern::from_portgraph)
                 .collect_vec();
+            #[cfg(feature = "serde")]
             if DBG_DUMP_FILES {
                 for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
                     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
@@ -477,6 +484,7 @@ mod tests {
             }
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
             let single_matches: HashSet<_>  = naive.find_matches(&g).into_iter().collect();
+            #[cfg(feature = "serde")]
             if DBG_DUMP_FILES {
                 fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
             }
@@ -494,10 +502,12 @@ mod tests {
             g in gen_portgraph(30, 4, 60)
         ) {
             if DBG_DUMP_FILES {
-                for entry in glob("pattern_*.json").expect("glob pattern failed") {
-                    if let Ok(path) = entry {
-                        fs::remove_file(path).expect("Removing file failed");
-                    }
+                println!("Warning: serde feature not enabled, cannot dump files");
+            }
+            #[cfg(feature = "serde")]
+            if DBG_DUMP_FILES {
+                for path in glob("pattern_*.json").expect("glob pattern failed").flatten() {
+                    fs::remove_file(path).expect("Removing file failed");
                 }
                 fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
             }
@@ -505,6 +515,7 @@ mod tests {
                 .iter()
                 .map(Pattern::from_portgraph)
                 .collect_vec();
+            #[cfg(feature = "serde")]
             if DBG_DUMP_FILES {
                 for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
                     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
@@ -512,6 +523,7 @@ mod tests {
             }
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
             let single_matches: BTreeSet<_> = naive.find_matches(&g).into_iter().collect();
+            #[cfg(feature = "serde")]
             if DBG_DUMP_FILES {
                 fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
             }
