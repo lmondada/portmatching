@@ -3,47 +3,31 @@ use std::collections::VecDeque;
 use itertools::Itertools;
 use portgraph::{LinkView, PortGraph, PortView};
 
-use crate::{predicate::PredicateSatisfied, EdgeProperty, NodeProperty, PatternID, Universe};
+use crate::{
+    constraint::{ScopeConstraint, ScopeMap},
+    BiMap, PatternID, Symbol,
+};
 
-use super::{AssignMap, OutPort, ScopeAutomaton, StateID, Symbol};
+use super::{OutPort, ScopeAutomaton, StateID};
 
-impl<PNode: NodeProperty, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
-    pub fn run<'s, U: Universe + 's>(
-        &'s self,
-        root: U,
-        node_prop: impl for<'a> Fn(U, &'a PNode) -> bool + 's,
-        edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Option<U> + 's,
-    ) -> impl Iterator<Item = PatternID> + 's {
-        let ass = AssignMap::new(self.root, root);
-        if !self.is_valid_assignment(self.root, &ass) {
-            panic!("Input is not a valid assignment of root scope");
-        }
-        Traverser::new(self, ass, node_prop, edge_prop)
+impl<C: ScopeConstraint + Clone> ScopeAutomaton<C> {
+    pub fn run<'a>(&'a self, root: C::Value, graph: C::DataRef<'a>) -> Traverser<'a, C> {
+        Traverser::new(self, root, graph)
     }
 
     /// An iterator of the allowed transitions
-    fn legal_transitions<'s, U: Universe>(
-        &'s self,
+    fn legal_transitions<'a, 's: 'a>(
+        &'a self,
         state: StateID,
-        ass: &'s AssignMap<U>,
-        node_prop: impl for<'a> Fn(U, &'a PNode) -> bool + 's,
-        edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Option<U> + 's,
-    ) -> impl Iterator<Item = (OutPort, Option<(Symbol, U)>)> + 's {
+        ass: &'a TraverseState<C>,
+        data: C::DataRef<'s>,
+    ) -> impl Iterator<Item = (OutPort, ScopeMap<C>)> + 'a {
         self.outputs(state).filter_map(move |edge| {
-            match self
-                .predicate(edge)
-                .is_satisfied(&ass.map, &node_prop, &edge_prop)
-            {
-                PredicateSatisfied::NewSymbol(new_symb, new_u) => {
-                    (edge, Some((new_symb, new_u))).into()
-                }
-                PredicateSatisfied::Yes => (edge, None).into(),
-                PredicateSatisfied::No => None,
-            }
+            Some((edge, self.predicate(edge).is_satisfied(&ass.map, data)?))
         })
     }
 
-    fn is_valid_assignment<U: Universe>(&self, state: StateID, ass: &AssignMap<U>) -> bool {
+    fn is_valid_assignment(&self, state: StateID, ass: &TraverseState<C>) -> bool {
         if state != ass.state_id {
             return false;
         }
@@ -53,52 +37,34 @@ impl<PNode: NodeProperty, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
 }
 
 /// An iterator for traversing a scope automaton
-///
-/// ## Type parameters
-///  - U: the universe that the symbols in scope get interpreted to
-///  - A: scope assignments mapping symbols to value in U
-///  - M: Markers
-///  - Symb: the symbol type used to refer to values in scope
-///  - P: a predicate to check for allowed transitions
-///  - SU: scope updater, to modify scope as we transition along edges
-///  - D: arbitrary input data that the automaton can refer to
-struct Traverser<Map, A, FnN, FnE> {
+pub struct Traverser<'a, C: ScopeConstraint> {
     matches_queue: VecDeque<PatternID>,
-    state_queue: VecDeque<(StateID, Map)>,
-    automaton: A,
-    node_prop: FnN,
-    edge_prop: FnE,
+    state_queue: VecDeque<TraverseState<C>>,
+    automaton: &'a ScopeAutomaton<C>,
+    data: C::DataRef<'a>,
 }
 
-impl<'a, Map, PNode, PEdge: EdgeProperty, FnN, FnE>
-    Traverser<Map, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
-{
-    fn new(
-        automaton: &'a ScopeAutomaton<PNode, PEdge>,
-        ass: Map,
-        node_prop: FnN,
-        edge_prop: FnE,
-    ) -> Self {
+impl<'a, C: ScopeConstraint + Clone> Traverser<'a, C> {
+    fn new(automaton: &'a ScopeAutomaton<C>, root: C::Value, data: C::DataRef<'a>) -> Self {
+        let ass = TraverseState::new(automaton.root, root);
+        if !automaton.is_valid_assignment(automaton.root, &ass) {
+            panic!("Input is not a valid assignment of root scope");
+        }
         let matches_queue = VecDeque::new();
-        let state_queue = VecDeque::from_iter([(automaton.root, ass)]);
+        let state_queue = VecDeque::from_iter([ass]);
         Self {
             matches_queue,
             state_queue,
             automaton,
-            node_prop,
-            edge_prop,
+            data,
         }
     }
-}
 
-impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty, FnN, FnE>
-    Traverser<AssignMap<U>, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
-{
     fn enqueue_state(
         &mut self,
         out_port: OutPort,
-        mut ass: AssignMap<U>,
-        new_symb: Option<(Symbol, U)>,
+        mut ass: TraverseState<C>,
+        new_symb: Option<(C::Symbol, C::Value)>,
     ) {
         let next_state = next_state(&self.automaton.graph, out_port);
         let next_scope = self.automaton.scope(next_state);
@@ -110,40 +76,60 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty, FnN, FnE>
                 panic!("Tried to overwrite in assignment map");
             }
         }
-        self.state_queue.push_back((next_state, ass))
+        self.state_queue.push_back(ass)
     }
 }
 
-impl<'a, U: Universe, PNode, PEdge: EdgeProperty, FnN, FnE> Iterator
-    for Traverser<AssignMap<U>, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
-where
-    PNode: NodeProperty,
-    FnN: for<'b> Fn(U, &'b PNode) -> bool,
-    FnE: for<'b> Fn(U, &'b PEdge) -> Option<U>,
-{
+impl<'a, C: ScopeConstraint + Clone> Iterator for Traverser<'a, C> {
     type Item = PatternID;
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.matches_queue.is_empty() {
-            let Some((state, ass)) = self.state_queue.pop_front() else {
+            let Some(ass) = self.state_queue.pop_front() else {
                 break;
             };
+            let state = ass.state_id;
             self.matches_queue.extend(self.automaton.matches(state));
-            let mut transitions =
-                self.automaton
-                    .legal_transitions(state, &ass, &self.node_prop, &self.edge_prop);
+            let mut transitions = self.automaton.legal_transitions(state, &ass, self.data);
             if self.automaton.is_deterministic(state) {
-                if let Some((edge, new_symb)) = transitions.next() {
+                if let Some((edge, new_symbs)) = transitions.next() {
                     drop(transitions);
-                    self.enqueue_state(edge, ass, new_symb);
+                    for (s, v) in new_symbs {
+                        self.enqueue_state(edge, ass.clone(), Some((s, v)));
+                    }
                 }
             } else {
-                for (edge, new_symb) in transitions.collect_vec() {
-                    self.enqueue_state(edge, ass.clone(), new_symb);
+                for (edge, new_symbs) in transitions.collect_vec() {
+                    for (s, v) in new_symbs {
+                        self.enqueue_state(edge, ass.clone(), Some((s, v)));
+                    }
                 }
             }
         }
         self.matches_queue.pop_front()
+    }
+}
+
+/// A map of scope symbols to values in the universe
+///
+/// For now, all scope assignments must be bijective, i.e. each value has
+/// at most one symbol it is assigned to.
+///
+/// ## Type parameters
+/// - A: A function from symbols to values
+#[derive(Clone)]
+struct TraverseState<C: ScopeConstraint> {
+    map: ScopeMap<C>,
+    state_id: StateID,
+}
+
+impl<C: ScopeConstraint> TraverseState<C> {
+    fn new(root_state: StateID, root: C::Value) -> Self {
+        let map = BiMap::from_iter([(C::Symbol::root(), root)]);
+        Self {
+            map,
+            state_id: root_state,
+        }
     }
 }
 

@@ -1,10 +1,12 @@
 use portgraph::PortView;
 
-use crate::{EdgeProperty, HashSet, PatternID};
+use super::{OutPort, ScopeAutomaton, StateID, Transition};
+use crate::{
+    constraint::{Scope, ScopeConstraint},
+    PatternID,
+};
 
-use super::{EdgePredicate, OutPort, ScopeAutomaton, StateID, Symbol};
-
-impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
+impl<C: ScopeConstraint + Clone> ScopeAutomaton<C> {
     pub(super) fn outputs(&self, state: StateID) -> impl Iterator<Item = OutPort> + '_ {
         self.graph.outputs(state.0).map(move |p| {
             let offset = self.graph.port_offset(p).expect("invalid port").index();
@@ -17,20 +19,20 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         self.graph.node_count()
     }
 
-    pub(super) fn predicate(&self, edge: OutPort) -> &EdgePredicate<PNode, PEdge, PEdge::OffsetID> {
+    pub(super) fn predicate(&self, edge: OutPort) -> &Transition<C> {
         let OutPort(state, offset) = edge;
         let port = self.graph.output(state.0, offset).unwrap();
-        let Some(transition) = self.weights[port].as_ref() else {
-            panic!("Invalid outgoing port transition");
-        };
-        &transition.predicate
+        self.weights[port].as_ref().expect("Invalid outgoing port transition")
     }
 
-    pub(super) fn scope(&self, state: StateID) -> &HashSet<Symbol> {
+    pub(super) fn scope(&self, state: StateID) -> &Scope<C> {
         &self.weights[state.0].as_ref().expect("invalid state").scope
     }
 
-    pub(super) fn matches(&self, state: StateID) -> impl Iterator<Item = PatternID> + '_ {
+    pub(super) fn matches(&self, state: StateID) -> impl Iterator<Item = PatternID> + '_
+    where
+        C: Clone,
+    {
         self.weights[state.0]
             .as_ref()
             .expect("invalid state")

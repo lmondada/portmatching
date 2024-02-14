@@ -15,7 +15,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 #[doc(inline)]
-pub use automaton::{ManyMatcher, UnweightedManyMatcher};
+pub use automaton::ManyMatcher;
 #[doc(inline)]
 pub use naive::NaiveManyMatcher;
 

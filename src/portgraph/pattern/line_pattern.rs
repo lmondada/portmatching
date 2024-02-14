@@ -1,11 +1,14 @@
 use std::collections::VecDeque;
+use std::hash::Hash;
 
 use derive_more::{From, Into};
 
 use crate::{
-    predicate::{EdgePredicate, NodeLocation, Symbol, SymbolsIter},
-    EdgeProperty, HashMap, NodeProperty, Universe,
+    portgraph::{IterationStatus, NodeLocation, SymbolsIter},
+    HashMap, PatternID,
 };
+
+use super::{EdgeProperty, NodeProperty, PortgraphConstraint, PortgraphPattern, Symbol};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) struct Line<U, PEdge> {
@@ -21,9 +24,18 @@ impl<U, PEdge> Line<U, PEdge> {
 
 /// A pattern to match, stored line by line from the root
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct LinePattern<U: Universe, PNode, PEdge> {
+pub(crate) struct LinePattern<U: Eq + Hash, PNode, PEdge> {
     pub(crate) nodes: HashMap<U, PNode>,
     pub(crate) lines: Vec<Line<U, PEdge>>,
+    pub(crate) pattern_id: PatternID,
+}
+
+impl<U: Eq + Hash + Copy + Ord, PNode: NodeProperty, PEdge: EdgeProperty>
+    From<LinePattern<U, PNode, PEdge>> for PortgraphPattern<U, PNode, PEdge>
+{
+    fn from(value: LinePattern<U, PNode, PEdge>) -> Self {
+        value.to_pattern()
+    }
 }
 
 /// Within a line pattern, the address of a node
@@ -31,7 +43,7 @@ pub struct LinePattern<U: Universe, PNode, PEdge> {
 #[derive(Clone, Copy, From, Into, Debug)]
 struct LineAddress(usize, usize);
 
-impl<U: Universe, PNode: NodeProperty, PEdge: Clone> LinePattern<U, PNode, PEdge> {
+impl<U: Eq + Hash + Copy, PNode: NodeProperty, PEdge: Clone> LinePattern<U, PNode, PEdge> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -44,7 +56,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: Clone> LinePattern<U, PNode, PEdge
         self.lines.push(Line { root, edges });
     }
 
-    pub(crate) fn edge_predicates(&self) -> PredicatesIter<'_, U, PNode, PEdge>
+    pub(crate) fn to_constraints(&self) -> PredicatesIter<'_, U, PNode, PEdge>
     where
         PEdge: EdgeProperty,
     {
@@ -56,24 +68,43 @@ impl<U: Universe, PNode: NodeProperty, PEdge: Clone> LinePattern<U, PNode, PEdge
     }
 }
 
-impl<U: Universe, PNode, PEdge> Default for LinePattern<U, PNode, PEdge> {
+impl<U: Eq + Hash + Copy, PNode: NodeProperty, PEdge: EdgeProperty> LinePattern<U, PNode, PEdge> {
+    pub(crate) fn to_pattern(&self) -> PortgraphPattern<U, PNode, PEdge>
+    where
+        U: Ord + Clone,
+        PNode: Clone,
+        PEdge: Clone,
+    {
+        let mut constraints_iter = self.to_constraints();
+        let constraints = (&mut constraints_iter).collect();
+        let u_to_symbol = constraints_iter.u_to_symbols.into_iter().collect();
+        PortgraphPattern {
+            constraints,
+            u_to_symbol,
+            pattern_id: self.pattern_id,
+        }
+    }
+}
+
+impl<U: Eq + Hash, PNode, PEdge> Default for LinePattern<U, PNode, PEdge> {
     fn default() -> Self {
         Self {
             nodes: HashMap::default(),
             lines: Vec::new(),
+            pattern_id: PatternID(0),
         }
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct PredicatesIter<'a, U: Universe, PNode, PEdge: EdgeProperty> {
+pub(crate) struct PredicatesIter<'a, U: Eq + Hash, PNode, PEdge: EdgeProperty> {
     // Map each node to the first address where it occurs
     to_line_ind: HashMap<U, LineAddress>,
     // For each line, the first index that we have not yet visited
     // (index 0 is always discovered by some other line)
     visited_boundary: Vec<usize>,
     // The queue of next items
-    it_queue: VecDeque<EdgePredicate<PNode, PEdge, PEdge::OffsetID>>,
+    it_queue: VecDeque<PortgraphConstraint<PNode, PEdge, PEdge::OffsetID>>,
     // The symbols that have been assigned to each node
     u_to_symbols: HashMap<U, Symbol>,
     // How far we have come in the traversal
@@ -86,7 +117,7 @@ pub(crate) struct PredicatesIter<'a, U: Universe, PNode, PEdge: EdgeProperty> {
     free_symbols: SymbolsIter,
 }
 
-impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
+impl<'a, U: Eq + Hash + Copy, PNode: NodeProperty, PEdge: EdgeProperty>
     PredicatesIter<'a, U, PNode, PEdge>
 {
     fn new(p: &'a LinePattern<U, PNode, PEdge>) -> Self {
@@ -108,14 +139,14 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
             let root_symbol = free_symbols.next().unwrap();
             u_to_symbols.insert(root, root_symbol);
             if let Some(root_prop) = nodes.get(&root) {
-                it_queue.push_back(EdgePredicate::NodeProperty {
+                it_queue.push_back(PortgraphConstraint::NodeProperty {
                     node: root_symbol,
                     property: root_prop.clone(),
                 });
             }
             if let Some(first_prop) = lines[0].edges.get(0).map(|w| &w.2) {
                 // Indicate location of first line
-                it_queue.push_back(EdgePredicate::NextRoot {
+                it_queue.push_back(PortgraphConstraint::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(root_symbol),
                     offset: first_prop.offset_id(),
@@ -134,7 +165,7 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
         }
     }
 
-    pub(crate) fn peek(&mut self) -> Option<&EdgePredicate<PNode, PEdge, PEdge::OffsetID>> {
+    pub(crate) fn peek(&mut self) -> Option<&PortgraphConstraint<PNode, PEdge, PEdge::OffsetID>> {
         self.fill_queue();
         self.it_queue.front()
     }
@@ -157,14 +188,14 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
         let boundary_ind = &mut self.visited_boundary[j];
         if j_ind >= *boundary_ind {
             // Indicate that we will be traversing `j` to reach the root of `i`
-            self.it_queue.push_back(EdgePredicate::NextRoot {
+            self.it_queue.push_back(PortgraphConstraint::NextRoot {
                 line_nb: i,
                 new_root: NodeLocation::Discover(j),
                 offset: first_prop.offset_id(),
             });
         } else {
             // Indicate that the root of `i` is known
-            self.it_queue.push_back(EdgePredicate::NextRoot {
+            self.it_queue.push_back(PortgraphConstraint::NextRoot {
                 line_nb: i,
                 new_root: NodeLocation::Exists(self.u_to_symbols[&self.lines[i].root]),
                 offset: first_prop.offset_id(),
@@ -184,7 +215,7 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
     fn traverse_leftover(&mut self, i: usize) {
         if i == 0 {
             // Indicate that we are moving to left overs
-            self.it_queue.push_back(EdgePredicate::True);
+            self.it_queue.push_back(PortgraphConstraint::True);
         }
         for ind in (self.visited_boundary[i] - 1)..self.lines[i].edges.len() {
             self.it_queue.extend(edge_predicates(
@@ -232,46 +263,13 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub(crate) enum IterationStatus {
-    // We are traversing the i-th line wihtin skeleton
-    Skeleton(usize),
-    // We are traversing the i-th line outside skeleton
-    LeftOver(usize),
-    // We are done
-    Finished,
-}
-
-impl IterationStatus {
-    fn increment(&mut self, max_i: usize) {
-        *self = match self {
-            Self::Skeleton(i) => {
-                if *i + 1 < max_i {
-                    Self::Skeleton(*i + 1)
-                } else {
-                    Self::LeftOver(0)
-                }
-            }
-            Self::LeftOver(i) => {
-                if *i + 1 < max_i {
-                    Self::LeftOver(*i + 1)
-                } else {
-                    Self::Finished
-                }
-            }
-            Self::Finished => Self::Finished,
-        }
-    }
-}
-
 impl<'a, U, PNode, PEdge> Iterator for PredicatesIter<'a, U, PNode, PEdge>
 where
-    U: Universe,
+    U: Eq + Hash + Copy,
     PNode: NodeProperty,
     PEdge: EdgeProperty,
 {
-    type Item = EdgePredicate<PNode, PEdge, PEdge::OffsetID>;
+    type Item = PortgraphConstraint<PNode, PEdge, PEdge::OffsetID>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.to_line_ind.is_empty() {
@@ -288,30 +286,30 @@ where
     }
 }
 
-fn edge_predicates<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
+fn edge_predicates<U: Eq + Hash, PNode: NodeProperty, PEdge: EdgeProperty>(
     (u, v, property): (U, U, PEdge),
     symbols: &mut HashMap<U, Symbol>,
     nodes: &HashMap<U, PNode>,
     mut new_symbols: impl Iterator<Item = Symbol>,
-) -> Vec<EdgePredicate<PNode, PEdge, PEdge::OffsetID>> {
+) -> Vec<PortgraphConstraint<PNode, PEdge, PEdge::OffsetID>> {
     let mut preds = Vec::new();
 
     let u_symb = symbols[&u];
     if let Some(&v_symb) = symbols.get(&v) {
-        preds.push(EdgePredicate::LinkKnownNode {
+        preds.push(PortgraphConstraint::LinkKnownNode {
             node: u_symb,
             property,
             known_node: v_symb,
         });
     } else {
         let v_symb = new_symbols.next().unwrap();
-        preds.push(EdgePredicate::LinkNewNode {
+        preds.push(PortgraphConstraint::LinkNewNode {
             node: u_symb,
             property,
             new_node: v_symb,
         });
         if let Some(v_prop) = nodes.get(&v).cloned() {
-            preds.push(EdgePredicate::NodeProperty {
+            preds.push(PortgraphConstraint::NodeProperty {
                 node: v_symb,
                 property: v_prop,
             });
@@ -352,6 +350,7 @@ mod tests {
                 (9, ()),
             ]),
             lines: vec![l1, l2, l3],
+            pattern_id: PatternID(0),
         };
         let symbs = [
             Symbol::new(IterationStatus::Skeleton(0), 0),
@@ -363,84 +362,84 @@ mod tests {
             Symbol::new(IterationStatus::LeftOver(2), 1),
         ];
         assert_eq!(
-            p.edge_predicates().collect::<Vec<_>>(),
+            p.to_constraints().collect::<Vec<_>>(),
             vec![
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[0],
                     property: ()
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(symbs[0]),
                     offset: ()
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 1,
                     new_root: NodeLocation::Discover(0),
                     offset: ()
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[0],
                     property: (),
                     new_node: symbs[1]
                 },
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[1],
                     property: ()
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[1],
                     property: (),
                     new_node: symbs[2]
                 },
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[2],
                     property: ()
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 2,
                     new_root: NodeLocation::Discover(1),
                     offset: ()
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[2],
                     property: (),
                     new_node: symbs[3]
                 },
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[3],
                     property: ()
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[3],
                     property: (),
                     new_node: symbs[4]
                 },
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[4],
                     property: ()
                 },
-                EdgePredicate::True,
-                EdgePredicate::LinkKnownNode {
+                PortgraphConstraint::True,
+                PortgraphConstraint::LinkKnownNode {
                     node: symbs[2],
                     property: (),
                     known_node: symbs[3]
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[4],
                     property: (),
                     new_node: symbs[5]
                 },
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[5],
                     property: ()
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[5],
                     property: (),
                     new_node: symbs[6]
                 },
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[6],
                     property: ()
                 },
@@ -471,49 +470,49 @@ mod tests {
             Symbol::new(IterationStatus::LeftOver(2), 0),
         ];
         assert_eq!(
-            p2.edge_predicates().collect::<Vec<_>>(),
+            p2.to_constraints().collect::<Vec<_>>(),
             vec![
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[0],
                     property: ()
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
                     offset: 0
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 1,
                     new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
                     offset: 0
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 2,
                     new_root: NodeLocation::Discover(1),
                     offset: 0
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[0],
                     property: 2,
                     new_node: symbs[1]
                 },
-                EdgePredicate::True,
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::True,
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[0],
                     property: 0,
                     new_node: symbs[2]
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[2],
                     property: 1,
                     new_node: symbs[3]
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[1],
                     property: 3,
                     new_node: symbs[4]
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[1],
                     property: 4,
                     new_node: symbs[5]
@@ -536,34 +535,34 @@ mod tests {
             Symbol::new(IterationStatus::LeftOver(1), 0),
         ];
         assert_eq!(
-            p2.edge_predicates().collect::<Vec<_>>(),
+            p2.to_constraints().collect::<Vec<_>>(),
             vec![
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[0],
                     property: ()
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(symbs[0]),
                     offset: 0
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 1,
                     new_root: NodeLocation::Discover(0),
                     offset: 0
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[0],
                     property: 0,
                     new_node: symbs[1]
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[1],
                     property: 0,
                     new_node: symbs[2]
                 },
-                EdgePredicate::True,
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::True,
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[2],
                     property: 0,
                     new_node: symbs[3]
@@ -596,49 +595,49 @@ mod tests {
             Symbol::new(IterationStatus::LeftOver(2), 0),
         ];
         assert_eq!(
-            p2.edge_predicates().collect_vec(),
+            p2.to_constraints().collect_vec(),
             vec![
-                EdgePredicate::NodeProperty {
+                PortgraphConstraint::NodeProperty {
                     node: symbs[0],
                     property: ()
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
                     offset: ()
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 1,
                     new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
                     offset: ()
                 },
-                EdgePredicate::NextRoot {
+                PortgraphConstraint::NextRoot {
                     line_nb: 2,
                     new_root: NodeLocation::Discover(1),
                     offset: ()
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[0],
                     property: (),
                     new_node: symbs[1]
                 },
-                EdgePredicate::True,
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::True,
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[0],
                     property: (),
                     new_node: symbs[2]
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[2],
                     property: (),
                     new_node: symbs[3]
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[1],
                     property: (),
                     new_node: symbs[4]
                 },
-                EdgePredicate::LinkNewNode {
+                PortgraphConstraint::LinkNewNode {
                     node: symbs[1],
                     property: (),
                     new_node: symbs[5]

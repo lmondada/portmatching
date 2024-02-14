@@ -1,30 +1,106 @@
+pub(super) mod line_pattern;
+
 use std::{
     collections::{BTreeSet, VecDeque},
     hash::Hash,
 };
 
-use super::{Line, LinePattern};
-use crate::{EdgeProperty, HashMap, HashSet, NodeProperty, Universe};
+pub(crate) use self::line_pattern::{Line, LinePattern};
+
+use super::{
+    constraint::{PortgraphConstraint, UnweightedPortgraphConstraint},
+    EdgeProperty, NodeProperty, Symbol,
+};
+use crate::{BiMap, HashMap, HashSet, ManyMatcher, Pattern, PatternID};
+
 use itertools::Itertools;
 use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
 use portgraph::{Direction, LinkView, NodeIndex, PortOffset, SecondaryMap};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Pattern<U: Universe, PNode, PEdge: Eq + Hash> {
+pub struct PortgraphPatternBuilder<U: Eq + Hash, PNode, PEdge: EdgeProperty> {
     nodes: HashMap<U, PNode>,
     edges: HashMap<(U, PEdge), U>,
     root: Option<U>,
+    pattern_id: PatternID,
 }
 
-impl<U: Universe, PNode, PEdge: Eq + Hash> Pattern<U, PNode, PEdge> {
+#[derive(Clone, PartialEq, Eq, Debug)]
+// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PortgraphPattern<U: Eq + Hash, PNode, PEdge: EdgeProperty> {
+    constraints: Vec<PortgraphConstraint<PNode, PEdge, PEdge::OffsetID>>,
+    pattern_id: PatternID,
+    u_to_symbol: BiMap<U, Symbol>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct UnweightedPortgraphPattern<U: Eq + Hash>(PortgraphPattern<U, (), UnweightedEdge>);
+
+impl<U: Eq + Hash + Copy + Ord, PNode: NodeProperty + 'static> Pattern
+    for PortgraphPattern<U, PNode, UnweightedEdge>
+{
+    type Constraint = PortgraphConstraint<PNode, UnweightedEdge, PortOffset>;
+    type Universe = U;
+
+    fn constraints(&self) -> impl Iterator<Item = Self::Constraint> {
+        self.constraints.iter().cloned()
+    }
+
+    fn id(&self) -> crate::PatternID {
+        self.pattern_id
+    }
+
+    fn get_symbol(
+        &self,
+        u: Self::Universe,
+    ) -> Option<<Self::Constraint as crate::ScopeConstraint>::Symbol> {
+        self.u_to_symbol.get_by_left(&u).copied()
+    }
+
+    fn get_id(
+        &self,
+        s: <Self::Constraint as crate::ScopeConstraint>::Symbol,
+    ) -> Option<Self::Universe> {
+        self.u_to_symbol.get_by_right(&s).copied()
+    }
+}
+
+impl<U: Eq + Hash + Copy + Ord> Pattern for UnweightedPortgraphPattern<U> {
+    type Constraint = UnweightedPortgraphConstraint<PortOffset>;
+    type Universe = U;
+
+    fn constraints(&self) -> impl Iterator<Item = Self::Constraint> {
+        self.0.constraints().map(|c| c.into())
+    }
+
+    fn id(&self) -> PatternID {
+        self.0.id()
+    }
+
+    fn get_symbol(
+        &self,
+        u: Self::Universe,
+    ) -> Option<<Self::Constraint as crate::ScopeConstraint>::Symbol> {
+        self.0.get_symbol(u)
+    }
+
+    fn get_id(
+        &self,
+        s: <Self::Constraint as crate::ScopeConstraint>::Symbol,
+    ) -> Option<Self::Universe> {
+        self.0.get_id(s)
+    }
+}
+
+impl<U: Eq + Hash, PNode, PEdge: EdgeProperty> PortgraphPatternBuilder<U, PNode, PEdge> {
     pub fn n_edges(&self) -> usize {
         self.edges.len()
     }
 }
 
-pub type UnweightedPattern = Pattern<NodeIndex, (), UnweightedEdge>;
-pub type WeightedPattern<W> = Pattern<NodeIndex, W, UnweightedEdge>;
+pub type UnweightedPattern = PortgraphPattern<NodeIndex, (), UnweightedEdge>;
+pub type WeightedPattern<W> = PortgraphPattern<NodeIndex, W, UnweightedEdge>;
 
 pub(crate) type UnweightedEdge = (PortOffset, PortOffset);
 
@@ -37,7 +113,7 @@ pub struct Edge<U, PNode, PEdge> {
     pub target_prop: Option<PNode>,
 }
 
-impl<U: Universe, PNode: Clone, PEdge: EdgeProperty> Edge<U, PNode, PEdge> {
+impl<U: Copy, PNode: Clone, PEdge: EdgeProperty> Edge<U, PNode, PEdge> {
     pub fn reverse(&self) -> Option<Self>
     where
         PEdge: EdgeProperty,
@@ -55,9 +131,16 @@ impl<U: Universe, PNode: Clone, PEdge: EdgeProperty> Edge<U, PNode, PEdge> {
 #[derive(Debug)]
 pub struct NoRootFound;
 
-impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
-    pub fn new() -> Self {
-        Self::default()
+impl<U: Eq + Hash + Copy + Ord, PNode: NodeProperty, PEdge: EdgeProperty>
+    PortgraphPatternBuilder<U, PNode, PEdge>
+{
+    pub fn new(pattern_id: impl Into<PatternID>) -> Self {
+        Self {
+            nodes: Default::default(),
+            edges: Default::default(),
+            root: Default::default(),
+            pattern_id: pattern_id.into(),
+        }
     }
     pub fn require(&mut self, node: U, property: PNode) {
         self.nodes.insert(node, property);
@@ -166,7 +249,20 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
     }
 }
 
-fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
+impl<U: Eq + Hash + Copy + Ord, PNode: NodeProperty>
+    TryFrom<PortgraphPatternBuilder<U, PNode, (PortOffset, PortOffset)>>
+    for PortgraphPattern<U, PNode, (PortOffset, PortOffset)>
+{
+    type Error = ();
+
+    fn try_from(
+        value: PortgraphPatternBuilder<U, PNode, (PortOffset, PortOffset)>,
+    ) -> Result<Self, Self::Error> {
+        value.build(compatible_offsets).ok_or(())
+    }
+}
+
+fn order_edges<U: Eq + Hash + Copy + Ord, PNode: NodeProperty, PEdge: EdgeProperty>(
     mut unvisited_edges: BTreeSet<Edge<U, PNode, PEdge>>,
     root_candidate: U,
 ) -> Option<Vec<Edge<U, PNode, PEdge>>> {
@@ -203,18 +299,8 @@ fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
     Some(edges)
 }
 
-impl<U: Universe, PNode, PEdge: Eq + Hash> Default for Pattern<U, PNode, PEdge> {
-    fn default() -> Self {
-        Self {
-            nodes: Default::default(),
-            edges: Default::default(),
-            root: None,
-        }
-    }
-}
-
 fn add_nodes<G: IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>>(
-    pattern: &mut Pattern<NodeIndex, (), (PortOffset, PortOffset)>,
+    pattern: &mut PortgraphPatternBuilder<NodeIndex, (), (PortOffset, PortOffset)>,
     g: G,
 ) {
     for n in g.node_identifiers() {
@@ -223,7 +309,7 @@ fn add_nodes<G: IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>>(
 }
 
 fn add_nodes_weighted<G, W>(
-    pattern: &mut Pattern<NodeIndex, W, (PortOffset, PortOffset)>,
+    pattern: &mut PortgraphPatternBuilder<NodeIndex, W, (PortOffset, PortOffset)>,
     g: G,
     w: impl SecondaryMap<NodeIndex, W>,
 ) where
@@ -235,8 +321,10 @@ fn add_nodes_weighted<G, W>(
     }
 }
 
-fn add_edges<W, G>(pattern: &mut Pattern<NodeIndex, W, (PortOffset, PortOffset)>, g: G)
-where
+fn add_edges<W, G>(
+    pattern: &mut PortgraphPatternBuilder<NodeIndex, W, (PortOffset, PortOffset)>,
+    g: G,
+) where
     W: NodeProperty,
     G: LinkView,
 {
@@ -256,12 +344,12 @@ where
     }
 }
 
-impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
+impl PortgraphPatternBuilder<NodeIndex, (), (PortOffset, PortOffset)> {
     pub fn from_portgraph<G>(g: G) -> Self
     where
         G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
     {
-        let mut pattern = Self::new();
+        let mut pattern = Self::new(0);
         add_nodes(&mut pattern, g);
         add_edges(&mut pattern, g);
         pattern.set_any_root().expect("Could not find root");
@@ -272,7 +360,7 @@ impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
     where
         G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
     {
-        let mut pattern = Self::new();
+        let mut pattern = Self::new(0);
         add_nodes(&mut pattern, g);
         add_edges(&mut pattern, g);
         pattern.set_root(root);
@@ -280,12 +368,40 @@ impl Pattern<NodeIndex, (), (PortOffset, PortOffset)> {
     }
 }
 
-impl<W: NodeProperty> Pattern<NodeIndex, W, (PortOffset, PortOffset)> {
+impl PortgraphPattern<NodeIndex, (), (PortOffset, PortOffset)> {
+    pub fn into_unweighted_pattern(self) -> UnweightedPortgraphPattern<NodeIndex> {
+        UnweightedPortgraphPattern(self)
+    }
+
+    pub fn try_from_portgraph<G>(g: G) -> Result<Self, ()>
+    where
+        G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    {
+        let mut pattern = PortgraphPatternBuilder::new(0);
+        add_nodes(&mut pattern, g);
+        add_edges(&mut pattern, g);
+        pattern.set_any_root().expect("Could not find root");
+        pattern.try_into()
+    }
+
+    pub fn try_from_rooted_portgraph<G>(g: G, root: NodeIndex) -> Result<Self, ()>
+    where
+        G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    {
+        let mut pattern = PortgraphPatternBuilder::new(0);
+        add_nodes(&mut pattern, g);
+        add_edges(&mut pattern, g);
+        pattern.set_root(root);
+        pattern.try_into()
+    }
+}
+
+impl<W: NodeProperty> PortgraphPatternBuilder<NodeIndex, W, (PortOffset, PortOffset)> {
     pub fn from_weighted_portgraph<G>(g: G, w: impl SecondaryMap<NodeIndex, W>) -> Self
     where
         G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
     {
-        let mut pattern = Self::new();
+        let mut pattern = Self::new(0);
         add_nodes_weighted(&mut pattern, g, w);
         add_edges(&mut pattern, g);
         pattern.set_any_root().expect("Could not find root");
@@ -293,11 +409,38 @@ impl<W: NodeProperty> Pattern<NodeIndex, W, (PortOffset, PortOffset)> {
     }
 }
 
-impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
-    /// Try to convert the pattern into a line pattern
+impl<W: NodeProperty> PortgraphPattern<NodeIndex, W, (PortOffset, PortOffset)> {
+    pub fn try_from_weighted_portgraph<G>(
+        g: G,
+        w: impl SecondaryMap<NodeIndex, W>,
+    ) -> Result<Self, ()>
+    where
+        G: LinkView + IntoNodeIdentifiers + GraphBase<NodeId = NodeIndex>,
+    {
+        let mut pattern = PortgraphPatternBuilder::new(0);
+        add_nodes_weighted(&mut pattern, g, w);
+        add_edges(&mut pattern, g);
+        pattern.set_any_root().expect("Could not find root");
+        pattern.try_into()
+    }
+}
+
+impl<U: Eq + Hash + Copy + Ord, PNode: NodeProperty, PEdge: EdgeProperty>
+    PortgraphPatternBuilder<U, PNode, PEdge>
+{
+    /// Build the pattern.
+    ///
+    /// Construct a line pattern and then turn it into constraints.
     ///
     /// Attempt every possible root and return `None` if none worked.
-    pub fn try_into_line_pattern<F: for<'a> Fn(&'a PEdge, &'a PEdge) -> bool>(
+    pub fn build<F: for<'a> Fn(&'a PEdge, &'a PEdge) -> bool>(
+        self,
+        valid_successor: F,
+    ) -> Option<PortgraphPattern<U, PNode, PEdge>> {
+        Some(self.to_line_pattern(valid_successor)?.into())
+    }
+
+    pub fn to_line_pattern<F: for<'a> Fn(&'a PEdge, &'a PEdge) -> bool>(
         self,
         valid_successor: F,
     ) -> Option<LinePattern<U, PNode, PEdge>> {
@@ -305,6 +448,7 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
             nodes,
             mut edges,
             root,
+            pattern_id: id,
         } = self;
         let mut to_visit = VecDeque::new();
 
@@ -345,11 +489,19 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
                 lines.push(line);
             }
         }
-        edges.is_empty().then_some(LinePattern { nodes, lines })
+        if !edges.is_empty() {
+            return None;
+        }
+        let lp = LinePattern {
+            nodes,
+            lines,
+            pattern_id: self.pattern_id,
+        };
+        Some(lp.into())
     }
 }
 
-fn add_new_edges<'a, U: Universe + 'a, PEdge: EdgeProperty + 'a>(
+fn add_new_edges<'a, U: Eq + Hash + Copy + Ord + 'a, PEdge: EdgeProperty + 'a>(
     queue: &mut VecDeque<(U, PEdge)>,
     node: U,
     edges: impl IntoIterator<Item = &'a (U, PEdge)>,
@@ -370,13 +522,30 @@ pub(crate) fn compatible_offsets(
     pout.direction() != pin.direction() && pout.index() == pin.index()
 }
 
+impl<U: Eq + Hash + Copy + Ord, PNode: NodeProperty + 'static>
+    From<Vec<PortgraphPattern<U, PNode, UnweightedEdge>>>
+    for ManyMatcher<PortgraphPattern<U, PNode, UnweightedEdge>>
+{
+    fn from(value: Vec<PortgraphPattern<U, PNode, UnweightedEdge>>) -> Self {
+        Self::from_patterns(value)
+    }
+}
+
+impl<U: Eq + Hash + Copy + Ord> From<Vec<UnweightedPortgraphPattern<U>>>
+    for ManyMatcher<UnweightedPortgraphPattern<U>>
+{
+    fn from(value: Vec<UnweightedPortgraphPattern<U>>) -> Self {
+        Self::from_patterns(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_to_line_pattern() {
-        let mut p: Pattern<_, (), _> = Default::default();
+        let mut p: PortgraphPatternBuilder<_, (), _> = PortgraphPatternBuilder::new(0);
         let po = PortOffset::new_outgoing;
         let pi = PortOffset::new_incoming;
         p.add_edge(0, 1, (po(0), pi(1)));
@@ -387,21 +556,22 @@ mod tests {
         p.add_edge(1, 2, (po(2), pi(2)));
         p.set_root(0);
         assert_eq!(
-            p.try_into_line_pattern(compatible_offsets),
+            p.to_line_pattern(compatible_offsets),
             Some(LinePattern {
                 nodes: HashMap::default(),
                 lines: vec![
                     Line::new(0, vec![(0, 1, (po(0), pi(1))), (1, 2, (po(1), pi(0))),]),
                     Line::new(0, vec![(0, 1, (po(1), pi(0))), (1, 2, (po(0), pi(1))),]),
                     Line::new(0, vec![(0, 1, (po(2), pi(2))), (1, 2, (po(2), pi(2))),])
-                ]
+                ],
+                pattern_id: PatternID(0)
             })
         );
     }
 
     #[test]
     fn from_pattern_with_rev() {
-        let mut p = Pattern::<_, (), _>::new();
+        let mut p: PortgraphPatternBuilder<_, (), _> = PortgraphPatternBuilder::new(0);
         let po = PortOffset::new_outgoing;
         let pi = PortOffset::new_incoming;
         p.add_edge(0, 0, (po(0), pi(2)));
@@ -409,7 +579,7 @@ mod tests {
         p.add_edge(2, 0, (po(0), pi(1)));
         p.set_root(0);
         let lp = p
-            .try_into_line_pattern(compatible_offsets)
+            .to_line_pattern(compatible_offsets)
             .expect("Could not convert to line pattern");
         assert_eq!(
             lp.lines,
@@ -423,25 +593,25 @@ mod tests {
 
     #[test]
     fn from_pattern_simple() {
-        let mut p = Pattern::<_, (), _>::new();
+        let mut p: PortgraphPatternBuilder<_, (), _> = PortgraphPatternBuilder::new(0);
         p.add_edge(0, 0, (0, 2));
         p.add_edge(0, 1, (1, 1));
         p.add_edge(0, 2, (2, 0));
         p.set_root(2);
-        p.try_into_line_pattern(|(_, pout), (pin, _)| pin == pout)
+        p.to_line_pattern(|(_, pout), (pin, _)| pin == pout)
             .expect("Could not convert to line pattern");
     }
 
     #[test]
     fn from_pattern2() {
-        let mut p = Pattern::<_, (), _>::new();
+        let mut p = PortgraphPatternBuilder::<_, (), _>::new(0);
         let po = PortOffset::new_outgoing;
         let pi = PortOffset::new_incoming;
         let mut add_edge = |(i, j), (k, l)| p.add_edge(i, k, (po(j), pi(l)));
         add_edge((0, 0), (1, 0));
         add_edge((2, 0), (1, 1));
         p.set_any_root().expect("Could not pick any root");
-        p.try_into_line_pattern(|(_, pout), (pin, _)| pin == pout)
+        p.to_line_pattern(|(_, pout), (pin, _)| pin == pout)
             .expect("Could not convert to line pattern");
     }
 }
