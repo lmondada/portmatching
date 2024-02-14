@@ -1,166 +1,73 @@
 use std::fmt;
 
-use itertools::Itertools;
-use portgraph::{LinkView, NodeIndex, SecondaryMap};
-
 use crate::{
     automaton::{LineBuilder, ScopeAutomaton},
-    matcher::{Match, PatternMatch},
-    patterns::{compatible_offsets, UnweightedEdge},
-    utils::{always_true, validate_unweighted_edge, validate_weighted_node},
-    EdgeProperty, HashMap, NodeProperty, Pattern, PatternID, PortMatcher, SinglePatternMatcher,
-    Universe, WeightedGraphRef,
+    matcher::PatternMatch,
+    pattern, HashMap, Pattern, PatternID, SinglePatternMatcher,
 };
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ManyMatcher<U, PNode, PEdge, OffsetID = <PEdge as EdgeProperty>::OffsetID>
-where
-    PEdge: EdgeProperty,
-    U: Universe,
-{
-    automaton: ScopeAutomaton<PNode, PEdge, OffsetID>,
-    patterns: Vec<Pattern<U, PNode, PEdge>>,
+// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ManyMatcher<P: Pattern> {
+    automaton: ScopeAutomaton<pattern::Constraint<P>>,
+    patterns: Vec<P>,
 }
 
-impl<U: Universe, PNode, PEdge: EdgeProperty> fmt::Debug for ManyMatcher<U, PNode, PEdge> {
+impl<P: Pattern> fmt::Debug for ManyMatcher<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ManyMatcher {{ {} patterns }}", self.patterns.len())
     }
 }
 
-impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> ManyMatcher<U, PNode, PEdge> {
-    pub fn new(
-        automaton: ScopeAutomaton<PNode, PEdge, <PEdge as EdgeProperty>::OffsetID>,
-        patterns: Vec<Pattern<U, PNode, PEdge>>,
-    ) -> Self {
+impl<P: Pattern + Clone> ManyMatcher<P> {
+    pub fn new(automaton: ScopeAutomaton<pattern::Constraint<P>>, patterns: Vec<P>) -> Self {
         Self {
             automaton,
             patterns,
         }
     }
 
-    pub fn run<N: Universe>(
+    pub fn run(
         &self,
-        root: N,
-        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &PEdge) -> Option<N>,
-    ) -> Vec<PatternMatch<PatternID, N>> {
+        root: pattern::Value<P>,
+        graph: pattern::DataRef<P>,
+    ) -> Vec<PatternMatch<PatternID, pattern::Value<P>>> {
         self.automaton
-            .run(root, validate_node, validate_edge)
+            .run(root, graph)
             .map(|id| PatternMatch::new(id, root))
             .collect()
     }
 
-    pub fn get_match_map<N: Universe>(
+    pub fn get_match_map(
         &self,
-        m: PatternMatch<PatternID, N>,
-        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
-    ) -> Option<HashMap<U, N>> {
+        m: PatternMatch<PatternID, pattern::Value<P>>,
+        graph: pattern::DataRef<P>,
+    ) -> Option<HashMap<P::Universe, pattern::Value<P>>> {
         let p = self.patterns.get(m.pattern.0).unwrap();
-        let single_matcher = SinglePatternMatcher::from_pattern(p.clone());
+        let single_matcher = SinglePatternMatcher::new(p.clone());
         single_matcher
-            .get_match_map(m.root, validate_node, validate_edge)
+            .get_match_map(m.root, graph)
             .map(|m| m.into_iter().collect())
     }
 
-    pub fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, PNode, PEdge>> {
+    pub fn get_pattern(&self, id: PatternID) -> Option<&P> {
         self.patterns.get(id.0)
     }
-}
 
-impl<U: Universe, PNode: NodeProperty> ManyMatcher<U, PNode, UnweightedEdge> {
-    pub fn from_patterns(patterns: Vec<Pattern<U, PNode, UnweightedEdge>>) -> Self {
-        let line_patterns = patterns
-            .clone()
-            .into_iter()
-            .map(|p| {
-                p.try_into_line_pattern(compatible_offsets)
-                    .expect("Failed to express pattern as line pattern")
-            })
-            .collect_vec();
-        let builder = LineBuilder::from_patterns(line_patterns);
+    pub fn from_patterns(patterns: Vec<P>) -> Self {
+        let builder: LineBuilder<_> = patterns.iter().collect();
         let automaton = builder.build();
         Self::new(automaton, patterns)
     }
-}
 
-impl<U, PNode, PEdge> ManyMatcher<U, PNode, PEdge>
-where
-    <PEdge as EdgeProperty>::OffsetID: fmt::Debug,
-    U: Universe,
-    PNode: Copy + fmt::Debug,
-    PEdge: EdgeProperty + fmt::Debug,
-{
     /// A dotstring representation of the trie.
-    pub fn dot_string(&self) -> String {
+    pub fn dot_string(&self) -> String
+    where
+        P::Constraint: fmt::Debug,
+        pattern::Symbol<P>: fmt::Debug,
+    {
         self.automaton.dot_string()
-    }
-}
-
-pub type UnweightedManyMatcher = ManyMatcher<NodeIndex, (), UnweightedEdge>;
-
-impl<U, G> PortMatcher<G, NodeIndex, U> for ManyMatcher<U, (), UnweightedEdge>
-where
-    U: Universe,
-    G: LinkView,
-{
-    type PNode = ();
-    type PEdge = UnweightedEdge;
-
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
-        self.run(
-            root,
-            // no node prop
-            always_true,
-            // check edge exist
-            validate_unweighted_edge(graph),
-        )
-    }
-
-    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
-        self.get_pattern(id)
-    }
-}
-
-impl<U: Universe, PNode: NodeProperty> From<Vec<Pattern<U, PNode, UnweightedEdge>>>
-    for ManyMatcher<U, PNode, UnweightedEdge>
-{
-    fn from(value: Vec<Pattern<U, PNode, UnweightedEdge>>) -> Self {
-        Self::from_patterns(value)
-    }
-}
-
-impl<'m, U, G, W, M> PortMatcher<WeightedGraphRef<G, &'m M>, NodeIndex, U>
-    for ManyMatcher<U, W, UnweightedEdge>
-where
-    M: SecondaryMap<NodeIndex, W>,
-    G: LinkView + Copy,
-    U: Universe,
-    W: NodeProperty,
-{
-    type PNode = W;
-    type PEdge = UnweightedEdge;
-
-    fn find_rooted_matches(
-        &self,
-        weighted_graph: WeightedGraphRef<G, &'m M>,
-        root: NodeIndex,
-    ) -> Vec<Match> {
-        let (graph, _) = weighted_graph.into();
-        self.run(
-            root,
-            // Node weights (none)
-            validate_weighted_node(weighted_graph),
-            // Check edges exist
-            validate_unweighted_edge(graph),
-        )
-    }
-
-    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
-        self.patterns.get(id.0)
     }
 }
 
@@ -169,7 +76,6 @@ mod tests {
     use std::collections::BTreeSet;
 
     use itertools::Itertools;
-
     use portgraph::{
         proptest::gen_portgraph, LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView,
         UnmanagedDenseMap,
@@ -182,11 +88,14 @@ mod tests {
     #[cfg(feature = "serde")]
     use std::fs;
 
+    use crate::portgraph::{PortMatcher, PortgraphPattern, PortgraphPatternBuilder, WeightedPortGraphRef};
     use crate::{
-        matcher::{ManyMatcher, PatternMatch, PortMatcher, SinglePatternMatcher},
+        matcher::{ManyMatcher, PatternMatch, SinglePatternMatcher},
         utils::test::gen_portgraph_connected,
         HashSet, NaiveManyMatcher, Pattern,
     };
+
+    use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
 
     const DBG_DUMP_FILES: bool = false;
 
@@ -194,8 +103,10 @@ mod tests {
     fn single_pattern_loop_link() {
         let mut g = PortGraph::new();
         g.add_node(0, 1);
-        let p = Pattern::from_portgraph(&g);
-        let matcher = ManyMatcher::from_patterns(vec![p]);
+        let p: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_portgraph(&g)
+            .try_into()
+            .unwrap();
+        let matcher = ManyMatcher::from_patterns(vec![p.into_unweighted_pattern()]);
         let mut g = PortGraph::new();
         let n = g.add_node(1, 1);
         g.link_ports(
@@ -222,8 +133,10 @@ mod tests {
             g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
-        let p = Pattern::from_portgraph(&g);
-        let matcher = ManyMatcher::from_patterns(vec![p]);
+        let p: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_portgraph(&g)
+            .try_into()
+            .unwrap();
+        let matcher = ManyMatcher::from_patterns(vec![p.into_unweighted_pattern()]);
 
         assert_eq!(
             matcher.find_matches(&g),
@@ -238,8 +151,8 @@ mod tests {
     fn single_pattern_simple() {
         let mut g = PortGraph::new();
         g.add_node(0, 2);
-        let p = Pattern::from_portgraph(&g);
-        let matcher: ManyMatcher<_, _, _> = vec![p].into();
+        let p = PortgraphPattern::try_from_portgraph(&g).unwrap();
+        let matcher: ManyMatcher<_> = vec![p.into_unweighted_pattern()].into();
 
         let mut g = PortGraph::new();
         let n0 = g.add_node(0, 1);
@@ -264,8 +177,10 @@ mod tests {
         link(&mut g, (n0, 0), (n0, 2));
         link(&mut g, (n0, 1), (n1, 1));
         link(&mut g, (n2, 0), (n0, 1));
-        let p = Pattern::from_portgraph(&g);
-        let _matcher: ManyMatcher<_, _, _> = vec![p].into();
+        let p: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_portgraph(&g)
+            .try_into()
+            .unwrap();
+        let _matcher: ManyMatcher<_> = vec![p].into();
     }
 
     fn link(p: &mut PortGraph, (n1, p1): (NodeIndex, usize), (n2, p2): (NodeIndex, usize)) {
@@ -303,9 +218,14 @@ mod tests {
         link(&mut g, (n3, 0), (n1, 1));
         link(&mut g, (n3, 1), (n0, 0));
 
-        let p1 = Pattern::from_rooted_portgraph(&p1, n0);
-        let p2 = Pattern::from_rooted_portgraph(&p2, n0);
-        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+        let p1: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_rooted_portgraph(&p1, n0)
+            .try_into()
+            .unwrap();
+        let p2: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_rooted_portgraph(&p2, n0)
+            .try_into()
+            .unwrap();
+        let matcher: ManyMatcher<_> =
+            vec![p1.into_unweighted_pattern(), p2.into_unweighted_pattern()].into();
         assert_eq!(matcher.find_matches(&g).len(), 3);
     }
 
@@ -336,9 +256,14 @@ mod tests {
         link(&mut g, (n3, 0), (n1, 1));
         link(&mut g, (n3, 1), (n0, 0));
 
-        let p1 = Pattern::from_rooted_portgraph(&p1, n1);
-        let p2 = Pattern::from_rooted_portgraph(&p2, n0);
-        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+        let p1: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_rooted_portgraph(&p1, n0)
+            .try_into()
+            .unwrap();
+        let p2: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_rooted_portgraph(&p2, n0)
+            .try_into()
+            .unwrap();
+        let matcher: ManyMatcher<_> =
+            vec![p1.into_unweighted_pattern(), p2.into_unweighted_pattern()].into();
         assert_eq!(matcher.find_matches(&g).len(), 3);
     }
 
@@ -353,7 +278,11 @@ mod tests {
         let n1 = p2.add_node(0, 2);
         link(&mut p2, (n1, 0), (n0, 1));
         link(&mut p2, (n1, 1), (n0, 0));
-        ManyMatcher::from_patterns([&p1, &p2].map(Pattern::from_portgraph).to_vec());
+        ManyMatcher::from_patterns(
+            [&p1, &p2]
+                .map(|g| PortgraphPattern::try_from_portgraph(g).unwrap())
+                .to_vec(),
+        );
     }
 
     #[test]
@@ -378,9 +307,10 @@ mod tests {
         link(&mut g, (n2, 0), (n3, 1));
         link(&mut g, (n3, 0), (n2, 0));
 
-        let p1 = Pattern::from_portgraph(&p1);
-        let p2 = Pattern::from_portgraph(&p2);
-        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+        let p1 = PortgraphPattern::try_from_portgraph(&p1).unwrap();
+        let p2 = PortgraphPattern::try_from_portgraph(&p2).unwrap();
+        let matcher: ManyMatcher<_> =
+            vec![p1.into_unweighted_pattern(), p2.into_unweighted_pattern()].into();
         assert_eq!(matcher.find_matches(&g).len(), 1);
     }
     #[test]
@@ -397,9 +327,9 @@ mod tests {
         link(&mut p2, (n0, 0), (n1, 1));
         link(&mut p2, (n0, 1), (n1, 0));
 
-        let p1 = Pattern::from_portgraph(&p1);
-        let p2 = Pattern::from_portgraph(&p2);
-        let _matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+        let p1 = PortgraphPattern::try_from_portgraph(&p1).unwrap();
+        let p2 = PortgraphPattern::try_from_portgraph(&p2).unwrap();
+        let _matcher: ManyMatcher<_> = vec![p1, p2].into();
     }
 
     // TODO: implement weighted matching
@@ -420,9 +350,9 @@ mod tests {
         let mut w2 = UnmanagedDenseMap::new();
         w2[n0] = 3;
         w2[n1] = 4;
-        let p1 = Pattern::from_weighted_portgraph(&p1, w1);
-        let p2 = Pattern::from_weighted_portgraph(&p2, w2);
-        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+        let p1 = PortgraphPattern::try_from_weighted_portgraph(&p1, w1).unwrap();
+        let p2 = PortgraphPattern::try_from_weighted_portgraph(&p2, w2).unwrap();
+        let matcher: ManyMatcher<_> = vec![p1, p2].into();
         let mut g = PortGraph::new();
         let mut w = UnmanagedDenseMap::new();
         let n0 = g.add_node(0, 2);
@@ -437,15 +367,15 @@ mod tests {
         link(&mut g, (n0, 1), (n1, 0));
         link(&mut g, (n1, 0), (n2, 0));
         link(&mut g, (n2, 0), (n3, 0));
-        assert_eq!(matcher.find_matches((&g, &w).into()).len(), 2);
+        assert_eq!(matcher.find_matches(WeightedPortGraphRef(&g, &w)).len(), 2);
     }
 
     proptest! {
         #[test]
         fn single_graph_proptest(pattern in gen_portgraph_connected(10, 4, 20), g in gen_portgraph(100, 4, 200)) {
-            let pattern = Pattern::from_portgraph(&pattern);
+            let pattern = PortgraphPattern::try_from_portgraph(&pattern).unwrap();
             let matcher = ManyMatcher::from_patterns(vec![pattern.clone()]);
-            let single_matcher = SinglePatternMatcher::from_pattern(pattern);
+            let single_matcher = SinglePatternMatcher::new(pattern);
             let many_matches = matcher.find_matches(&g);
             let single_matches: Vec<_> = single_matcher
                 .find_matches(&g);
@@ -473,7 +403,7 @@ mod tests {
             }
             let patterns = pattern_graphs
                 .iter()
-                .map(Pattern::from_portgraph)
+                .map(|g| PortgraphPattern::try_from_portgraph(g).unwrap())
                 .collect_vec();
             #[cfg(feature = "serde")]
             if DBG_DUMP_FILES {
@@ -512,7 +442,7 @@ mod tests {
             }
             let patterns = pattern_graphs
                 .iter()
-                .map(Pattern::from_portgraph)
+                .map(|g| PortgraphPattern::try_from_portgraph(g).unwrap())
                 .collect_vec();
             #[cfg(feature = "serde")]
             if DBG_DUMP_FILES {

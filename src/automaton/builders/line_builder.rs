@@ -1,427 +1,218 @@
-use std::{
-    collections::{BTreeSet, VecDeque},
-    hash::{BuildHasher, Hash},
-};
+use std::{collections::VecDeque, hash::Hash, ops::Deref};
 
-use itertools::{Either, Itertools};
+use delegate::delegate;
+use itertools::Itertools;
 
 use crate::{
-    automaton::{ScopeAutomaton, StateID},
-    patterns::{IterationStatus, LinePattern, PredicatesIter},
-    predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility, Symbol},
-    EdgeProperty, HashMap, HashSet, NodeProperty, Universe,
+    automaton::{ScopeAutomaton, StateID, Transition},
+    constraint::ScopeConstraint,
+    HashMap, Pattern, PatternID,
 };
 
-pub struct LineBuilder<U: Universe, PNode, PEdge> {
-    patterns: Vec<LinePattern<U, PNode, PEdge>>,
-    // Map from ({pattern_id} x line_nb) to automaton state
-    det_states: HashMap<(BTreeSet<usize>, usize), StateID>,
+pub struct LineBuilder<C: ScopeConstraint> {
+    /// The rest of the constraints to add
+    patterns: Vec<Vec<C>>,
+    /// The matcher being built
+    matcher: ScopeAutomaton<C>,
+    /// A cache of automaton state so that the same state is not inserted twice
+    cached_states: HashMap<String, StateID>,
 }
 
-impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
+impl<C: ScopeConstraint + Clone> LineBuilder<C> {
     #[allow(unused)]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn from_patterns(patterns: Vec<LinePattern<U, PNode, PEdge>>) -> Self {
-        Self {
-            patterns,
-            det_states: HashMap::default(),
-        }
+    pub fn from_patterns<P>(patterns: Vec<P>) -> Self
+    where
+        P: Pattern<Constraint = C>,
+    {
+        patterns.iter().collect()
     }
 
     #[allow(unused)]
-    pub fn add_pattern(&mut self, pattern: LinePattern<U, PNode, PEdge>) {
-        self.patterns.push(pattern);
+    pub fn add_pattern(&mut self, pattern: &impl Pattern<Constraint = C>) {
+        self.patterns.push(pattern.constraints().collect());
     }
 
-    pub fn build(mut self) -> ScopeAutomaton<PNode, PEdge>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-        PEdge::OffsetID: Eq + Hash,
-    {
-        let mut matcher = ScopeAutomaton::<PNode, PEdge>::new();
-
+    pub fn build(mut self) -> ScopeAutomaton<C> {
         // Convert patterns to pattern in construction
         let patterns = self
             .patterns
             .iter()
+            .cloned()
             .enumerate()
-            .map(|(i, p)| PatternInConstruction::new(p.edge_predicates(), i))
+            .map(|(i, p)| PatternInConstruction::new(p, PatternID(i)))
             .collect::<Vec<_>>();
 
         let mut to_insert = VecDeque::new();
-        to_insert.push_back((matcher.root(), patterns));
+        to_insert.push_back((self.matcher.root(), patterns));
         while let Some((state, patterns)) = to_insert.pop_front() {
             // Filter out done patterns
-            let (patterns_stages, done_ids): (Vec<_>, Vec<_>) =
-                patterns.into_iter().partition_map(|mut p| {
-                    let stage = p.edges.traversal_stage();
-                    match stage {
-                        IterationStatus::Finished => Either::Right(p.pattern_id),
-                        _ => Either::Left((p, stage)),
-                    }
-                });
+            let (done_patterns, patterns): (Vec<_>, Vec<_>) =
+                patterns.into_iter().partition(|p| p.edges.is_empty());
             // Insert flags for done patterns
-            for p in done_ids {
-                matcher.add_match(state, p.into());
+            for p in done_patterns {
+                self.matcher.add_match(state, p.pattern_id);
             }
-            let (patterns, stages): (Vec<_>, Vec<_>) = patterns_stages.into_iter().unzip();
-            // The current stage of the iteration is the minimum of all stages
-            let Some(&current_stage) = stages.iter().min() else {
-                continue;
-            };
-            // Compute the next transitions
-            let transitions = if matches!(current_stage, IterationStatus::LeftOver(_)) {
-                // In the leftover stage, only use det transitions
-                // Store predicates as a map (stage -> predicates)
-                let stage_patterns = stages
+            let next_constraints = patterns.iter().map(|p| p.edges.front().unwrap());
+            let constraints_split = C::split(next_constraints);
+            let new_children = self.add_transitions(
+                state,
+                constraints_split.labels,
+                constraints_split.deterministic,
+            );
+            // Enqueue the new states into queue
+            for (new_state, constraint_set) in new_children
+                .into_iter()
+                .zip(constraints_split.constraint_sets)
+            {
+                let Some(new_state) = new_state else {
+                    continue;
+                };
+                let patterns = constraint_set
                     .into_iter()
-                    .map(|stage| match stage {
-                        IterationStatus::LeftOver(i) => i,
-                        _ => unreachable!("finished was filtered out and skeleton is smaller"),
+                    .map(|(i, consumed)| {
+                        let mut p = patterns[i].clone();
+                        if consumed {
+                            p.pop_front();
+                        }
+                        p
                     })
-                    .zip(patterns)
-                    .into_grouping_map()
                     .collect();
-                self.only_det_predicates(state, stage_patterns)
-            } else {
-                self.get_compatible_predicates(state, patterns)
-            };
-            let new_children = self.add_transitions(&mut matcher, &transitions);
-
-            // Enqueue new states
-            for (new_state, mut new_transition) in new_children.into_iter().zip(transitions) {
-                if let Some(new_state) = new_state {
-                    if let Some(stage) = leftover_stage(&mut new_transition.patterns) {
-                        // Insert into our catalog of deterministic states
-                        let pattern_ids = new_transition
-                            .patterns
-                            .iter()
-                            .map(|p| p.pattern_id)
-                            .collect();
-                        self.det_states
-                            .entry((pattern_ids, stage))
-                            .or_insert(new_state);
-                    }
-                    to_insert.push_back((new_state, new_transition.patterns));
-                }
+                to_insert.push_back((new_state, patterns));
             }
         }
-        matcher
+        self.matcher
     }
 
+    /// Add transitions to matcher
+    ///
+    /// Either deterministic or non-deterministic
+    ///
+    /// Returns the newly created states
     fn add_transitions(
-        &self,
-        matcher: &mut ScopeAutomaton<PNode, PEdge>,
-        transitions: &[TransitionInConstruction<'_, U, PNode, PEdge>],
-    ) -> Vec<Option<StateID>>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-        PEdge::OffsetID: Eq,
-    {
-        let mut new_states = vec![None; transitions.len()];
-        // Enumerate them so that we can restore their ordering
-        let transitions = transitions.iter().enumerate();
-
-        for (source, transitions) in partition_by(transitions, |(_, t)| t.source) {
-            let (inds, targets, preds, scopes): (Vec<_>, Vec<_>, Vec<_>, Vec<_>) = transitions
-                .into_iter()
-                .map(|(i, t)| (i, t.target, t.pred.clone(), t.scope()))
-                .multiunzip();
-
-            // make source non-deterministic if necessary
-            match are_compatible_predicates(&preds) {
-                PredicateCompatibility::Deterministic => {}
-                PredicateCompatibility::NonDeterministic => matcher.make_non_det(source),
-                PredicateCompatibility::Incompatible => {
-                    panic!("trying to insert non-compatible transitions");
+        &mut self,
+        state: StateID,
+        constraints: Vec<Option<C>>,
+        deterministic: bool,
+    ) -> Vec<Option<StateID>> {
+        if deterministic {
+            for (i, c) in constraints.iter().enumerate() {
+                let is_last = i == constraints.len() - 1;
+                if c.is_none() && !is_last {
+                    panic!("Only last constraint may be None for deterministc transition");
                 }
             }
-
-            let added_states = matcher.set_children(source, preds, &targets, scopes);
-
-            for (i, new_state) in inds.into_iter().zip(added_states) {
-                new_states[i] = new_state;
-            }
+        } else {
+            self.matcher.make_non_det(state);
         }
+        let next_states = constraints
+            .iter()
+            .map(|c| {
+                let id = c.as_ref()?.uid()?;
+                self.cached_states.get(&id).copied()
+            })
+            .collect_vec();
+        let scopes = constraints
+            .iter()
+            .map(|c| {
+                let mut scope = self.matcher.scope(state).clone();
+                if let Some(c) = c.as_ref() {
+                    scope.extend(c.new_symbols());
+                }
+                scope
+            })
+            .collect_vec();
+        let transitions: Vec<Transition<_>> = constraints.into_iter().map_into().collect();
 
+        let new_states =
+            self.matcher
+                .set_children(state, transitions.iter().cloned(), &next_states, scopes);
+
+        self.cache_new_states(new_states.iter().copied().zip(transitions));
         new_states
     }
 
-    /// The next predicate of each pattern
-    ///
-    /// Tries to consume the first predicate of each pattern. If there is a mix
-    /// of deterministic and non-deterministic transitions, then prioritise
-    /// non-deterministic ones and bundle all deterministc ones behind a single
-    /// True transition.
-    fn get_compatible_predicates<'a>(
-        &self,
-        source: StateID,
-        patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-        PEdge::OffsetID: Hash,
-    {
-        let mut patterns = patterns
-            .into_iter()
-            .map(|mut p| (p.edges.peek().expect("Not finished").transition_type(), p))
-            .into_group_map();
-        let nondet_patterns = patterns.remove(&PredicateCompatibility::NonDeterministic);
-        let det_patterns = patterns.remove(&PredicateCompatibility::Deterministic);
-        debug_assert!(patterns.is_empty());
-
-        let mut transitions = Vec::new();
-        if let Some(patterns) = nondet_patterns {
-            transitions.append(&mut create_transitions(
-                source,
-                patterns
-                    .into_iter()
-                    .map(|mut p| (p.next_edge().expect("Not finished"), p)),
-            ));
-        }
-        if let Some(patterns) = det_patterns {
-            if transitions.is_empty() {
-                // No non-det, so we can just add all deterministic transitions
-                transitions.append(&mut create_transitions(
-                    source,
-                    patterns
-                        .into_iter()
-                        .map(|mut p| (p.next_edge().expect("Not finished"), p)),
-                ));
-            } else {
-                // Add a single True transition, and put all det transitions there
-                transitions.push(TransitionInConstruction {
-                    source,
-                    target: None,
-                    pred: EdgePredicate::True,
-                    patterns,
-                })
+    fn cache_new_states(
+        &mut self,
+        new_states: impl IntoIterator<Item = (Option<StateID>, Transition<C>)>,
+    ) {
+        for (new_state, transition) in new_states {
+            let Some(new_state) = new_state else { continue };
+            if let Transition::Constraint(c) = transition {
+                if let Some(id) = c.uid() {
+                    self.cached_states.entry(id).or_insert(new_state);
+                }
             }
         }
-        transitions
     }
-
-    /// Force deterministic transitions
-    ///
-    /// Unlike other transition functions, this does the patterns in the children
-    /// states do not necessary form a partition: patterns might be cloned up
-    /// to `n` times, yielding an exponential overhead if this is called repeatedly.
-    fn only_det_predicates<'a, H: BuildHasher>(
-        &self,
-        source: StateID,
-        mut patterns: std::collections::HashMap<
-            usize,
-            Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
-            H,
-        >,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-        PEdge::OffsetID: Hash,
-    {
-        // Find the min stage
-        let Some(&min_stage) = patterns.keys().min() else {
-            return Vec::new();
-        };
-        // Split patterns between min stage and other stages
-        let min_patterns = patterns.remove(&min_stage).unwrap();
-        let mut other_patterns = patterns.into_values().flatten().collect_vec();
-
-        // Introduce the transitions as normal for the minimal stage
-        // We need to be careful about the "scope" of the patterns
-        // If the scope is smaller than the total scope, then we need to add
-        // a child node to handle the smaller scope.
-        let min_scopes = min_patterns.iter().map(|p| p.scope.clone()).collect_vec();
-        let scope = min_scopes.iter().max_by_key(|s| s.len()).unwrap();
-        let (mut in_scope_patterns, mut out_scope_patterns): (Vec<_>, Vec<_>) = min_patterns
-            .iter()
-            .cloned()
-            .partition(|p| scope.is_superset(&p.scope));
-        if !out_scope_patterns.is_empty() {
-            // we need to split the predicates into two halves, because
-            // the scopes do not have a join
-            in_scope_patterns.extend(other_patterns.iter().cloned());
-            out_scope_patterns.extend(other_patterns.iter().cloned());
-            return vec![
-                TransitionInConstruction {
-                    source,
-                    target: None,
-                    pred: EdgePredicate::True,
-                    patterns: in_scope_patterns,
-                },
-                TransitionInConstruction {
-                    source,
-                    target: None,
-                    pred: EdgePredicate::True,
-                    patterns: out_scope_patterns,
-                },
-            ];
-        }
-        // We handle the predicates with maximal scope
-        let min_predicates = in_scope_patterns
-            .iter_mut()
-            .map(|p| p.next_edge().expect("Not finished"))
-            .collect_vec();
-        let mut transitions =
-            create_transitions(source, min_predicates.into_iter().zip(in_scope_patterns));
-        // Then add all other patterns to each possible transition
-        for t in &mut transitions {
-            t.patterns.append(&mut other_patterns.clone());
-        }
-
-        // Finally, we add a Fail transition to all other stages together
-        // Also add patterns with smaller scope
-        other_patterns.extend(
-            min_patterns
-                .into_iter()
-                // The scope is contained, so just check the size
-                .filter(|p| p.scope.len() < scope.len()),
-        );
-        if !other_patterns.is_empty() {
-            let next_state = self.try_reuse_det_state(&mut other_patterns);
-            transitions.push(TransitionInConstruction {
-                source,
-                target: next_state,
-                pred: EdgePredicate::Fail,
-                patterns: other_patterns,
-            });
-        }
-        transitions
-    }
-
-    /// Find out whether a state that we can reuse exists
-    fn try_reuse_det_state(
-        &self,
-        patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge>],
-    ) -> Option<StateID>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-    {
-        let Some(stage) = leftover_stage(patterns) else {
-            panic!("Can only reuse states in the LeftOver stage")
-        };
-        let pattern_ids = patterns.iter().map(|p| p.pattern_id).collect();
-        self.det_states.get(&(pattern_ids, stage)).copied()
-    }
-}
-
-fn leftover_stage<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
-    patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge>],
-) -> Option<usize> {
-    patterns
-        .iter_mut()
-        .map(|p| {
-            if let IterationStatus::LeftOver(i) = p.edges.traversal_stage() {
-                Some(i)
-            } else {
-                None
-            }
-        })
-        .min()
-        .flatten()
-}
-
-fn create_transitions<'a, U, PNode, PEdge>(
-    source: StateID,
-    iter: impl IntoIterator<
-        Item = (
-            EdgePredicate<PNode, PEdge, PEdge::OffsetID>,
-            PatternInConstruction<'a, U, PNode, PEdge>,
-        ),
-    >,
-) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
-where
-    U: Universe,
-    PNode: NodeProperty,
-    PEdge: EdgeProperty,
-    PEdge::OffsetID: Hash,
-{
-    iter.into_iter()
-        .into_group_map()
-        .into_iter()
-        .map(|(pred, patterns)| TransitionInConstruction {
-            source,
-            target: None,
-            pred,
-            patterns,
-        })
-        .collect()
 }
 
 #[derive(Clone)]
-struct PatternInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
-    /// Predicates of the pattern yet to be inserted
-    edges: PredicatesIter<'a, U, PNode, PEdge>,
+struct PatternInConstruction<C> {
+    /// Constraints of the pattern yet to be inserted
+    edges: VecDeque<C>,
     /// Pattern ID
-    pattern_id: usize,
-    /// The scope required to interpret the predicates
-    /// This is initially empty, but is updated as predicates are consumed
-    scope: HashSet<Symbol>,
+    pattern_id: PatternID,
+    // /// The scope required to interpret the predicates
+    // /// This is initially empty, but is updated as predicates are consumed
+    // scope: HashSet<Symbol>,
 }
 
-struct TransitionInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
-    source: StateID,
-    target: Option<StateID>,
-    pred: EdgePredicate<PNode, PEdge, PEdge::OffsetID>,
-    patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
-}
+// struct TransitionInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
+//     source: StateID,
+//     target: Option<StateID>,
+//     pred: EdgePredicate<PNode, PEdge, PEdge::OffsetID>,
+//     patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
+// }
 
-impl<'a, U: Universe, PNode, PEdge: EdgeProperty> TransitionInConstruction<'a, U, PNode, PEdge> {
-    fn scope(&self) -> HashSet<Symbol> {
-        self.patterns
-            .iter()
-            .flat_map(|p| p.scope.iter().copied())
-            .collect()
-    }
-}
+// impl<'a, U: Universe, PNode, PEdge: EdgeProperty> TransitionInConstruction<'a, U, PNode, PEdge> {
+//     fn scope(&self) -> HashSet<Symbol> {
+//         self.patterns
+//             .iter()
+//             .flat_map(|p| p.scope.iter().copied())
+//             .collect()
+//     }
+// }
 
-impl<'a, U: Universe, PNode: Clone, PEdge: EdgeProperty>
-    PatternInConstruction<'a, U, PNode, PEdge>
-{
-    fn new(edges: PredicatesIter<'a, U, PNode, PEdge>, pattern_id: usize) -> Self {
+impl<C> PatternInConstruction<C> {
+    fn new(edges: impl IntoIterator<Item = C>, pattern_id: PatternID) -> Self {
         Self {
-            edges,
+            edges: edges.into_iter().collect(),
             pattern_id,
-            scope: [Symbol::root()].into_iter().collect(),
         }
     }
 
-    fn next_edge(&mut self) -> Option<EdgePredicate<PNode, PEdge, PEdge::OffsetID>>
-    where
-        PNode: NodeProperty,
-    {
-        let edge = self.edges.next()?;
-        if let EdgePredicate::LinkNewNode { new_node, .. } = edge {
-            self.scope.insert(new_node);
+    delegate! {
+        to self.edges {
+            fn pop_front(&mut self) -> Option<C>;
         }
-        Some(edge)
     }
 }
 
-impl<U: Universe, PNode, PEdge> Default for LineBuilder<U, PNode, PEdge> {
+impl<C: ScopeConstraint + Clone> Default for LineBuilder<C> {
     fn default() -> Self {
         Self {
             patterns: Vec::new(),
-            det_states: HashMap::default(),
+            matcher: ScopeAutomaton::new(),
+            cached_states: HashMap::default(),
         }
     }
 }
 
-impl<U: Universe, PNode, PEdge> FromIterator<LinePattern<U, PNode, PEdge>>
-    for LineBuilder<U, PNode, PEdge>
+impl<'p, C: ScopeConstraint + Clone, P: Pattern<Constraint = C>> FromIterator<&'p P>
+    for LineBuilder<C>
 {
-    fn from_iter<T: IntoIterator<Item = LinePattern<U, PNode, PEdge>>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = &'p P>>(iter: T) -> Self {
         Self {
-            patterns: iter.into_iter().collect(),
-            det_states: HashMap::default(),
+            patterns: iter
+                .into_iter()
+                .map(|p| p.constraints().collect())
+                .collect(),
+            cached_states: HashMap::default(),
+            matcher: ScopeAutomaton::new(),
         }
     }
 }
@@ -441,7 +232,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{patterns::LinePattern, EdgeProperty};
+    use itertools::Itertools;
+    use portgraph::PortOffset;
+
+    use crate::portgraph::pattern::{LinePattern, UnweightedEdge};
+    use crate::portgraph::EdgeProperty;
 
     use super::LineBuilder;
 
@@ -460,14 +255,18 @@ mod tests {
     #[test]
     fn test_simple_build() {
         let mut p1 = LinePattern::new();
+        let edge1 = (PortOffset::new_incoming(0), PortOffset::new_outgoing(0));
+        let edge2 = (PortOffset::new_incoming(1), PortOffset::new_outgoing(1));
         p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
+        p1.add_line(0, vec![(0, 1, edge1), (1, 2, edge2)]);
 
         let mut p2 = LinePattern::new();
         p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (1, 2, 1)]);
+        p2.add_line(0, vec![(0, 1, edge1), (1, 2, edge2)]);
 
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
+        let patterns = [p1, p2].into_iter().map(|lp| lp.to_pattern()).collect_vec();
+
+        let builder = LineBuilder::from_patterns(patterns);
         let matcher = builder.build();
         assert_eq!(matcher.n_states(), 7);
     }
@@ -476,32 +275,36 @@ mod tests {
     #[should_panic]
     fn test_incompatible_preds() {
         let mut p1 = LinePattern::new();
+        let edge1 = (PortOffset::new_incoming(0), PortOffset::new_outgoing(0));
+        let edge2 = (PortOffset::new_incoming(1), PortOffset::new_outgoing(1));
         p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
+        p1.add_line(0, vec![(0, 1, edge1), (1, 2, edge1)]);
 
         let mut p2 = LinePattern::new();
         p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (0, 2, 1)]);
+        p2.add_line(0, vec![(0, 1, edge1), (0, 2, edge2)]);
 
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
+        let builder: LineBuilder<_> = [p1.to_pattern(), p2.to_pattern()].iter().collect();
         builder.build();
     }
 
     #[test]
     fn test_build_two_dir() {
+        let edge1 = (PortOffset::new_incoming(0), PortOffset::new_outgoing(0));
+        let edge2 = (PortOffset::new_incoming(1), PortOffset::new_outgoing(1));
         let mut p1 = LinePattern::new();
         p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p1.add_line(0, vec![(0, 3, 1), (3, 4, 0)]);
-        p1.add_line(1, vec![(1, 5, 0)]);
+        p1.add_line(0, vec![(0, 1, edge1), (1, 2, edge1)]);
+        p1.add_line(0, vec![(0, 3, edge2), (3, 4, edge1)]);
+        p1.add_line(1, vec![(1, 5, edge1)]);
 
         let mut p2 = LinePattern::new();
         p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p2.add_line(0, vec![(0, 3, 1), (3, 4, 0)]);
-        p2.add_line(3, vec![(3, 5, 0)]);
+        p2.add_line(0, vec![(0, 1, edge1), (1, 2, edge1)]);
+        p2.add_line(0, vec![(0, 3, edge2), (3, 4, edge1)]);
+        p2.add_line(3, vec![(3, 5, edge1)]);
 
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
+        let builder: LineBuilder<_> = [p1.to_pattern(), p2.to_pattern()].iter().collect();
         let matcher = builder.build();
         assert_eq!(matcher.n_states(), 18);
     }
@@ -509,68 +312,83 @@ mod tests {
     #[test]
     fn test_build_two_different_length() {
         let mut p1 = LinePattern::new();
+        let edge1 = (PortOffset::new_incoming(0), PortOffset::new_outgoing(0));
+        let edge2 = (PortOffset::new_incoming(1), PortOffset::new_outgoing(1));
         p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p1.add_line(0, vec![(0, 3, 0), (3, 4, 0)]);
-        p1.add_line(1, vec![(1, 5, 0)]);
+        p1.add_line(0, vec![(0, 1, edge1), (1, 2, edge1)]);
+        p1.add_line(0, vec![(0, 3, edge1), (3, 4, edge1)]);
+        p1.add_line(1, vec![(1, 5, edge1)]);
 
         let mut p2 = LinePattern::new();
         p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0)]);
-        p2.add_line(0, vec![(0, 3, 0), (3, 4, 0)]);
+        p2.add_line(0, vec![(0, 1, edge1)]);
+        p2.add_line(0, vec![(0, 3, edge1), (3, 4, edge1)]);
 
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
+        let builder: LineBuilder<_> = [p1.to_pattern(), p2.to_pattern()].iter().collect();
         let matcher = builder.build();
         assert_eq!(matcher.n_states(), 15);
     }
 
     #[test]
     fn test_build_full_det() {
+        let edge1 = (PortOffset::new_incoming(0), PortOffset::new_outgoing(0));
+        let edge2 = (PortOffset::new_incoming(1), PortOffset::new_outgoing(1));
         let mut p1 = LinePattern::new();
         p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0), (2, 3, 0), (3, 4, 0)]);
-        p1.add_line(0, vec![(0, 1, 1), (1, 5, 0)]);
+        p1.add_line(
+            0,
+            vec![(0, 1, edge1), (1, 2, edge1), (2, 3, edge1), (3, 4, edge1)],
+        );
+        p1.add_line(0, vec![(0, 1, edge2), (1, 5, edge1)]);
 
         let mut p2 = LinePattern::new();
         p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p2.add_line(0, vec![(0, 1, 1)]);
+        p2.add_line(0, vec![(0, 1, edge1), (1, 2, edge1)]);
+        p2.add_line(0, vec![(0, 1, edge2)]);
 
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
+        let builder: LineBuilder<_> = [p1.to_pattern(), p2.to_pattern()].iter().collect();
         let matcher = builder.build();
         assert_eq!(matcher.n_states(), 13);
     }
 
     #[test]
     fn test_build_full_3_det() {
+        let edge1 = (PortOffset::new_incoming(0), PortOffset::new_outgoing(0));
+        let edge2 = (PortOffset::new_incoming(1), PortOffset::new_outgoing(1));
+        let edge3 = (PortOffset::new_incoming(2), PortOffset::new_outgoing(2));
         let mut p1 = LinePattern::new();
         p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0), (2, 3, 0), (3, 4, 0)]);
-        p1.add_line(0, vec![(0, 1, 1), (1, 5, 0)]);
-        p1.add_line(0, vec![(0, 1, 2), (1, 6, 0)]);
+        p1.add_line(
+            0,
+            vec![(0, 1, edge1), (1, 2, edge1), (2, 3, edge1), (3, 4, edge1)],
+        );
+        p1.add_line(0, vec![(0, 1, edge2), (1, 5, edge1)]);
+        p1.add_line(0, vec![(0, 1, edge3), (1, 6, edge1)]);
 
         let mut p2 = LinePattern::new();
         p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p2.add_line(0, vec![(0, 1, 1)]);
-        p2.add_line(0, vec![(0, 1, 2), (1, 6, 0)]);
+        p2.add_line(0, vec![(0, 1, edge1), (1, 2, edge1)]);
+        p2.add_line(0, vec![(0, 1, edge2)]);
+        p2.add_line(0, vec![(0, 1, edge3), (1, 6, edge1)]);
 
         let mut p3 = LinePattern::new();
         p3.require(0, 1);
-        p3.add_line(0, vec![(0, 1, 0)]);
-        p3.add_line(0, vec![(0, 1, 1)]);
-        p3.add_line(0, vec![(0, 1, 2)]);
+        p3.add_line(0, vec![(0, 1, edge1)]);
+        p3.add_line(0, vec![(0, 1, edge2)]);
+        p3.add_line(0, vec![(0, 1, edge3)]);
 
-        let builder: LineBuilder<_, _, _> = [p1, p2, p3].into_iter().collect();
+        let builder: LineBuilder<_> = [p1.to_pattern(), p2.to_pattern(), p3.to_pattern()]
+            .iter()
+            .collect();
         let matcher = builder.build();
         assert_eq!(matcher.n_states(), 23);
     }
 
     #[test]
     fn test_build_empty() {
-        let p1 = LinePattern::<usize, usize, usize>::new();
+        let p1 = LinePattern::<usize, usize, UnweightedEdge>::new();
 
-        let builder: LineBuilder<_, _, _> = [p1].into_iter().collect();
+        let builder: LineBuilder<_> = [p1.to_pattern()].iter().collect();
         let matcher = builder.build();
         assert_eq!(matcher.n_states(), 1);
     }

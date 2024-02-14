@@ -2,105 +2,71 @@
 //!
 //! This matcher is used as a baseline in benchmarking by repeating
 //! the matching process for each pattern separately.
+
 use std::hash::Hash;
 
-use bimap::BiMap;
-use portgraph::{LinkView, NodeIndex, PortOffset};
-
 use crate::{
-    patterns::{Edge, UnweightedEdge},
-    utils::{always_true, validate_unweighted_edge},
-    EdgeProperty, NodeProperty, Pattern, PatternID, Universe,
+    constraint::{ScopeConstraint, ScopeMap},
+    pattern,
+    portgraph::RootedPortMatcher,
+    HashMap, Pattern, PatternID, Symbol,
 };
 
-use super::{Match, PatternMatch, PortMatcher};
+use super::PatternMatch;
+
+use delegate::delegate;
 
 /// A simple matcher for a single pattern.
-pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
-    pattern: Pattern<U, PNode, PEdge>,
-    edges: Vec<Edge<U, PNode, PEdge>>,
-    root: U,
-}
+pub struct SinglePatternMatcher<P: Pattern>(P);
 
-impl<U, G> PortMatcher<G, NodeIndex, U> for SinglePatternMatcher<U, (), UnweightedEdge>
+impl<P: Pattern> SinglePatternMatcher<P>
 where
-    G: LinkView + Copy,
-    U: Universe,
+    P::Universe: Eq + Hash,
 {
-    type PNode = ();
-    type PEdge = UnweightedEdge;
-
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
-        self.find_rooted_match(root, always_true, validate_unweighted_edge(graph))
-    }
-
-    fn get_pattern(&self, _id: crate::PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
-        Some(&self.pattern)
-    }
-}
-
-// TODO: add impls of PortMatcher for weighted graphs etc
-
-impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> SinglePatternMatcher<U, PNode, PEdge> {
-    /// Create a new matcher for a single pattern.
-    pub fn new(pattern: Pattern<U, PNode, PEdge>) -> Self {
-        // This is our "matching recipe" -- we precompute it once and store it
-        let edges = pattern.edges().expect("Cannot match disconnected pattern");
-        let root = pattern.root().expect("Cannot match unrooted pattern");
-        Self {
-            pattern,
-            edges,
-            root,
+    delegate! {
+        to self.0 {
+            pub fn constraints(&self) -> impl Iterator<Item = P::Constraint> + '_;
+            pub fn id(&self) -> PatternID;
         }
     }
 
-    pub fn from_pattern(pattern: Pattern<U, PNode, PEdge>) -> Self {
-        Self::new(pattern)
+    /// Create a new matcher for a single pattern.
+    pub fn new(pattern: P) -> Self {
+        Self(pattern)
     }
-}
 
-impl<U, PNode, PEdge> SinglePatternMatcher<U, PNode, PEdge>
-where
-    U: Universe,
-    PNode: NodeProperty,
-    PEdge: EdgeProperty,
-{
     /// Whether `self` matches `host` anchored at `root`.
     ///
     /// Check whether each edge of the pattern is valid in the host
-    fn match_exists<N: Universe>(
-        &self,
-        host_root: N,
-        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
-    ) -> bool {
-        self.get_match_map(host_root, validate_node, validate_edge)
-            .is_some()
+    fn match_exists(&self, host_root: pattern::Value<P>, graph: pattern::DataRef<P>) -> bool {
+        self.get_match_map(host_root, graph).is_some()
     }
 
     /// Match the pattern and return a map from pattern nodes to host nodes
     ///
     /// Returns `None` if the pattern does not match.
-    pub fn get_match_map<N: Universe>(
+    pub fn get_match_map(
         &self,
-        host_root: N,
-        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
-    ) -> Option<BiMap<U, N>> {
-        let mut match_map = BiMap::from_iter([(self.root, host_root)]);
-        for e in self.edges.iter() {
-            let src = e.source.expect("Only connected edges allowed in pattern");
-            let tgt = e.target.expect("Only connected edges allowed in pattern");
-            let new_src = match_map.get_by_left(&src).copied()?;
-            let new_tgt = validate_edge(new_src, &e.edge_prop)?;
-            if let Some(target_prop) = e.target_prop.as_ref() {
-                if !validate_node(new_tgt, target_prop) {
-                    return None;
+        host_root: pattern::Value<P>,
+        graph: pattern::DataRef<P>,
+    ) -> Option<HashMap<P::Universe, pattern::Value<P>>> {
+        let mut scope = pattern::ScopeMap::<P>::from_iter([(
+            <pattern::Symbol<P> as Symbol>::root(),
+            host_root,
+        )]);
+        for c in self.constraints() {
+            let new_symbols = c.is_satisfied(graph, &scope)?;
+            for (symb, val) in new_symbols {
+                if scope.get_by_left(&symb) == Some(&val) {
+                    continue;
                 }
+                scope.insert_no_overwrite(symb, val).ok()?;
             }
-            if match_map.get_by_left(&tgt) != Some(&new_tgt) {
-                match_map.insert_no_overwrite(tgt, new_tgt).ok()?;
-            }
+        }
+
+        let mut match_map = HashMap::default();
+        for (symb, val) in scope {
+            match_map.insert(self.0.get_id(symb).expect("symbol not found in scope"), val);
         }
         Some(match_map)
     }
@@ -108,13 +74,12 @@ where
     /// The matches in `host` starting at `host_root`
     ///
     /// For single pattern matchers there is always at most one match
-    fn find_rooted_match<N: Universe>(
+    pub(crate) fn find_rooted_match(
         &self,
-        host_root: N,
-        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
-    ) -> Vec<PatternMatch<PatternID, N>> {
-        if self.match_exists(host_root, validate_node, validate_edge) {
+        host_root: pattern::Value<P>,
+        graph: pattern::DataRef<P>,
+    ) -> Vec<PatternMatch<PatternID, pattern::Value<P>>> {
+        if self.match_exists(host_root, graph) {
             vec![PatternMatch {
                 pattern: 0.into(),
                 root: host_root,
@@ -123,13 +88,18 @@ where
             Vec::new()
         }
     }
+
+    pub fn pattern(&self) -> &P {
+        &self.0
+    }
 }
 
-impl<U: Universe> Pattern<U, (), (PortOffset, PortOffset)> {
-    pub fn into_single_pattern_matcher(
-        self,
-    ) -> SinglePatternMatcher<U, (), (PortOffset, PortOffset)> {
-        SinglePatternMatcher::new(self)
+impl<P: Pattern> From<P> for SinglePatternMatcher<P>
+where
+    P::Universe: Eq + Hash,
+{
+    fn from(value: P) -> Self {
+        SinglePatternMatcher::new(value)
     }
 }
 
@@ -138,15 +108,21 @@ mod tests {
     use itertools::Itertools;
     use portgraph::{LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView};
 
-    use crate::{matcher::PortMatcher, utils::test::graph, Pattern};
+    use crate::{utils::test::graph, Pattern};
+
+    use crate::portgraph::{PortMatcher, PortgraphPattern, PortgraphPatternBuilder};
 
     use super::SinglePatternMatcher;
+
+    use petgraph::visit::IntoNodeIdentifiers;
 
     #[test]
     fn single_pattern_match_simple() {
         let g = graph();
-        let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p);
+        let p: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_portgraph(&g)
+            .try_into()
+            .unwrap();
+        let matcher = SinglePatternMatcher::new(p.into_unweighted_pattern());
 
         let (n0, n1, n3, n4) = (
             NodeIndex::new(0),
@@ -170,8 +146,10 @@ mod tests {
     fn single_pattern_single_node() {
         let mut g = PortGraph::new();
         g.add_node(0, 1);
-        let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p);
+        let p: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_portgraph(&g)
+            .try_into()
+            .unwrap();
+        let matcher = SinglePatternMatcher::new(p.into_unweighted_pattern());
         let mut g = PortGraph::new();
         g.add_node(1, 0);
 
@@ -187,8 +165,10 @@ mod tests {
             g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
-        let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p);
+        let p: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_portgraph(&g)
+            .try_into()
+            .unwrap();
+        let matcher = SinglePatternMatcher::new(p.into_unweighted_pattern());
 
         let mut g = PortGraph::new();
         let n = g.add_node(2, 1);
@@ -210,8 +190,10 @@ mod tests {
             g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
-        let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p);
+        let p: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_portgraph(&g)
+            .try_into()
+            .unwrap();
+        let matcher = SinglePatternMatcher::new(p.into_unweighted_pattern());
 
         let mut g = PortGraph::new();
         let n0 = g.add_node(0, 1);
@@ -244,8 +226,10 @@ mod tests {
         let pi = |i| pattern.nodes_iter().nth(i).unwrap();
         let ps = [pi(0), pi(1), pi(2), pi(3)];
         add_pattern(&mut pattern, &ps);
-        let p = Pattern::from_portgraph(&pattern);
-        let matcher = SinglePatternMatcher::from_pattern(p);
+        let p: PortgraphPattern<_, _, _> = PortgraphPatternBuilder::from_portgraph(&pattern)
+            .try_into()
+            .unwrap();
+        let matcher = SinglePatternMatcher::new(p.into_unweighted_pattern());
 
         let mut g = PortGraph::new();
         for _ in 0..100 {

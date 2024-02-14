@@ -5,15 +5,15 @@ mod view;
 
 pub use builders::LineBuilder;
 
-use std::fmt::Debug;
+use std::{fmt::Debug, hash::Hash};
 
 use derive_more::{From, Into};
 
 use portgraph::dot::DotFormat;
 use portgraph::{NodeIndex, PortGraph, PortMut, PortView, Weights};
 
-use crate::predicate::{EdgePredicate, Symbol};
-use crate::{BiMap, EdgeProperty, HashSet, PatternID, Universe};
+use crate::constraint::{ScopeConstraint, ScopeMap};
+use crate::{BiMap, HashSet, PatternID, Symbol};
 
 /// A state ID in a scope automaton
 #[derive(Clone, Copy, PartialEq, Eq, From, Into, Hash, Debug)]
@@ -37,19 +37,42 @@ impl OutPort {
 /// Nodes have zero, one or many markers that are output when the state is traversed
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct State {
+struct State<S: Hash + Eq> {
     matches: Vec<PatternID>,
-    scope: HashSet<Symbol>,
+    scope: HashSet<S>,
     deterministic: bool,
 }
 
 /// Weight of outgoing ports
 ///
 /// Leaving a state, we need to satisfy the predicate P
-#[derive(Clone, Debug, Copy, From, Into)]
+#[derive(Clone, Debug, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct Transition<PNode, PEdge, OffsetID> {
-    predicate: EdgePredicate<PNode, PEdge, OffsetID>,
+enum Transition<C> {
+    Constraint(C),
+    Epsilon,
+}
+
+impl<C> From<Option<C>> for Transition<C> {
+    fn from(c: Option<C>) -> Self {
+        match c {
+            Some(c) => Self::Constraint(c),
+            None => Self::Epsilon,
+        }
+    }
+}
+
+impl<C: ScopeConstraint> Transition<C>
+where
+    C::Symbol: Clone,
+    C::Value: Clone + Eq + Hash,
+{
+    fn is_satisfied(&self, scope: &ScopeMap<C>, graph: C::DataRef<'_>) -> Option<ScopeMap<C>> {
+        match self {
+            Self::Constraint(c) => c.is_satisfied(graph, scope),
+            Self::Epsilon => Some((*scope).clone()),
+        }
+    }
 }
 
 // #[cfg(feature = "serde")]
@@ -85,14 +108,14 @@ struct Transition<PNode, PEdge, OffsetID> {
 /// - P: Predicates to determine allowable transitions
 /// - SU: Functions that update scope at incoming ports
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ScopeAutomaton<PNode, PEdge, OffsetID = <PEdge as EdgeProperty>::OffsetID> {
+// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ScopeAutomaton<C: ScopeConstraint> {
     graph: PortGraph,
-    weights: Weights<Option<State>, Option<Transition<PNode, PEdge, OffsetID>>>,
+    weights: Weights<Option<State<C::Symbol>>, Option<Transition<C>>>,
     root: StateID,
 }
 
-impl<PNode: Clone, PEdge: EdgeProperty> Default for ScopeAutomaton<PNode, PEdge> {
+impl<C: ScopeConstraint + Clone> Default for ScopeAutomaton<C> {
     fn default() -> Self {
         let mut graph = PortGraph::new();
         let root: StateID = graph.add_node(0, 0).into();
@@ -100,7 +123,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> Default for ScopeAutomaton<PNode, PEdge>
             let mut w = Weights::new();
             w[root.0] = Some(State {
                 matches: Vec::new(),
-                scope: HashSet::from_iter([Symbol::root()]),
+                scope: HashSet::from_iter([C::Symbol::root()]),
                 deterministic: true,
             });
             w
@@ -113,7 +136,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> Default for ScopeAutomaton<PNode, PEdge>
     }
 }
 
-impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
+impl<C: ScopeConstraint + Clone> ScopeAutomaton<C> {
     /// A new scope automaton
     pub fn new() -> Self {
         Default::default()
@@ -121,9 +144,8 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
 
     pub(crate) fn str_weights(&self) -> Weights<String, String>
     where
-        PNode: Debug,
-        PEdge: Debug,
-        <PEdge as EdgeProperty>::OffsetID: Debug,
+        C: Debug,
+        C::Symbol: Debug,
     {
         let mut str_weights = Weights::new();
         for n in self.graph.nodes_iter() {
@@ -147,9 +169,8 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
     /// Get its dot string representation
     pub fn dot_string(&self) -> String
     where
-        PNode: Debug,
-        PEdge: Debug,
-        <PEdge as EdgeProperty>::OffsetID: Debug,
+        C: Debug,
+        C::Symbol: Debug,
     {
         self.graph
             .dot_format()
@@ -159,28 +180,5 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
 
     pub(crate) fn root(&self) -> StateID {
         self.root
-    }
-}
-
-/// A map of scope symbols to values in the universe
-///
-/// For now, all scope assignments must be bijective, i.e. each value has
-/// at most one symbol it is assigned to.
-///
-/// ## Type parameters
-/// - A: A function from symbols to values
-#[derive(Clone, Debug)]
-struct AssignMap<U: Universe> {
-    map: BiMap<Symbol, U>,
-    state_id: StateID,
-}
-
-impl<U: Universe> AssignMap<U> {
-    fn new(root_state: StateID, root: U) -> Self {
-        let map = BiMap::from_iter([(Symbol::root(), root)]);
-        Self {
-            map,
-            state_id: root_state,
-        }
     }
 }
