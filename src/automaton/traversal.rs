@@ -179,7 +179,9 @@ fn next_state(g: &PortGraph, edge: OutPort) -> StateID {
         .into()
 }
 
-fn broadcast<V: Debug, U: Eq + Clone>(vec: &mut Vec<(V, Vec<PredicateSatisfied<U>>)>) -> Option<usize> {
+fn broadcast<V: Debug, U: Eq + Clone>(
+    vec: &mut Vec<(V, Vec<PredicateSatisfied<U>>)>,
+) -> Option<usize> {
     let Some(len) = vec
         .iter()
         .find(|(_, res)| {
