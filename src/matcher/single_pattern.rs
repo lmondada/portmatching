@@ -72,7 +72,7 @@ where
         &self,
         host_root: N,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
     ) -> bool {
         self.get_match_map(host_root, validate_node, validate_edge)
             .is_some()
@@ -85,14 +85,16 @@ where
         &self,
         host_root: N,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
     ) -> Option<BiMap<U, N>> {
         let mut match_map = BiMap::from_iter([(self.root, host_root)]);
         for e in self.edges.iter() {
             let src = e.source.expect("Only connected edges allowed in pattern");
             let tgt = e.target.expect("Only connected edges allowed in pattern");
             let new_src = match_map.get_by_left(&src).copied()?;
-            let new_tgt = validate_edge(new_src, &e.edge_prop)?;
+            let new_tgt = validate_edge(new_src, &e.edge_prop)
+                .into_iter()
+                .find(|p| p.is_some())??;
             if let Some(target_prop) = e.target_prop.as_ref() {
                 if !validate_node(new_tgt, target_prop) {
                     return None;
@@ -112,7 +114,7 @@ where
         &self,
         host_root: N,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
     ) -> Vec<PatternMatch<PatternID, N>> {
         if self.match_exists(host_root, validate_node, validate_edge) {
             vec![PatternMatch {

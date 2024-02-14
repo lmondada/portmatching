@@ -1,6 +1,7 @@
 use derive_more::{From, Into};
 
 use std::{
+    fmt,
     hash::Hash,
     iter::{self, Map, Repeat, Zip},
     ops::RangeFrom,
@@ -72,26 +73,51 @@ pub(crate) enum NodeLocation {
     Discover(usize),
 }
 
+#[derive(PartialEq, Eq, Copy, Clone, Hash)]
 pub(crate) enum PredicateSatisfied<U> {
     NewSymbol(Symbol, U),
     Yes,
     No,
 }
 
+impl<U> fmt::Debug for PredicateSatisfied<U> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NewSymbol(arg0, _) => f.debug_tuple("NewSymbol").field(arg0).finish(),
+            Self::Yes => write!(f, "Yes"),
+            Self::No => write!(f, "No"),
+        }
+    }
+}
+
+impl<U: Copy> PredicateSatisfied<U> {
+    pub(crate) fn to_option(&self) -> Option<Option<(Symbol, U)>> {
+        match self {
+            &PredicateSatisfied::NewSymbol(s, u) => Some(Some((s, u))),
+            PredicateSatisfied::Yes => Some(None),
+            PredicateSatisfied::No => None,
+        }
+    }
+}
+
 impl<PNode: NodeProperty, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge::OffsetID> {
+    /// Check whether the predicate is satisfied by the given assignment
+    ///
+    /// It is important that the `edge_prop` function returns
+    /// the same number of values for deterministically compatible properties.
     pub(crate) fn is_satisfied<'s, U: Universe>(
         &self,
         ass: &BiMap<Symbol, U>,
         node_prop: impl for<'a> Fn(U, &'a PNode) -> bool + 's,
-        edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Option<U> + 's,
-    ) -> PredicateSatisfied<U> {
+        edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Vec<Option<U>> + 's,
+    ) -> Vec<PredicateSatisfied<U>> {
         match self {
             EdgePredicate::NodeProperty { node, property } => {
                 let u = *ass.get_by_left(node).unwrap();
                 if node_prop(u, property) {
-                    PredicateSatisfied::Yes
+                    vec![PredicateSatisfied::Yes]
                 } else {
-                    PredicateSatisfied::No
+                    vec![PredicateSatisfied::No]
                 }
             }
             EdgePredicate::LinkNewNode {
@@ -100,14 +126,19 @@ impl<PNode: NodeProperty, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge
                 new_node,
             } => {
                 let u = *ass.get_by_left(node).unwrap();
-                let Some(new_u) = edge_prop(u, property) else {
-                    return PredicateSatisfied::No;
-                };
-                if ass.get_by_right(&new_u).is_none() {
-                    PredicateSatisfied::NewSymbol(*new_node, new_u)
-                } else {
-                    PredicateSatisfied::No
+                let mut predicate_results = vec![];
+                for new_u in edge_prop(u, property) {
+                    let Some(new_u) = new_u else {
+                        predicate_results.push(PredicateSatisfied::No);
+                        continue;
+                    };
+                    if ass.get_by_right(&new_u).is_none() {
+                        predicate_results.push(PredicateSatisfied::NewSymbol(*new_node, new_u));
+                    } else {
+                        predicate_results.push(PredicateSatisfied::No);
+                    }
                 }
+                predicate_results
             }
             EdgePredicate::LinkKnownNode {
                 node,
@@ -115,17 +146,22 @@ impl<PNode: NodeProperty, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge
                 known_node,
             } => {
                 let u = *ass.get_by_left(node).unwrap();
-                let Some(new_u) = edge_prop(u, property) else {
-                    return PredicateSatisfied::No;
-                };
-                if ass.get_by_left(known_node).unwrap() == &new_u {
-                    PredicateSatisfied::Yes
-                } else {
-                    PredicateSatisfied::No
+                let mut predicate_results = vec![];
+                for new_u in edge_prop(u, property) {
+                    let Some(new_u) = new_u else {
+                        predicate_results.push(PredicateSatisfied::No);
+                        continue;
+                    };
+                    if ass.get_by_left(known_node).unwrap() == &new_u {
+                        predicate_results.push(PredicateSatisfied::Yes);
+                    } else {
+                        predicate_results.push(PredicateSatisfied::No);
+                    }
                 }
+                predicate_results
             }
             EdgePredicate::True { .. } | EdgePredicate::NextRoot { .. } | EdgePredicate::Fail => {
-                PredicateSatisfied::Yes
+                vec![PredicateSatisfied::Yes]
             }
         }
     }

@@ -45,7 +45,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> ManyMatcher<U, PNode
         &self,
         root: N,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &PEdge) -> Option<N>,
+        validate_edge: impl for<'a> Fn(N, &PEdge) -> Vec<Option<N>>,
     ) -> Vec<PatternMatch<PatternID, N>> {
         self.automaton
             .run(root, validate_node, validate_edge)
@@ -57,7 +57,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> ManyMatcher<U, PNode
         &self,
         m: PatternMatch<PatternID, N>,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
     ) -> Option<HashMap<U, N>> {
         let p = self.patterns.get(m.pattern.0).unwrap();
         let single_matcher = SinglePatternMatcher::from_pattern(p.clone());
@@ -171,8 +171,8 @@ mod tests {
     use itertools::Itertools;
 
     use portgraph::{
-        proptest::gen_portgraph, LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView,
-        UnmanagedDenseMap,
+        proptest::gen_portgraph, LinkMut, MultiPortGraph, NodeIndex, PortGraph, PortMut,
+        PortOffset, PortView, UnmanagedDenseMap,
     };
 
     use proptest::prelude::*;
@@ -268,7 +268,7 @@ mod tests {
         let _matcher: ManyMatcher<_, _, _> = vec![p].into();
     }
 
-    fn link(p: &mut PortGraph, (n1, p1): (NodeIndex, usize), (n2, p2): (NodeIndex, usize)) {
+    fn link<G: LinkMut>(p: &mut G, (n1, p1): (NodeIndex, usize), (n2, p2): (NodeIndex, usize)) {
         p.link_ports(
             p.port_index(n1, PortOffset::new_outgoing(p1)).unwrap(),
             p.port_index(n2, PortOffset::new_incoming(p2)).unwrap(),
@@ -438,6 +438,31 @@ mod tests {
         link(&mut g, (n1, 0), (n2, 0));
         link(&mut g, (n2, 0), (n3, 0));
         assert_eq!(matcher.find_matches((&g, &w).into()).len(), 2);
+    }
+
+    #[test]
+    fn non_unique_ports() {
+        let mut p1 = PortGraph::new();
+        let n0 = p1.add_node(0, 1);
+        let n1 = p1.add_node(2, 0);
+        link(&mut p1, (n0, 0), (n1, 0));
+
+        let mut p2 = PortGraph::new();
+        let n0 = p2.add_node(0, 1);
+        let n1 = p2.add_node(2, 0);
+        link(&mut p2, (n0, 0), (n1, 1));
+
+        let p1 = Pattern::from_portgraph(&p1);
+        let p2 = Pattern::from_portgraph(&p2);
+        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+
+        let mut g = MultiPortGraph::new();
+        let n0 = g.add_node(0, 1);
+        let n1 = g.add_node(2, 0);
+        link(&mut g, (n0, 0), (n1, 0));
+        link(&mut g, (n0, 0), (n1, 1));
+
+        assert_eq!(matcher.find_matches(&g).len(), 2);
     }
 
     proptest! {
