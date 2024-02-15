@@ -1,1 +1,0 @@
-[{"node_meta":[{"n":{"first_port":0,"incoming":2,"outgoing":1,"capacity":2}},{"n":{"first_port":2,"incoming":2,"outgoing":0,"capacity":1}},{"n":{"first_port":3,"incoming":3,"outgoing":3,"capacity":5}}],"port_link":[7,3,5,1,6,2,4,0],"port_meta":[1,2147483649,2,3,3,2147483651,2147483651,2147483651],"node_free":null,"port_free":[],"node_count":3,"port_count":8,"link_count":4},0]
