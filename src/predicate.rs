@@ -56,7 +56,7 @@ pub(crate) enum EdgePredicate<PNode, PEdge, OffsetID> {
     NextRoot {
         line_nb: usize,
         new_root: NodeLocation,
-        offset: OffsetID,
+        offset: Option<OffsetID>,
     },
     // Always true (non-deterministic)
     True,
@@ -183,6 +183,16 @@ impl<PNode: NodeProperty, PEdge: EdgeProperty> EdgePredicate<PNode, PEdge, PEdge
     }
 }
 
+/// Whether transitions may appear at the same state.
+///
+/// - Deterministically compatible transitions are mutually exclusive,
+/// - Non-deterministically compatible transitions can be anything, but are
+/// usually of the same type.
+/// - Incompatible transitions cannot appear at the same state.
+///
+/// The choice between non-deterministic and incompatible transitions is
+/// arbitrary, but is used to heuristically reduce the number of non-deterministic
+/// states that are necessary.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PredicateCompatibility {
     Deterministic,
@@ -221,7 +231,11 @@ impl<OffsetID> CompatibilityType<OffsetID> {
             EdgePredicate::Fail => Self::Fail,
             EdgePredicate::LinkNewNode { node, property, .. }
             | EdgePredicate::LinkKnownNode { node, property, .. } => {
-                Self::Link(*node, property.offset_id())
+                if let Some(prop) = property.property_id() {
+                    Self::Link(*node, prop)
+                } else {
+                    Self::NonDet
+                }
             }
             EdgePredicate::NodeProperty { node, .. } => Self::Weight(*node),
         }

@@ -89,8 +89,7 @@ fn test<'g, M, U>(
 
 #[test]
 fn from_saved_patterns() {
-    // let testcases = ["0", "1", "2", "3", "4"];
-    let testcases = ["1"];
+    let testcases = ["0", "1", "2", "3", "4"];
     for test_name in testcases {
         println!("{test_name}...");
         let path: PathBuf = ["tests", "saved_patterns", test_name].iter().collect();
