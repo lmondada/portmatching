@@ -105,7 +105,7 @@ impl<U: Universe, PNode: NodeProperty> PatternMatch<Pattern<U, PNode, Unweighted
         }
     }
 
-    pub fn to_match_map<G: LinkView + Copy>(&self, graph: G) -> Option<HashMap<U, NodeIndex>> {
+    pub fn to_match_map<G: LinkView + Copy>(&self, graph: G) -> Vec<HashMap<U, NodeIndex>> {
         self.as_ref().to_match_map(graph)
     }
 }
@@ -113,24 +113,26 @@ impl<U: Universe, PNode: NodeProperty> PatternMatch<Pattern<U, PNode, Unweighted
 impl<'p, U: Universe, PNode: NodeProperty>
     PatternMatch<&'p Pattern<U, PNode, UnweightedEdge>, NodeIndex>
 {
-    pub fn to_match_map<G: LinkView + Copy>(&self, graph: G) -> Option<HashMap<U, NodeIndex>> {
-        Some(
-            SinglePatternMatcher::from_pattern(self.pattern.clone())
-                .get_match_map(self.root, always_true, validate_unweighted_edge(graph))?
-                .into_iter()
-                .collect(),
-        )
+    pub fn to_match_map<G: LinkView + Copy>(&self, graph: G) -> Vec<HashMap<U, NodeIndex>> {
+        SinglePatternMatcher::from_pattern(self.pattern.clone())
+            .get_match_map(self.root, always_true, validate_unweighted_edge(graph))
+            .into_iter()
+            .map(|m| m.into_iter().collect())
+            .collect()
     }
 }
 
 impl PatternMatch<PatternID, NodeIndex> {
-    pub fn to_match_map<G, M, U>(&self, graph: G, matcher: &M) -> Option<HashMap<U, NodeIndex>>
+    pub fn to_match_map<G, M, U>(&self, graph: G, matcher: &M) -> Vec<HashMap<U, NodeIndex>>
     where
         G: LinkView + Copy,
         M::PNode: NodeProperty,
         M: PortMatcher<G, NodeIndex, U, PEdge = UnweightedEdge>,
         U: Universe,
     {
-        PatternMatch::new(matcher.get_pattern(self.pattern)?, self.root).to_match_map(graph)
+        let Some(pattern) = matcher.get_pattern(self.pattern) else {
+            return Vec::new();
+        };
+        PatternMatch::new(pattern, self.root).to_match_map(graph)
     }
 }

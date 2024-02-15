@@ -58,12 +58,14 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> ManyMatcher<U, PNode
         m: PatternMatch<PatternID, N>,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
         validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
-    ) -> Option<HashMap<U, N>> {
+    ) -> Vec<HashMap<U, N>> {
         let p = self.patterns.get(m.pattern.0).unwrap();
         let single_matcher = SinglePatternMatcher::from_pattern(p.clone());
         single_matcher
             .get_match_map(m.root, validate_node, validate_edge)
+            .into_iter()
             .map(|m| m.into_iter().collect())
+            .collect()
     }
 
     pub fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, PNode, PEdge>> {
@@ -462,7 +464,46 @@ mod tests {
         link(&mut g, (n0, 0), (n1, 0));
         link(&mut g, (n0, 0), (n1, 1));
 
-        assert_eq!(matcher.find_matches(&g).len(), 2);
+        let matches = matcher.find_matches(&g);
+        assert_eq!(matches.len(), 2);
+        assert!(!matches[0].to_match_map(&g, &matcher).is_empty());
+        assert!(!matches[1].to_match_map(&g, &matcher).is_empty());
+    }
+
+    #[test]
+    fn non_unique_ports_2() {
+        let mut p1 = PortGraph::new();
+        let n0 = p1.add_node(0, 1);
+        let n1 = p1.add_node(1, 1);
+        let n2 = p1.add_node(2, 0);
+        link(&mut p1, (n0, 0), (n1, 0));
+        link(&mut p1, (n1, 0), (n2, 0));
+
+        let mut p2 = PortGraph::new();
+        let n0 = p2.add_node(0, 1);
+        let n1 = p2.add_node(1, 1);
+        let n2 = p2.add_node(2, 0);
+        link(&mut p2, (n0, 0), (n1, 0));
+        link(&mut p2, (n1, 0), (n2, 1));
+
+        let p1 = Pattern::from_portgraph(&p1);
+        let p2 = Pattern::from_portgraph(&p2);
+        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+
+        let mut g = MultiPortGraph::new();
+        let n0 = g.add_node(0, 1);
+        let n1a = g.add_node(1, 1);
+        let n1b = g.add_node(1, 1);
+        let n2 = g.add_node(2, 0);
+        link(&mut g, (n0, 0), (n1a, 0));
+        link(&mut g, (n0, 0), (n1b, 0));
+        link(&mut g, (n1a, 0), (n2, 0));
+        link(&mut g, (n1b, 0), (n2, 1));
+
+        let matches = matcher.find_matches(&g);
+        assert_eq!(matches.len(), 2);
+        assert!(!matches[0].to_match_map(&g, &matcher).is_empty());
+        assert!(!matches[1].to_match_map(&g, &matcher).is_empty());
     }
 
     proptest! {

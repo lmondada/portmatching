@@ -182,7 +182,7 @@ fn next_state(g: &PortGraph, edge: OutPort) -> StateID {
 fn broadcast<V: Debug, U: Eq + Clone>(
     vec: &mut Vec<(V, Vec<PredicateSatisfied<U>>)>,
 ) -> Option<usize> {
-    let Some(len) = vec
+    let Some(mut len) = vec
         .iter()
         .find(|(_, res)| {
             // Singleton `Yes` predicates can be broadcast
@@ -192,14 +192,27 @@ fn broadcast<V: Debug, U: Eq + Clone>(
     else {
         return vec.first().map(|(_, res)| res.len());
     };
-    // Broadcast all vecs to length `len`
-    for (_, res) in vec.iter_mut() {
-        if res.len() != len {
-            if *res != vec![PredicateSatisfied::Yes] {
-                dbg!(&vec);
-                panic!("Could not broadcast predicate outputs. Are they all of the same length?");
+    if len < 1 {
+        // All non-broadcastable vecs are empty
+        // There might still be a `Yes` predicate that we cannot get rid of,
+        // so we broadcast all vecs to length 1
+        len = 1;
+        for (_, res) in vec.iter_mut() {
+            if res.is_empty() {
+                *res = vec![PredicateSatisfied::No];
             }
-            *res = vec![PredicateSatisfied::Yes; len];
+        }
+    } else {
+        // Broadcast all vecs to length `len`
+        for (_, res) in vec.iter_mut() {
+            if res.len() != len {
+                if *res != vec![PredicateSatisfied::Yes] {
+                    panic!(
+                        "Could not broadcast predicate outputs. Are they all of the same length?"
+                    );
+                }
+                *res = vec![PredicateSatisfied::Yes; len];
+            }
         }
     }
     Some(len)
