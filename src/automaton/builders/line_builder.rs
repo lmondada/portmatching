@@ -452,8 +452,8 @@ mod tests {
             Some(*self)
         }
 
-        fn property_id(&self) -> Option<Self::OffsetID> {
-            Some(0)
+        fn offset_id(&self) -> Self::OffsetID {
+            0
         }
     }
 

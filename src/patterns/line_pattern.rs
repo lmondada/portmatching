@@ -118,7 +118,7 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
                 it_queue.push_back(EdgePredicate::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(root_symbol),
-                    offset: first_prop.property_id(),
+                    offset: first_prop.offset_id(),
                 });
             }
         }
@@ -160,14 +160,14 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
             self.it_queue.push_back(EdgePredicate::NextRoot {
                 line_nb: i,
                 new_root: NodeLocation::Discover(j),
-                offset: first_prop.property_id(),
+                offset: first_prop.offset_id(),
             });
         } else {
             // Indicate that the root of `i` is known
             self.it_queue.push_back(EdgePredicate::NextRoot {
                 line_nb: i,
                 new_root: NodeLocation::Exists(self.u_to_symbols[&self.lines[i].root]),
-                offset: first_prop.property_id(),
+                offset: first_prop.offset_id(),
             });
         }
         while j_ind >= *boundary_ind {
@@ -372,12 +372,12 @@ mod tests {
                 EdgePredicate::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(symbs[0]),
-                    offset: Some(())
+                    offset: ()
                 },
                 EdgePredicate::NextRoot {
                     line_nb: 1,
                     new_root: NodeLocation::Discover(0),
-                    offset: Some(())
+                    offset: ()
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
@@ -400,7 +400,7 @@ mod tests {
                 EdgePredicate::NextRoot {
                     line_nb: 2,
                     new_root: NodeLocation::Discover(1),
-                    offset: Some(())
+                    offset: ()
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[2],
@@ -480,17 +480,17 @@ mod tests {
                 EdgePredicate::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
-                    offset: Some(0)
+                    offset: 0
                 },
                 EdgePredicate::NextRoot {
                     line_nb: 1,
                     new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
-                    offset: Some(0)
+                    offset: 0
                 },
                 EdgePredicate::NextRoot {
                     line_nb: 2,
                     new_root: NodeLocation::Discover(1),
-                    offset: Some(0)
+                    offset: 0
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
@@ -545,12 +545,12 @@ mod tests {
                 EdgePredicate::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(symbs[0]),
-                    offset: Some(0)
+                    offset: 0
                 },
                 EdgePredicate::NextRoot {
                     line_nb: 1,
                     new_root: NodeLocation::Discover(0),
-                    offset: Some(0)
+                    offset: 0
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],
@@ -605,17 +605,17 @@ mod tests {
                 EdgePredicate::NextRoot {
                     line_nb: 0,
                     new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
-                    offset: Some(())
+                    offset: ()
                 },
                 EdgePredicate::NextRoot {
                     line_nb: 1,
                     new_root: NodeLocation::Exists(Symbol::new(IterationStatus::Skeleton(0), 0)),
-                    offset: Some(())
+                    offset: ()
                 },
                 EdgePredicate::NextRoot {
                     line_nb: 2,
                     new_root: NodeLocation::Discover(1),
-                    offset: Some(())
+                    offset: ()
                 },
                 EdgePredicate::LinkNewNode {
                     node: symbs[0],

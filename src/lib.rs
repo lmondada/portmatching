@@ -27,10 +27,7 @@ pub trait EdgeProperty: Clone + Ord + Hash {
 
     fn reverse(&self) -> Option<Self>;
 
-    /// Properties with the same ID are mutually exclusive (or identical).
-    ///
-    /// If None, the property is never exclusive.
-    fn property_id(&self) -> Option<Self::OffsetID>;
+    fn offset_id(&self) -> Self::OffsetID;
 }
 
 pub trait NodeProperty: Clone + Hash + Ord {}
@@ -44,8 +41,8 @@ impl<A: Copy + Ord + Hash> EdgeProperty for (A, A) {
         (self.1, self.0).into()
     }
 
-    fn property_id(&self) -> Option<Self::OffsetID> {
-        Some(self.0)
+    fn offset_id(&self) -> Self::OffsetID {
+        self.0
     }
 }
 
@@ -56,9 +53,7 @@ impl EdgeProperty for () {
         ().into()
     }
 
-    fn property_id(&self) -> Option<Self::OffsetID> {
-        Some(())
-    }
+    fn offset_id(&self) -> Self::OffsetID {}
 }
 
 type BiMap<S, U> =
