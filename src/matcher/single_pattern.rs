@@ -106,9 +106,7 @@ where
             let Some(&new_src) = match_map.get_by_left(&src) else {
                 continue;
             };
-            let new_tgts = validate_edge(new_src, &e.edge_prop)
-                .into_iter()
-                .filter_map(|p| p);
+            let new_tgts = validate_edge(new_src, &e.edge_prop).into_iter().flatten();
             for new_tgt in new_tgts {
                 let mut new_match_map = match_map.clone();
                 if let Some(target_prop) = e.target_prop.as_ref() {

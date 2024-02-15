@@ -91,9 +91,9 @@ impl<U> fmt::Debug for PredicateSatisfied<U> {
 }
 
 impl<U: Copy> PredicateSatisfied<U> {
-    pub(crate) fn to_option(&self) -> Option<Option<(Symbol, U)>> {
+    pub(crate) fn to_option(self) -> Option<Option<(Symbol, U)>> {
         match self {
-            &PredicateSatisfied::NewSymbol(s, u) => Some(Some((s, u))),
+            PredicateSatisfied::NewSymbol(s, u) => Some(Some((s, u))),
             PredicateSatisfied::Yes => Some(None),
             PredicateSatisfied::No => None,
         }

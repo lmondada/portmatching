@@ -180,7 +180,7 @@ fn next_state(g: &PortGraph, edge: OutPort) -> StateID {
 }
 
 fn broadcast<V: Debug, U: Eq + Clone>(
-    vec: &mut Vec<(V, Vec<PredicateSatisfied<U>>)>,
+    vec: &mut [(V, Vec<PredicateSatisfied<U>>)],
 ) -> Option<usize> {
     let Some(mut len) = vec
         .iter()
