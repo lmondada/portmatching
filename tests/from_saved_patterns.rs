@@ -10,7 +10,7 @@ use portmatching::{
     PatternID, Universe, UnweightedPattern,
 };
 
-const DBG_DUMP_FILES: bool = false;
+const DBG_DUMP_FILES: bool = true;
 
 fn valid_json_file(s: &str, pattern: &str) -> bool {
     s.starts_with(pattern) && s.ends_with(".json")
@@ -89,7 +89,7 @@ fn test<'g, M, U>(
 
 #[test]
 fn from_saved_patterns() {
-    let testcases = ["0", "1", "2"];
+    let testcases = ["0", "1", "2", "3"];
     for test_name in testcases {
         println!("{test_name}...");
         let path: PathBuf = ["tests", "saved_patterns", test_name].iter().collect();

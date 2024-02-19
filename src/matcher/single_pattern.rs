@@ -2,7 +2,7 @@
 //!
 //! This matcher is used as a baseline in benchmarking by repeating
 //! the matching process for each pattern separately.
-use std::hash::Hash;
+use std::{collections::VecDeque, hash::Hash};
 
 use bimap::BiMap;
 use portgraph::{LinkView, NodeIndex, PortOffset};
@@ -72,10 +72,11 @@ where
         &self,
         host_root: N,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
     ) -> bool {
-        self.get_match_map(host_root, validate_node, validate_edge)
-            .is_some()
+        !self
+            .get_match_map(host_root, validate_node, validate_edge)
+            .is_empty()
     }
 
     /// Match the pattern and return a map from pattern nodes to host nodes
@@ -85,24 +86,43 @@ where
         &self,
         host_root: N,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
-    ) -> Option<BiMap<U, N>> {
-        let mut match_map = BiMap::from_iter([(self.root, host_root)]);
-        for e in self.edges.iter() {
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
+    ) -> Vec<BiMap<U, N>> {
+        let mut candidates = VecDeque::new();
+        candidates.push_back((
+            self.edges.as_slice(),
+            BiMap::from_iter([(self.root, host_root)]),
+        ));
+        let mut final_match_maps = Vec::new();
+        while let Some((edges, match_map)) = candidates.pop_front() {
+            let Some(e) = edges.first() else {
+                final_match_maps.push(match_map);
+                continue;
+            };
+            let edges = &edges[1..];
+
             let src = e.source.expect("Only connected edges allowed in pattern");
             let tgt = e.target.expect("Only connected edges allowed in pattern");
-            let new_src = match_map.get_by_left(&src).copied()?;
-            let new_tgt = validate_edge(new_src, &e.edge_prop)?;
-            if let Some(target_prop) = e.target_prop.as_ref() {
-                if !validate_node(new_tgt, target_prop) {
-                    return None;
+            let Some(&new_src) = match_map.get_by_left(&src) else {
+                continue;
+            };
+            let new_tgts = validate_edge(new_src, &e.edge_prop).into_iter().flatten();
+            for new_tgt in new_tgts {
+                let mut new_match_map = match_map.clone();
+                if let Some(target_prop) = e.target_prop.as_ref() {
+                    if !validate_node(new_tgt, target_prop) {
+                        continue;
+                    }
                 }
-            }
-            if match_map.get_by_left(&tgt) != Some(&new_tgt) {
-                match_map.insert_no_overwrite(tgt, new_tgt).ok()?;
+                if match_map.get_by_left(&tgt) != Some(&new_tgt) {
+                    let Ok(_) = new_match_map.insert_no_overwrite(tgt, new_tgt) else {
+                        continue;
+                    };
+                }
+                candidates.push_back((edges, new_match_map));
             }
         }
-        Some(match_map)
+        final_match_maps
     }
 
     /// The matches in `host` starting at `host_root`
@@ -112,7 +132,7 @@ where
         &self,
         host_root: N,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
     ) -> Vec<PatternMatch<PatternID, N>> {
         if self.match_exists(host_root, validate_node, validate_edge) {
             vec![PatternMatch {
@@ -158,7 +178,7 @@ mod tests {
             matcher
                 .find_matches(&g)
                 .into_iter()
-                .map(|m| m.to_match_map(&g, &matcher).unwrap())
+                .flat_map(|m| m.to_match_map(&g, &matcher))
                 .collect_vec(),
             vec![[(n0, n0), (n1, n1), (n3, n3), (n4, n4)]
                 .into_iter()
@@ -262,14 +282,8 @@ mod tests {
         let mut matches = matcher
             .find_matches(&g)
             .into_iter()
-            .map(|m| {
-                m.to_match_map(&g, &matcher)
-                    .unwrap()
-                    .values()
-                    .sorted()
-                    .copied()
-                    .collect_vec()
-            })
+            .flat_map(|m| m.to_match_map(&g, &matcher))
+            .map(|m| m.values().sorted().copied().collect_vec())
             .collect_vec();
         matches.sort_unstable_by_key(|v| *v.first().unwrap());
         assert_eq!(matches.len(), 3);
