@@ -173,7 +173,6 @@ mod tests {
     use itertools::Itertools;
 
     use portgraph::{
-        dot::DotFormat,
         proptest::{gen_multiportgraph, gen_portgraph},
         LinkMut, MultiPortGraph, NodeIndex, PortGraph, PortMut, PortOffset, PortView,
         UnmanagedDenseMap,
@@ -619,7 +618,6 @@ mod tests {
                     fs::remove_file(path).expect("Removing file failed");
                 }
                 fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
-                fs::write("graph.dot", g.dot_string()).unwrap();
             }
             let patterns = pattern_graphs
                 .iter()
@@ -629,7 +627,6 @@ mod tests {
             if DBG_DUMP_FILES {
                 for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
                     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
-                    fs::write(&format!("pattern_{}.dot", i), g.dot_string()).unwrap();
                 }
             }
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());

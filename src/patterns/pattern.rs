@@ -6,7 +6,7 @@ use std::{
 use super::{Line, LinePattern};
 use crate::{EdgeProperty, HashMap, HashSet, NodeProperty, Universe};
 use itertools::Itertools;
-use petgraph::visit::{self, GraphBase, IntoNodeIdentifiers};
+use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
 use portgraph::{Direction, LinkView, NodeIndex, PortOffset, SecondaryMap};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -124,7 +124,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
                 target: Some(*v),
                 edge_prop: property.clone(),
                 source_prop: self.nodes.get(u).cloned(),
-                target_prop: self.nodes.get(&v).cloned(),
+                target_prop: self.nodes.get(v).cloned(),
             })
             .collect();
         let root = self
@@ -158,7 +158,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
                 target: Some(*v),
                 edge_prop: property.clone(),
                 source_prop: self.nodes.get(u).cloned(),
-                target_prop: self.nodes.get(&v).cloned(),
+                target_prop: self.nodes.get(v).cloned(),
             })
             .collect();
 
