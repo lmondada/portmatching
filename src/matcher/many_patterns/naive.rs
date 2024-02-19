@@ -21,7 +21,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> NaiveManyMatcher<U, 
         Self {
             matchers: patterns
                 .into_iter()
-                .map(SinglePatternMatcher::new)
+                .map(SinglePatternMatcher::from_pattern)
                 .collect(),
         }
     }
