@@ -16,8 +16,9 @@ use crate::{
 use super::{Match, PatternMatch, PortMatcher};
 
 /// A simple matcher for a single pattern.
-pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
-    pattern: Pattern<U, PNode, PEdge>,
+pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Eq + Hash, P = Pattern<U, PNode, PEdge>>
+{
+    pattern: P,
     edges: Vec<Edge<U, PNode, PEdge>>,
     root: U,
 }
@@ -43,7 +44,7 @@ where
 
 impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> SinglePatternMatcher<U, PNode, PEdge> {
     /// Create a new matcher for a single pattern.
-    pub fn new(pattern: Pattern<U, PNode, PEdge>) -> Self {
+    pub fn from_pattern(pattern: Pattern<U, PNode, PEdge>) -> Self {
         // This is our "matching recipe" -- we precompute it once and store it
         let edges = pattern.edges().expect("Cannot match disconnected pattern");
         let root = pattern.root().expect("Cannot match unrooted pattern");
@@ -53,13 +54,20 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> SinglePatternMatcher
             root,
         }
     }
+}
 
-    pub fn from_pattern(pattern: Pattern<U, PNode, PEdge>) -> Self {
-        Self::new(pattern)
+impl<U: Universe, PNode, PEdge: Eq + Hash, P> SinglePatternMatcher<U, PNode, PEdge, P> {
+    /// Create a new matcher for a single pattern.
+    pub fn new(pattern: P, edges: Vec<Edge<U, PNode, PEdge>>, root: U) -> Self {
+        Self {
+            pattern,
+            edges,
+            root,
+        }
     }
 }
 
-impl<U, PNode, PEdge> SinglePatternMatcher<U, PNode, PEdge>
+impl<U, PNode, PEdge, P> SinglePatternMatcher<U, PNode, PEdge, P>
 where
     U: Universe,
     PNode: NodeProperty,
@@ -149,7 +157,7 @@ impl<U: Universe> Pattern<U, (), (PortOffset, PortOffset)> {
     pub fn into_single_pattern_matcher(
         self,
     ) -> SinglePatternMatcher<U, (), (PortOffset, PortOffset)> {
-        SinglePatternMatcher::new(self)
+        SinglePatternMatcher::from_pattern(self)
     }
 }
 
