@@ -17,6 +17,12 @@ pub struct Pattern<U: Universe, PNode, PEdge: Eq + Hash> {
     root: Option<U>,
 }
 
+impl<U: Universe, PNode, PEdge: Eq + Hash> Pattern<U, PNode, PEdge> {
+    pub fn n_edges(&self) -> usize {
+        self.edges.len()
+    }
+}
+
 pub type UnweightedPattern = Pattern<NodeIndex, (), UnweightedEdge>;
 pub type WeightedPattern<W> = Pattern<NodeIndex, W, UnweightedEdge>;
 
@@ -32,7 +38,7 @@ pub struct Edge<U, PNode, PEdge> {
 }
 
 impl<U: Universe, PNode: Clone, PEdge: EdgeProperty> Edge<U, PNode, PEdge> {
-    pub(crate) fn reverse(&self) -> Option<Self>
+    pub fn reverse(&self) -> Option<Self>
     where
         PEdge: EdgeProperty,
     {
@@ -88,6 +94,19 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
         }
         s.push_str("}\n");
         s
+    }
+
+    /// Whether the pattern has a root and is connected.
+    pub fn is_valid(&self) -> bool {
+        let Some(edges) = self.edges() else {
+            return false;
+        };
+        // edges form connected graph, now check that all nodes are connected to the edge set
+        let known_nodes = edges
+            .iter()
+            .flat_map(|e| [e.source, e.target].into_iter().flatten())
+            .collect::<HashSet<_>>();
+        self.nodes.len() < 2 || self.nodes.iter().all(|(u, _)| known_nodes.contains(u))
     }
 
     /// Let the pattern fix a root
@@ -161,7 +180,9 @@ fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
             known_nodes.contains(&src)
         };
         let is_rev_boundary_edge = |e: &&Edge<U, PNode, PEdge>| {
-            let Some(e) = e.reverse() else { return false; };
+            let Some(e) = e.reverse() else {
+                return false;
+            };
             let src = e.source.expect("Pattern cannot have dangling edges");
             known_nodes.contains(&src)
         };
@@ -225,7 +246,7 @@ where
         }
         let pout = p;
         let Some(pin) = g.port_link(pout) else {
-            continue
+            continue;
         };
         let pout_offset = g.port_offset(pout).unwrap();
         let pin_offset = g.port_offset(pin).unwrap();
@@ -310,10 +331,13 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
                 }
                 new_edges.push((u, v, property.clone()));
                 add_new_edges(&mut to_visit, v, edges.keys());
-                let Some((_, new_prop)) = edges.keys()
+                let Some((_, new_prop)) = edges
+                    .keys()
                     .find(|(u, p)| u == &v && valid_successor(&property, p))
                     .cloned()
-                else { break };
+                else {
+                    break;
+                };
                 curr_edge = (v, new_prop);
             }
             if !new_edges.is_empty() {
@@ -332,8 +356,8 @@ fn add_new_edges<'a, U: Universe + 'a, PEdge: EdgeProperty + 'a>(
 ) {
     let mut node_edges = edges
         .into_iter()
+        .filter(|&&(u, _)| u == node)
         .cloned()
-        .filter(|&(u, _)| u == node)
         .collect_vec();
     node_edges.sort_unstable_by_key(|(_, prop)| prop.clone());
     queue.extend(node_edges)

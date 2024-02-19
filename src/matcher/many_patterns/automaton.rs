@@ -45,7 +45,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> ManyMatcher<U, PNode
         &self,
         root: N,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &PEdge) -> Option<N>,
+        validate_edge: impl for<'a> Fn(N, &PEdge) -> Vec<Option<N>>,
     ) -> Vec<PatternMatch<PatternID, N>> {
         self.automaton
             .run(root, validate_node, validate_edge)
@@ -57,13 +57,15 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> ManyMatcher<U, PNode
         &self,
         m: PatternMatch<PatternID, N>,
         validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Option<N>,
-    ) -> Option<HashMap<U, N>> {
+        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
+    ) -> Vec<HashMap<U, N>> {
         let p = self.patterns.get(m.pattern.0).unwrap();
         let single_matcher = SinglePatternMatcher::from_pattern(p.clone());
         single_matcher
             .get_match_map(m.root, validate_node, validate_edge)
+            .into_iter()
             .map(|m| m.into_iter().collect())
+            .collect()
     }
 
     pub fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, PNode, PEdge>> {
@@ -166,23 +168,29 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use std::collections::BTreeSet;
 
     use itertools::Itertools;
 
     use portgraph::{
-        proptest::gen_portgraph, LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView,
-        UnmanagedDenseMap,
+        proptest::gen_portgraph, LinkMut, MultiPortGraph, NodeIndex, PortGraph, PortMut,
+        PortOffset, PortView, UnmanagedDenseMap,
     };
 
     use proptest::prelude::*;
+
+    #[cfg(feature = "serde")]
+    use glob::glob;
+    #[cfg(feature = "serde")]
+    use std::fs;
 
     use crate::{
         matcher::{ManyMatcher, PatternMatch, PortMatcher, SinglePatternMatcher},
         utils::test::gen_portgraph_connected,
         HashSet, NaiveManyMatcher, Pattern,
     };
+
+    const DBG_DUMP_FILES: bool = false;
 
     #[test]
     fn single_pattern_loop_link() {
@@ -262,7 +270,7 @@ mod tests {
         let _matcher: ManyMatcher<_, _, _> = vec![p].into();
     }
 
-    fn link(p: &mut PortGraph, (n1, p1): (NodeIndex, usize), (n2, p2): (NodeIndex, usize)) {
+    fn link<G: LinkMut>(p: &mut G, (n1, p1): (NodeIndex, usize), (n2, p2): (NodeIndex, usize)) {
         p.link_ports(
             p.port_index(n1, PortOffset::new_outgoing(p1)).unwrap(),
             p.port_index(n2, PortOffset::new_incoming(p2)).unwrap(),
@@ -434,6 +442,70 @@ mod tests {
         assert_eq!(matcher.find_matches((&g, &w).into()).len(), 2);
     }
 
+    #[test]
+    fn non_unique_ports() {
+        let mut p1 = PortGraph::new();
+        let n0 = p1.add_node(0, 1);
+        let n1 = p1.add_node(2, 0);
+        link(&mut p1, (n0, 0), (n1, 0));
+
+        let mut p2 = PortGraph::new();
+        let n0 = p2.add_node(0, 1);
+        let n1 = p2.add_node(2, 0);
+        link(&mut p2, (n0, 0), (n1, 1));
+
+        let p1 = Pattern::from_portgraph(&p1);
+        let p2 = Pattern::from_portgraph(&p2);
+        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+
+        let mut g = MultiPortGraph::new();
+        let n0 = g.add_node(0, 1);
+        let n1 = g.add_node(2, 0);
+        link(&mut g, (n0, 0), (n1, 0));
+        link(&mut g, (n0, 0), (n1, 1));
+
+        let matches = matcher.find_matches(&g);
+        assert_eq!(matches.len(), 2);
+        assert!(!matches[0].to_match_map(&g, &matcher).is_empty());
+        assert!(!matches[1].to_match_map(&g, &matcher).is_empty());
+    }
+
+    #[test]
+    fn non_unique_ports_2() {
+        let mut p1 = PortGraph::new();
+        let n0 = p1.add_node(0, 1);
+        let n1 = p1.add_node(1, 1);
+        let n2 = p1.add_node(2, 0);
+        link(&mut p1, (n0, 0), (n1, 0));
+        link(&mut p1, (n1, 0), (n2, 0));
+
+        let mut p2 = PortGraph::new();
+        let n0 = p2.add_node(0, 1);
+        let n1 = p2.add_node(1, 1);
+        let n2 = p2.add_node(2, 0);
+        link(&mut p2, (n0, 0), (n1, 0));
+        link(&mut p2, (n1, 0), (n2, 1));
+
+        let p1 = Pattern::from_portgraph(&p1);
+        let p2 = Pattern::from_portgraph(&p2);
+        let matcher: ManyMatcher<_, _, _> = vec![p1, p2].into();
+
+        let mut g = MultiPortGraph::new();
+        let n0 = g.add_node(0, 1);
+        let n1a = g.add_node(1, 1);
+        let n1b = g.add_node(1, 1);
+        let n2 = g.add_node(2, 0);
+        link(&mut g, (n0, 0), (n1a, 0));
+        link(&mut g, (n0, 0), (n1b, 0));
+        link(&mut g, (n1a, 0), (n2, 0));
+        link(&mut g, (n1b, 0), (n2, 1));
+
+        let matches = matcher.find_matches(&g);
+        assert_eq!(matches.len(), 2);
+        assert!(!matches[0].to_match_map(&g, &matcher).is_empty());
+        assert!(!matches[1].to_match_map(&g, &matcher).is_empty());
+    }
+
     proptest! {
         #[test]
         fn single_graph_proptest(pattern in gen_portgraph_connected(10, 4, 20), g in gen_portgraph(100, 4, 200)) {
@@ -451,15 +523,36 @@ mod tests {
         #[ignore = "a bit slow"]
         #[test]
         fn many_graphs_proptest(
-            patterns in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
+            pattern_graphs in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..100),
             g in gen_portgraph(30, 4, 60)
         ) {
-            let patterns = patterns
-                .into_iter()
-                .map(|p| Pattern::from_portgraph(&p))
+            #[cfg(not(feature = "serde"))]
+            if DBG_DUMP_FILES {
+                println!("Warning: serde feature not enabled, cannot dump files");
+            }
+            #[cfg(feature = "serde")]
+            if DBG_DUMP_FILES {
+                for path in glob("pattern_*.json").expect("glob pattern failed").flatten() {
+                    fs::remove_file(path).expect("Removing file failed");
+                }
+                fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            }
+            let patterns = pattern_graphs
+                .iter()
+                .map(Pattern::from_portgraph)
                 .collect_vec();
+            #[cfg(feature = "serde")]
+            if DBG_DUMP_FILES {
+                for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
+                    fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
+                }
+            }
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
             let single_matches: HashSet<_>  = naive.find_matches(&g).into_iter().collect();
+            #[cfg(feature = "serde")]
+            if DBG_DUMP_FILES {
+                fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            }
             let matcher = ManyMatcher::from_patterns(patterns);
             let many_matches: HashSet<_> = matcher.find_matches(&g).into_iter().collect();
             prop_assert_eq!(many_matches, single_matches);
@@ -473,22 +566,32 @@ mod tests {
             pattern_graphs in prop::collection::vec(gen_portgraph_connected(10, 4, 20), 1..10),
             g in gen_portgraph(30, 4, 60)
         ) {
-            // for entry in glob("pattern_*.json").expect("glob pattern failed") {
-            //     if let Ok(path) = entry {
-            //         fs::remove_file(path).expect("Removing file failed");
-            //     }
-            // }
-            // fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            if DBG_DUMP_FILES {
+                println!("Warning: serde feature not enabled, cannot dump files");
+            }
+            #[cfg(feature = "serde")]
+            if DBG_DUMP_FILES {
+                for path in glob("pattern_*.json").expect("glob pattern failed").flatten() {
+                    fs::remove_file(path).expect("Removing file failed");
+                }
+                fs::write("graph.json", serde_json::to_vec(&g).unwrap()).unwrap();
+            }
             let patterns = pattern_graphs
                 .iter()
                 .map(Pattern::from_portgraph)
                 .collect_vec();
-            // for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
-            //     fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
-            // }
+            #[cfg(feature = "serde")]
+            if DBG_DUMP_FILES {
+                for ((i, g), p) in pattern_graphs.iter().enumerate().zip(&patterns) {
+                    fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&(g, p.root().unwrap())).unwrap()).unwrap();
+                }
+            }
             let naive = NaiveManyMatcher::from_patterns(patterns.clone());
             let single_matches: BTreeSet<_> = naive.find_matches(&g).into_iter().collect();
-            // fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            #[cfg(feature = "serde")]
+            if DBG_DUMP_FILES {
+                fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
+            }
             let matcher = ManyMatcher::from_patterns(patterns);
             let many_matches: BTreeSet<_> = matcher.find_matches(&g).into_iter().collect();
             prop_assert_eq!(many_matches, single_matches);

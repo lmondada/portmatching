@@ -10,6 +10,8 @@ use portmatching::{
     PatternID, Universe, UnweightedPattern,
 };
 
+const DBG_DUMP_FILES: bool = true;
+
 fn valid_json_file(s: &str, pattern: &str) -> bool {
     s.starts_with(pattern) && s.ends_with(".json")
 }
@@ -28,7 +30,7 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<UnweightedPattern>> {
     for path in all_patterns {
         let (p, root): (PortGraph, NodeIndex) =
             serde_json::from_reader(fs::File::open(&path)?).unwrap();
-        {
+        if DBG_DUMP_FILES {
             let mut path = path;
             path.set_extension("gv");
             fs::write(path, p.dot_string()).unwrap();
@@ -46,7 +48,7 @@ fn load_graph(dir: &Path) -> io::Result<PortGraph> {
         let path = entry.path();
         if valid_json_file(&file_name, "graph") {
             let graph: PortGraph = serde_json::from_reader(fs::File::open(&path)?).unwrap();
-            {
+            if DBG_DUMP_FILES {
                 let mut path = path;
                 path.set_extension("gv");
                 fs::write(path, graph.dot_string()).unwrap();
@@ -87,7 +89,7 @@ fn test<'g, M, U>(
 
 #[test]
 fn from_saved_patterns() {
-    let testcases = ["0"];
+    let testcases = ["0", "1", "2", "3"];
     for test_name in testcases {
         println!("{test_name}...");
         let path: PathBuf = ["tests", "saved_patterns", test_name].iter().collect();
@@ -96,7 +98,7 @@ fn from_saved_patterns() {
         let exp = load_results(&path).unwrap();
 
         let matcher = ManyMatcher::from_patterns(patterns.clone());
-        {
+        if DBG_DUMP_FILES {
             let mut path = path.clone();
             path.push("trie.gv");
             fs::write(path, matcher.dot_string()).unwrap();
