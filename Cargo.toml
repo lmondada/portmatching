@@ -26,7 +26,8 @@ path = "src/lib.rs"
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-portgraph = { version = "0.8.0", features = ["petgraph"] }
+# portgraph = { version = "0.8.0", features = ["petgraph"] }
+portgraph = { git = "https://github.com/CQCL/portgraph.git", rev = "aae4b5d", features = ["petgraph"] }
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 smallvec = "1.10.0"
 itertools = "0.10.5"
@@ -54,8 +55,9 @@ glob = "0.3.1"
 criterion = { version = "0.4.0", features = ["html_reports"] }
 
 [dev-dependencies.portgraph]
-version = "0.8"
 features = ["proptest", "serde"]
+rev = "aae4b5d"
+git = "https://github.com/CQCL/portgraph.git"
 
 [[example]]
 name = "large_graph"
@@ -66,7 +68,7 @@ name = "optimise_graph"
 required-features = ["serde", "datagen"]
 
 [[test]]
-name = "from_saved_patterns"
+name = "from_testcases"
 required-features = ["serde"]
 
 [[bin]]

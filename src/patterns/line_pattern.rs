@@ -7,7 +7,7 @@ use crate::{
     EdgeProperty, HashMap, NodeProperty, Universe,
 };
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Hash)]
 pub(crate) struct Line<U, PEdge> {
     root: U,
     edges: Vec<(U, U, PEdge)>,

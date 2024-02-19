@@ -1,8 +1,11 @@
-use portgraph::proptest::gen_portgraph;
-use portgraph::{LinkMut, PortGraph, PortMut, PortOffset, PortView};
+use std::fmt;
+
+use itertools::Itertools;
+use portgraph::proptest::{gen_multiportgraph, gen_portgraph};
+use portgraph::{LinkMut, LinkView, MultiPortGraph, PortGraph, PortMut, PortOffset, PortView};
 use proptest::prelude::*;
 
-use super::depth::is_connected;
+use super::connected_components;
 
 pub(crate) fn graph() -> PortGraph {
     let mut g = PortGraph::new();
@@ -24,10 +27,38 @@ pub(crate) fn graph() -> PortGraph {
     g
 }
 
+/// Strategy adaptor to return the largest connected component of a graph.
+fn connected_strat<G: PortView + LinkView + PortMut + fmt::Debug>(
+    strat: impl Strategy<Value = G>,
+) -> impl Strategy<Value = G> {
+    strat.prop_map(|mut g| {
+        let cc = connected_components(&g);
+        let Some(max_cc) = cc.iter().position_max_by_key(|c| c.len()) else {
+            return g;
+        };
+        for (i, c) in cc.into_iter().enumerate() {
+            if i != max_cc {
+                for v in c {
+                    g.remove_node(v);
+                }
+            }
+        }
+        g
+    })
+}
+
 pub(crate) fn gen_portgraph_connected(
     n_nodes: usize,
     n_ports: usize,
     max_edges: usize,
 ) -> impl Strategy<Value = PortGraph> {
-    gen_portgraph(n_nodes, n_ports, max_edges).prop_filter("Must be connected", is_connected)
+    connected_strat(gen_portgraph(n_nodes, n_ports, max_edges))
+}
+
+pub(crate) fn gen_multiportgraph_connected(
+    n_nodes: usize,
+    n_ports: usize,
+    max_edges: usize,
+) -> impl Strategy<Value = MultiPortGraph> {
+    connected_strat(gen_multiportgraph(n_nodes, n_ports, max_edges))
 }
