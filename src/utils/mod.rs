@@ -3,9 +3,8 @@
 #[cfg(test)]
 pub(crate) mod test;
 
-mod depth;
-mod pre_order;
-pub use depth::is_connected;
+mod connected_components;
+pub use connected_components::{is_connected, connected_components};
 use portgraph::{LinkView, NodeIndex, SecondaryMap};
 
 use crate::{patterns::UnweightedEdge, WeightedGraphRef};

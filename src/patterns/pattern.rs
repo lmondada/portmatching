@@ -6,14 +6,14 @@ use std::{
 use super::{Line, LinePattern};
 use crate::{EdgeProperty, HashMap, HashSet, NodeProperty, Universe};
 use itertools::Itertools;
-use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
+use petgraph::visit::{self, GraphBase, IntoNodeIdentifiers};
 use portgraph::{Direction, LinkView, NodeIndex, PortOffset, SecondaryMap};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Pattern<U: Universe, PNode, PEdge: Eq + Hash> {
     nodes: HashMap<U, PNode>,
-    edges: HashMap<(U, PEdge), U>,
+    edges: HashSet<(U, U, PEdge)>,
     root: Option<U>,
 }
 
@@ -64,7 +64,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
     }
 
     pub fn add_edge(&mut self, u: U, v: U, property: PEdge) {
-        self.edges.insert((u, property), v);
+        self.edges.insert((u, v, property));
     }
 
     pub fn root(&self) -> Option<U> {
@@ -86,7 +86,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
         for (u, property) in &self.nodes {
             s.push_str(&format!("  {:?} [label=\"{:?}\"];\n", u, property));
         }
-        for ((u, property), v) in &self.edges {
+        for (u, v, property) in &self.edges {
             s.push_str(&format!(
                 "  {:?} -> {:?} [label=\"{:?}\"];\n",
                 u, v, property
@@ -119,9 +119,9 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
         let all_edges: BTreeSet<_> = self
             .edges
             .iter()
-            .map(|((u, property), &v)| Edge {
+            .map(|(u, v, property)| Edge {
                 source: Some(*u),
-                target: Some(v),
+                target: Some(*v),
                 edge_prop: property.clone(),
                 source_prop: self.nodes.get(u).cloned(),
                 target_prop: self.nodes.get(&v).cloned(),
@@ -139,7 +139,7 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
         self.nodes
             .keys()
             .copied()
-            .chain(self.edges.iter().flat_map(|(&(u, _), &v)| vec![u, v]))
+            .chain(self.edges.iter().flat_map(|&(u, v, _)| vec![u, v]))
             .unique()
     }
 
@@ -153,9 +153,9 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
         let all_edges: BTreeSet<_> = self
             .edges
             .iter()
-            .map(|((u, property), &v)| Edge {
+            .map(|(u, v, property)| Edge {
                 source: Some(*u),
-                target: Some(v),
+                target: Some(*v),
                 edge_prop: property.clone(),
                 source_prop: self.nodes.get(u).cloned(),
                 target_prop: self.nodes.get(&v).cloned(),
@@ -245,14 +245,13 @@ where
             continue;
         }
         let pout = p;
-        let Some(pin) = g.port_link(pout) else {
-            continue;
-        };
-        let pout_offset = g.port_offset(pout).unwrap();
-        let pin_offset = g.port_offset(pin).unwrap();
-        let pout_node = g.port_node(pout).unwrap();
-        let pin_node = g.port_node(pin).unwrap();
-        pattern.add_edge(pout_node, pin_node, (pout_offset, pin_offset));
+        for (_, pin) in g.port_links(pout) {
+            let pout_offset = g.port_offset(pout).unwrap();
+            let pin_offset = g.port_offset(pin).unwrap();
+            let pout_node = g.port_node(pout).unwrap();
+            let pin_node = g.port_node(pin).unwrap();
+            pattern.add_edge(pout_node, pin_node, (pout_offset, pin_offset));
+        }
     }
 }
 
@@ -296,71 +295,89 @@ impl<W: NodeProperty> Pattern<NodeIndex, W, (PortOffset, PortOffset)> {
 impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
     /// Try to convert the pattern into a line pattern
     ///
-    /// Attempt every possible root and return `None` if none worked.
+    /// A root must be set, otherwise None is returned.
     pub fn try_into_line_pattern<F: for<'a> Fn(&'a PEdge, &'a PEdge) -> bool>(
         self,
         valid_successor: F,
     ) -> Option<LinePattern<U, PNode, PEdge>> {
-        let Self {
-            nodes,
-            mut edges,
-            root,
-        } = self;
+        let Self { nodes, edges, root } = self;
         let mut to_visit = VecDeque::new();
+        let mut visited_edges = HashSet::default();
+        let mut n_visited_edges = 0;
 
-        // Add all the valid reverse edges too
-        let rev_edges = edges
-            .iter()
-            .filter_map(|((u, p), &v)| p.reverse().map(|rev| ((v, rev), *u)))
-            .collect_vec();
-        edges.extend(rev_edges);
-
-        add_new_edges(&mut to_visit, root?, edges.keys());
-        let mut lines = Vec::new();
-        while let Some((u, property)) = to_visit.pop_front() {
-            let mut new_edges = Vec::new();
-            let mut curr_edge = (u, property);
-            loop {
-                let (u, property) = curr_edge;
-                let Some(v) = edges.remove(&(u, property.clone())) else {
-                    break;
-                };
-                // Also remove the reverse edge (if present)
-                if let Some(rev) = property.reverse() {
-                    edges.remove(&(v, rev));
+        // Adjacency map vertex -> [(vertex, prop)]
+        let adj = {
+            let mut adj = HashMap::default();
+            for (u, v, prop) in &edges {
+                adj.entry(*u)
+                    .or_insert_with(HashSet::default)
+                    .insert((*v, prop.clone()));
+                if let Some(rev) = prop.reverse() {
+                    adj.entry(*v)
+                        .or_insert_with(HashSet::default)
+                        .insert((*u, rev));
                 }
-                new_edges.push((u, v, property.clone()));
-                add_new_edges(&mut to_visit, v, edges.keys());
-                let Some((_, new_prop)) = edges
-                    .keys()
-                    .find(|(u, p)| u == &v && valid_successor(&property, p))
-                    .cloned()
+            }
+            adj
+        };
+
+        // Add edges to visit
+        let enqueue_edges = |u, to_visit: &mut VecDeque<_>, visited_edges: &HashSet<_>| {
+            for (v, prop) in adj.get(&u).into_iter().flatten() {
+                let edge = (u, *v, prop.clone());
+                if !visited_edges.contains(&edge) {
+                    to_visit.push_back(edge.clone());
+                }
+            }
+        };
+
+        // Visit edge
+        let mut visit = |edge: (U, U, PEdge), visited_edges: &mut HashSet<_>| {
+            if !visited_edges.insert(edge.clone()) {
+                return false;
+            }
+            if let Some(rev_edge) = {
+                let (u, v, prop) = &edge;
+                prop.reverse().map(|prop| (*v, *u, prop))
+            } {
+                visited_edges.insert(rev_edge);
+            }
+            n_visited_edges += 1;
+            true
+        };
+
+        // Initialise edges to visit
+        enqueue_edges(root?, &mut to_visit, &visited_edges);
+
+        let mut lines = Vec::new();
+        while let Some(mut curr_edge) = to_visit.pop_front() {
+            let mut line = Vec::new();
+            let root = curr_edge.0;
+            loop {
+                if !visit(curr_edge.clone(), &mut visited_edges) {
+                    break;
+                }
+
+                line.push(curr_edge.clone());
+
+                let (_, u, prop) = curr_edge;
+                enqueue_edges(u, &mut to_visit, &visited_edges);
+
+                let Some((next_u, next_prop)) = adj[&u]
+                    .iter()
+                    .find(|(_, new_prop)| valid_successor(&prop, new_prop))
                 else {
                     break;
                 };
-                curr_edge = (v, new_prop);
+                curr_edge = (u, *next_u, next_prop.clone());
             }
-            if !new_edges.is_empty() {
-                let line = Line::new(u, new_edges);
+            if !line.is_empty() {
+                let line = Line::new(root, line);
                 lines.push(line);
             }
         }
-        edges.is_empty().then_some(LinePattern { nodes, lines })
+        (n_visited_edges == edges.len()).then_some(LinePattern { nodes, lines })
     }
-}
-
-fn add_new_edges<'a, U: Universe + 'a, PEdge: EdgeProperty + 'a>(
-    queue: &mut VecDeque<(U, PEdge)>,
-    node: U,
-    edges: impl IntoIterator<Item = &'a (U, PEdge)>,
-) {
-    let mut node_edges = edges
-        .into_iter()
-        .filter(|&&(u, _)| u == node)
-        .cloned()
-        .collect_vec();
-    node_edges.sort_unstable_by_key(|(_, prop)| prop.clone());
-    queue.extend(node_edges)
 }
 
 pub(crate) fn compatible_offsets(
@@ -386,16 +403,17 @@ mod tests {
         p.add_edge(0, 1, (po(2), pi(2)));
         p.add_edge(1, 2, (po(2), pi(2)));
         p.set_root(0);
+        let lp = p.try_into_line_pattern(compatible_offsets).unwrap();
+        assert_eq!(lp.nodes, HashMap::default());
         assert_eq!(
-            p.try_into_line_pattern(compatible_offsets),
-            Some(LinePattern {
-                nodes: HashMap::default(),
-                lines: vec![
-                    Line::new(0, vec![(0, 1, (po(0), pi(1))), (1, 2, (po(1), pi(0))),]),
-                    Line::new(0, vec![(0, 1, (po(1), pi(0))), (1, 2, (po(0), pi(1))),]),
-                    Line::new(0, vec![(0, 1, (po(2), pi(2))), (1, 2, (po(2), pi(2))),])
-                ]
-            })
+            lp.lines.into_iter().collect::<HashSet<_>>(),
+            [
+                Line::new(0, vec![(0, 1, (po(0), pi(1))), (1, 2, (po(1), pi(0))),]),
+                Line::new(0, vec![(0, 1, (po(1), pi(0))), (1, 2, (po(0), pi(1))),]),
+                Line::new(0, vec![(0, 1, (po(2), pi(2))), (1, 2, (po(2), pi(2))),])
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>()
         );
     }
 
@@ -404,20 +422,22 @@ mod tests {
         let mut p = Pattern::<_, (), _>::new();
         let po = PortOffset::new_outgoing;
         let pi = PortOffset::new_incoming;
-        p.add_edge(0, 0, (po(0), pi(2)));
         p.add_edge(0, 1, (po(1), pi(1)));
         p.add_edge(2, 0, (po(0), pi(1)));
+        p.add_edge(3, 0, (po(0), pi(0)));
         p.set_root(0);
         let lp = p
             .try_into_line_pattern(compatible_offsets)
             .expect("Could not convert to line pattern");
         assert_eq!(
-            lp.lines,
-            vec![
+            lp.lines.into_iter().collect::<HashSet<_>>(),
+            [
                 Line::new(0, vec![(0, 2, (pi(1), po(0)))]),
-                Line::new(0, vec![(0, 0, (pi(2), po(0)))]),
+                Line::new(0, vec![(0, 3, (pi(0), po(0)))]),
                 Line::new(0, vec![(0, 1, (po(1), pi(1)))]),
             ]
+            .into_iter()
+            .collect::<HashSet<_>>()
         );
     }
 
