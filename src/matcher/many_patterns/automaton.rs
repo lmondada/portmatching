@@ -683,5 +683,4 @@ mod tests {
             prop_assert_eq!(many_matches, single_matches);
         }
     }
-
 }
