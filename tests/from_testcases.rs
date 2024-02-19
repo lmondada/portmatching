@@ -11,7 +11,7 @@ use portmatching::{
     PatternID, UnweightedPattern,
 };
 
-const DBG_DUMP_FILES: bool = false;
+const DBG_DUMP_FILES: bool = true;
 
 fn valid_json_file(s: &str, pattern: &str) -> bool {
     s.starts_with(pattern) && s.ends_with(".json")
