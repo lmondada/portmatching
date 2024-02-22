@@ -20,6 +20,9 @@ impl<U, PEdge> Line<U, PEdge> {
 }
 
 /// A pattern to match, stored line by line from the root
+///
+/// A non-empty line pattern should always have at least one line (which
+/// may be empty if there are no edges).
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct LinePattern<U: Universe, PNode, PEdge> {
     pub(crate) nodes: HashMap<U, PNode>,

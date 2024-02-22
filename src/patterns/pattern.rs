@@ -164,6 +164,11 @@ impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> Pattern<U, PNode, PE
 
         order_edges(all_edges, self.root?)
     }
+
+    /// The property of a node
+    pub fn node_property(&self, node: U) -> Option<&PNode> {
+        self.nodes.get(&node)
+    }
 }
 
 fn order_edges<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
@@ -350,6 +355,11 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
         enqueue_edges(root?, &mut to_visit, &visited_edges);
 
         let mut lines = Vec::new();
+        if to_visit.is_empty() {
+            // A non-empty line pattern always has at least one line
+            let line = Line::new(root?, Vec::new());
+            lines.push(line);
+        }
         while let Some(mut curr_edge) = to_visit.pop_front() {
             let mut line = Vec::new();
             let root = curr_edge.0;
