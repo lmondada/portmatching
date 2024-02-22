@@ -355,6 +355,11 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
         enqueue_edges(root?, &mut to_visit, &visited_edges);
 
         let mut lines = Vec::new();
+        if to_visit.is_empty() {
+            // A non-empty line pattern always has at least one line
+            let line = Line::new(root?, Vec::new());
+            lines.push(line);
+        }
         while let Some(mut curr_edge) = to_visit.pop_front() {
             let mut line = Vec::new();
             let root = curr_edge.0;
