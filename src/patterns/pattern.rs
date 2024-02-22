@@ -322,6 +322,11 @@ impl<U: Universe, PNode, PEdge: EdgeProperty> Pattern<U, PNode, PEdge> {
 
         add_new_edges(&mut to_visit, root?, edges.keys());
         let mut lines = Vec::new();
+        if to_visit.is_empty() {
+            // A non-empty line pattern always has at least one line
+            let line = Line::new(root?, Vec::new());
+            lines.push(line);
+        }
         while let Some((u, property)) = to_visit.pop_front() {
             let mut new_edges = Vec::new();
             let mut curr_edge = (u, property);

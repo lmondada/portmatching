@@ -20,6 +20,9 @@ impl<U, PEdge> Line<U, PEdge> {
 }
 
 /// A pattern to match, stored line by line from the root
+///
+/// A non-empty line pattern should always have at least one line (which
+/// may be empty if there are no edges).
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct LinePattern<U: Universe, PNode, PEdge> {
     pub(crate) nodes: HashMap<U, PNode>,
@@ -97,7 +100,7 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
         let mut u_to_symbols = HashMap::default();
         let mut status = IterationStatus::Finished;
         let mut free_symbols = Symbol::symbols_in_status(status);
-        if let Some(root) = lines.get(0).map(|w| w.root) {
+        if let Some(root) = lines.first().map(|w| w.root) {
             to_line_ind.insert(root, (0, 0).into());
             // Add 0-th line to known nodes
             for (ind, &(_, u, _)) in lines[0].edges.iter().enumerate() {
@@ -113,7 +116,7 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>
                     property: root_prop.clone(),
                 });
             }
-            if let Some(first_prop) = lines[0].edges.get(0).map(|w| &w.2) {
+            if let Some(first_prop) = lines[0].edges.first().map(|w| &w.2) {
                 // Indicate location of first line
                 it_queue.push_back(EdgePredicate::NextRoot {
                     line_nb: 0,
