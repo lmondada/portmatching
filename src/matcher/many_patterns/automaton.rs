@@ -188,7 +188,7 @@ mod tests {
     use crate::{
         matcher::{ManyMatcher, PatternMatch, PortMatcher, SinglePatternMatcher},
         utils::test::{gen_multiportgraph_connected, gen_portgraph_connected},
-        HashSet, NaiveManyMatcher, Pattern,
+        HashSet, NaiveManyMatcher, Pattern, WeightedPattern,
     };
 
     const DBG_DUMP_FILES: bool = false;
@@ -269,6 +269,25 @@ mod tests {
         link(&mut g, (n2, 0), (n0, 1));
         let p = Pattern::from_portgraph(&g);
         let _matcher: ManyMatcher<_, _, _> = vec![p].into();
+    }
+
+    #[test]
+    fn one_vertex_pattern() {
+        let mut g = PortGraph::new();
+        let n0 = g.add_node(0, 1);
+        let mut w = UnmanagedDenseMap::new();
+        w[n0] = 1;
+        let p = WeightedPattern::from_weighted_portgraph(&g, w);
+        let m: ManyMatcher<_, _, _> = vec![p].into();
+
+        let mut g = PortGraph::new();
+        let n0 = g.add_node(0, 1);
+        let n1 = g.add_node(1, 0);
+        let mut w = UnmanagedDenseMap::new();
+        w[n0] = 0;
+        w[n1] = 1;
+        println!("{}", m.dot_string());
+        assert_eq!(m.find_matches((&g, &w).into()).len(), 1);
     }
 
     fn link<G: LinkMut>(p: &mut G, (n1, p1): (NodeIndex, usize), (n2, p2): (NodeIndex, usize)) {
