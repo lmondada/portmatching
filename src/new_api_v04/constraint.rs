@@ -91,13 +91,13 @@ where
         match &self.predicate {
             Predicate::Assign(ap) => {
                 let objects = ap.check_assign(data, subject);
+                let ConstraintLitteral::Variable(rhs) = &self.rhs else {
+                    panic!("Invalid constraint: rhs of AssignPredicate is a value");
+                };
                 objects
                     .into_iter()
                     .map(|obj| {
                         let mut scope = scope.clone();
-                        let ConstraintLitteral::Variable(rhs) = &self.rhs else {
-                            panic!("Invalid constraint: rhs of AssignPredicate is a value");
-                        };
                         scope.bind(rhs, obj).unwrap();
                         scope
                     })
