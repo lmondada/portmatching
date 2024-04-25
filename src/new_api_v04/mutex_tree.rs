@@ -94,6 +94,12 @@ impl<P> MutuallyExclusiveTree<P> {
     }
 }
 
+impl<P> Default for MutuallyExclusiveTree<P> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<P> MutExTreeNode<P> {
     fn new() -> Self {
         Self {

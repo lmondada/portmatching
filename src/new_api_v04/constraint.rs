@@ -90,7 +90,7 @@ where
         let subject = self.lhs.evaluate(&scope);
         match &self.predicate {
             Predicate::Assign(ap) => {
-                let objects = ap.check_assign(data, &subject);
+                let objects = ap.check_assign(data, subject);
                 objects
                     .into_iter()
                     .map(|obj| {
