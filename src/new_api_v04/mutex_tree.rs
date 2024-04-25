@@ -116,6 +116,8 @@ struct MutExTreeNode<P> {
 ///
 /// Pointing is done using an index into the list of nodes in the tree.
 struct MutExTreeNodeChild<P> {
+    #[allow(dead_code)]
     predicate: P,
+    #[allow(dead_code)]
     node_index: usize,
 }
