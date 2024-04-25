@@ -195,6 +195,7 @@ where
     /// binding, or if the constraint is malformed.
     pub fn satisfy<S, D>(&self, data: &D, scope: S) -> Result<Vec<S>, InvalidConstraint>
     where
+        V: Debug,
         S: Clone + VariableScope<V, U>,
         AP: AssignPredicate<U, D>,
         FP: FilterPredicate<U, D>,
