@@ -21,7 +21,7 @@
 use crate::HashSet;
 
 /// A predicate with a fixed arity N.
-pub trait ArityPredicate {
+pub trait ArityPredicate: Eq {
     /// Get Predicate arity
     fn arity(&self) -> usize;
 }

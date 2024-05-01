@@ -170,7 +170,7 @@ fn perform_benches(c: &mut Criterion) {
         &patterns,
         (0..=300).step_by(100),
         &graph,
-        NaiveManyMatcher::from_patterns,
+        NaiveManyMatcher::from_constraints,
     );
     bench_matching(
         "ManyMatcher (3 qubits)",

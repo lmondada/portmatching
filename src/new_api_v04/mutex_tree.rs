@@ -18,6 +18,11 @@
 //!       with the tree.
 //!     - index labels in nodes are unique.
 
+use super::{
+    constraint::Constraint,
+    predicate::{ArityPredicate, Predicate},
+};
+
 /// A trait to define the semantics of predicate enums.
 ///
 /// The client must provide a way to decompose a list of (arbitrary) constraints
@@ -35,6 +40,7 @@ pub trait ToMutuallyExclusiveTree
 where
     Self: Sized,
 {
+    /// Structure a list of constraints into a mutually exclusive tree.
     fn to_mutually_exclusive_tree(preds: Vec<Self>) -> MutuallyExclusiveTree<Self>;
 }
 
@@ -46,12 +52,16 @@ where
 ///  - there is at least one vertex with an index label.
 ///
 /// A set of constraints are mutually exclusive if for any data input and for
-/// any variable assignent, only one of the constraints is satisfied. All
-/// assign predicates must have the same variable LHS, and a constraint is
-/// satisfied if one of the variable assignments returned by `check_assign`
-/// corresponds to the assignment in the scope assignment.
-/// In other words, the sets of variable assignments returned by the assign
-/// predicates must be disjoint.
+/// any variable assignent, only one of the constraints is satisfied. More
+/// precisely, one of the following must hold
+///  a) all constraints are filter constraints, and only one constraint can be
+///     satisfied for any input data.
+///  b) all constraints are assign constraints, and i) they are all assignments
+///     to the same variable and ii) the sets of variable assignments returned
+///     by the assign constraints for any input are disjoint.
+///
+/// If a index label appears at least once, then it is assumed that the
+/// constraint is satisfied exactly when a labelled state is reacheable.
 pub struct MutuallyExclusiveTree<P> {
     nodes: Vec<MutExTreeNode<P>>,
 }
@@ -66,6 +76,19 @@ impl<P> MutuallyExclusiveTree<P> {
     /// Get the index of the root node.
     pub fn root(&self) -> usize {
         0
+    }
+
+    /// Get the index of the constraint at a node.
+    pub fn constraint_index(&self, node: usize) -> Option<usize> {
+        self.nodes[node].constraint_index
+    }
+
+    /// The set of constraints at node `node`.
+    pub fn children(&self, node: usize) -> impl Iterator<Item = (usize, &P)> {
+        self.nodes[node]
+            .children
+            .iter()
+            .map(|child| (child.node_index, &child.predicate))
     }
 
     /// Add children to a node in the tree.
@@ -109,6 +132,27 @@ impl<P> MutExTreeNode<P> {
     }
 }
 
+impl<V, U, AP, FP> MutuallyExclusiveTree<Constraint<V, U, AP, FP>>
+where
+    AP: ArityPredicate,
+    FP: ArityPredicate,
+{
+    /// Check that the tree is well-formed.
+    ///
+    /// Currently, this checks that the constraints on the edges outgoing from
+    /// the root are either all Assign or all Filter constraints.
+    pub fn is_valid_tree(&self) -> bool {
+        let root = self.root();
+        let all_assign = self
+            .children(root)
+            .all(|(_, pred)| matches!(pred.predicate(), Predicate::Assign(_)));
+        let all_filter = self
+            .children(root)
+            .all(|(_, pred)| matches!(pred.predicate(), Predicate::Filter(_)));
+        all_assign || all_filter
+    }
+}
+
 /// A node in a mutually exclusive tree.
 ///
 /// The `constraint_index` is the index of the constraint in the list of
@@ -124,8 +168,6 @@ struct MutExTreeNode<P> {
 /// Pointing is done using an index into the list of nodes in the tree.
 #[derive(Clone, Debug)]
 struct MutExTreeNodeChild<P> {
-    #[allow(dead_code)]
     predicate: P,
-    #[allow(dead_code)]
     node_index: usize,
 }

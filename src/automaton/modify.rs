@@ -1,87 +1,68 @@
-use itertools::izip;
-use petgraph::{graph::NodeIndex, Graph};
+use itertools::Itertools;
+use petgraph::{graph::NodeIndex, stable_graph::StableGraph};
 
-use crate::{
-    predicate::{EdgePredicate, Symbol},
-    EdgeProperty, HashSet, PatternID,
-};
+use crate::PatternID;
 
-use super::{view::graph_node_weight, ScopeAutomaton, State, StateID};
+use super::{ScopeAutomaton, State, StateID, Transition};
 
-impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
-    pub(super) fn set_children<I>(
+impl<C: Eq + Clone> ScopeAutomaton<C> {
+    /// Add a transition from `parent` to `child` with the given `constraint`.
+    ///
+    /// Note that it could be that such a transition already exists at `parent`
+    /// and points to `actual_child` instead of `child`. In that case,
+    /// all transitions at `child` are added to `actual_child`, so that in effect
+    /// the automaton "behaves" as if there is a transition from `parent` to
+    /// `child`.
+    ///
+    /// In such a case, the transition adding will cascade recursively, so in
+    /// some cases this might be expensive.
+    pub(super) fn add_transition_known_child(
         &mut self,
-        state: StateID,
-        preds: impl IntoIterator<IntoIter = I>,
-        next_states: &[Option<StateID>],
-        next_scopes: Vec<HashSet<Symbol>>,
-    ) -> Vec<Option<StateID>>
-    where
-        I: Iterator<Item = EdgePredicate<PNode, PEdge, PEdge::OffsetID>> + ExactSizeIterator,
-    {
-        let preds = preds.into_iter();
-        if self.any_out_ports(state) {
-            panic!("State already has outgoing ports");
+        parent: StateID,
+        child: StateID,
+        constraint: Option<C>,
+    ) {
+        match self.find_constraint(parent, constraint.as_ref()) {
+            Some(transition) => {
+                // Transition already exists, we must recurse
+                let actual_child = self.next_state(transition);
+                self.copy_constraints(child, actual_child);
+            }
+            None => {
+                // Add edge.
+                let transition = Transition { constraint };
+                self.graph.add_edge(parent.0, child.0, transition);
+            }
         }
-        // Build the children
-        izip!(preds, next_states, next_scopes)
-            .enumerate()
-            .map(|(i, (pred, &next_state, next_scope))| {
-                self.add_transition(state, i, pred, next_state, Some(next_scope))
-            })
-            .collect()
     }
 
-    fn add_transition(
-        &mut self,
-        StateID(parent): StateID,
-        position: usize,
-        predicate: EdgePredicate<PNode, PEdge, PEdge::OffsetID>,
-        new_state: Option<StateID>,
-        new_scope: Option<HashSet<Symbol>>,
-    ) -> Option<StateID> {
-        // Create state if it does not exist
-        let mut added_state = false;
-        let new_state = match new_state {
-            Some(StateID(new_state)) => new_state,
-            None => {
-                added_state = true;
-                self.graph.add_node(None)
-            }
-        };
-
-        // Add edge to new state
-        let new_edge = self.graph.add_edge(parent, new_state, ());
-
-        // Update scope of new state
-        let new_scope = new_scope.unwrap_or_else(|| {
-            // By default, take scope of parent and add symbol if necessary
-            let mut old_scope = graph_node_weight(&self.graph, parent).scope.clone();
-            if let EdgePredicate::LinkNewNode { new_node, .. } = predicate {
-                old_scope.insert(new_node);
-            }
-            old_scope
+    pub(super) fn add_non_det_node(&mut self) -> StateID {
+        let node = self.graph.add_node(State {
+            matches: vec![],
+            deterministic: false,
         });
+        StateID(node)
+    }
 
-        let new_state_weight = self.graph.node_weight_mut(new_state).unwrap();
-        if let Some(new_state_weight) = new_state_weight {
-            new_state_weight.scope.retain(|k| new_scope.contains(k));
+    /// Add a transition from `parent` with the given `constraint`.
+    ///
+    /// If the transition already exists, this returns the existing child.
+    /// Otherwise, a new child is created and a transition from `parent` to the
+    /// new child is added.
+    pub(super) fn add_transition_unknown_child(
+        &mut self,
+        parent: StateID,
+        constraint: Option<C>,
+    ) -> StateID {
+        if let Some(transition) = self.find_constraint(parent, constraint.as_ref()) {
+            // Transition exists, use it
+            self.next_state(transition)
         } else {
-            *new_state_weight = Some(State {
-                matches: vec![],
-                predicates: vec![],
-                scope: new_scope,
-                deterministic: true,
-            });
+            // Create a new state and new transition
+            let child = self.add_non_det_node();
+            self.add_transition_known_child(parent, child, constraint);
+            child
         }
-
-        // Finally, add predicate to parent at `position`
-        let parent_weight = graph_node_weight_mut(&mut self.graph, parent);
-        parent_weight
-            .predicates
-            .insert(position, (predicate, new_edge));
-
-        added_state.then_some(StateID(new_state))
     }
 
     pub(crate) fn add_match(&mut self, StateID(state): StateID, pattern: PatternID) {
@@ -90,49 +71,85 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
             .push(pattern);
     }
 
-    pub(crate) fn make_non_det(&mut self, state: StateID) {
-        if self.any_out_ports(state) {
-            panic!("Cannot make state non-deterministic: has outgoing ports");
+    pub(crate) fn add_constraints(
+        &mut self,
+        constraints: impl IntoIterator<Item = C>,
+    ) -> PatternID {
+        let mut curr_state = self.root();
+        for constraint in constraints {
+            curr_state = self.add_transition_unknown_child(curr_state, Some(constraint));
         }
-        graph_node_weight_mut(&mut self.graph, state.0).deterministic = false;
+        let id = PatternID(self.n_patterns);
+        self.add_match(curr_state, id);
+        self.n_patterns += 1;
+        id
+    }
+
+    pub(crate) fn drain_constraints(
+        &mut self,
+        state: StateID,
+    ) -> impl Iterator<Item = (Option<C>, StateID)> + '_ {
+        let transitions = self.transitions(state).collect_vec();
+        transitions.into_iter().map(|transition| {
+            let target = self.next_state(transition);
+            let constraint = self
+                .graph
+                .remove_edge(transition.0)
+                .expect("invalid transition")
+                .constraint;
+            (constraint, target)
+        })
+    }
+
+    /// Turn `state` into a deterministic state
+    ///
+    /// This assumes that all transitions from `state` are mutually exclusive,
+    /// with the exception of the epsilon transition. The state is made
+    /// deterministic by adding all transitions at the child of the epsilon, if
+    /// it exists, to every other child of `state`.
+    ///
+    /// This will turn the epsilon transition into a FAIL (fallback) transition.
+    pub(crate) fn make_det(&mut self, state: StateID) {
+        // Change the flag
+        let det_flag = &mut graph_node_weight_mut(&mut self.graph, state.0).deterministic;
+        if *det_flag {
+            // Already deterministic
+            return;
+        } else {
+            *det_flag = true;
+        }
+
+        // Epsilon transition becomes FAIL (fallback) transition
+        let Some(fail_edge) = self.find_constraint(state, None) else {
+            // There is no epsilon transition => `state` is already deterministic
+            return;
+        };
+        let fail_state = self.next_state(fail_edge);
+
+        // Add all constraint transitions of the FAIL state to every other child
+        let non_fail_children = self
+            .children(state)
+            .filter(|&c| c != fail_state)
+            .collect_vec();
+        for child in non_fail_children {
+            self.copy_constraints(fail_state, child);
+        }
+    }
+
+    /// Copy all constraints on state `from` to state `to`.
+    ///
+    /// If a constraint of `from` already exists in `to`, then recursively copy
+    /// the children of the constraint.
+    fn copy_constraints(&mut self, from: StateID, to: StateID) {
+        let transitions = self.transitions(from).collect_vec();
+        for transition in transitions {
+            let from_child = self.next_state(transition);
+            let constraint = self.constraint(transition).cloned();
+            self.add_transition_known_child(to, from_child, constraint);
+        }
     }
 }
 
-fn graph_node_weight_mut<N, E>(graph: &mut Graph<Option<N>, E>, state: NodeIndex) -> &mut N {
-    graph
-        .node_weight_mut(state)
-        .expect("unknown state")
-        .as_mut()
-        .expect("invalid state")
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{patterns::IterationStatus, predicate::Symbol};
-
-    use super::*;
-
-    /// The child state's scope should be the intersection of all possible scopes
-    #[test]
-    fn intersect_scope() {
-        let mut a = ScopeAutomaton::new();
-        let s_root = Symbol::root();
-        let s1 = Symbol::new(IterationStatus::Finished, 0);
-        let s2 = Symbol::new(IterationStatus::Finished, 1);
-        let t1: EdgePredicate<(), (), ()> = EdgePredicate::LinkNewNode {
-            node: s_root,
-            property: (),
-            new_node: s1,
-        };
-        let t2 = EdgePredicate::LinkNewNode {
-            node: s_root,
-            property: (),
-            new_node: s2,
-        };
-        let child = a.add_transition(a.root(), 0, t1, None, None).unwrap();
-
-        assert_eq!(a.scope(child), &[s_root, s1].into_iter().collect());
-        a.add_transition(a.root(), 1, t2, Some(child), None);
-        assert_eq!(a.scope(child), &[s_root].into_iter().collect());
-    }
+fn graph_node_weight_mut<N, E>(graph: &mut StableGraph<N, E>, state: NodeIndex) -> &mut N {
+    graph.node_weight_mut(state).expect("invalid state")
 }

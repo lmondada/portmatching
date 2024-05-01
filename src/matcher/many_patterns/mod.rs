@@ -8,21 +8,14 @@
 mod automaton;
 mod naive;
 
-use derive_more::{From, Into};
 use std::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 #[doc(inline)]
-pub use automaton::{ManyMatcher, UnweightedManyMatcher};
+pub use automaton::ManyMatcher;
 #[doc(inline)]
 pub use naive::NaiveManyMatcher;
 
-/// ID for a pattern in a [`ManyPatternMatcher`].
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Hash)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-pub struct PatternID(pub usize);
+use super::PatternID;
 
 impl fmt::Debug for PatternID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

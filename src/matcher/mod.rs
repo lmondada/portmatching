@@ -8,56 +8,70 @@
 pub mod many_patterns;
 pub mod single_pattern;
 
-use std::hash::Hash;
+use derive_more::{From, Into};
+use std::{fmt::Debug, hash::Hash};
 
-pub use many_patterns::{ManyMatcher, NaiveManyMatcher, PatternID, UnweightedManyMatcher};
-use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
-use portgraph::{LinkView, NodeIndex};
-pub use single_pattern::SinglePatternMatcher;
+pub use self::many_patterns::{ManyMatcher, NaiveManyMatcher};
+pub use self::single_pattern::SinglePatternMatcher;
 
-use crate::{
-    patterns::UnweightedEdge,
-    utils::{always_true, validate_unweighted_edge},
-    HashMap, NodeProperty, Pattern, Universe,
-};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+/// ID for a pattern in a [`ManyPatternMatcher`].
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct PatternID(pub usize);
+
+type Match<U> = PatternMatch<PatternID, U>;
 
 /// A trait for pattern matchers.
 ///
 /// A pattern matcher is a type that can find matches of a pattern in a graph.
 /// Implement [`Matcher::find_anchored_matches`] that finds matches of all
 /// patterns anchored at a given root node.
-pub trait PortMatcher<GraphRef, NodeId, U: Universe> {
-    /// Node properties
-    type PNode;
-    /// Edge properties
-    type PEdge: Eq + Hash;
-
+pub trait PortMatcher<U, D> {
     /// Find matches of all patterns in `graph` anchored at the given `root`.
-    fn find_rooted_matches(
-        &self,
-        graph: GraphRef,
-        root: NodeId,
-    ) -> Vec<PatternMatch<PatternID, NodeId>>;
-
-    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>>;
+    fn find_rooted_matches(&self, root: U, graph: &D) -> Vec<Match<U>>;
 
     /// Find matches of all patterns in `graph`.
     ///
     /// The default implementation loops over all possible `root` nodes and
     /// calls [`PortMatcher::find_anchored_matches`] for each of them.
-    fn find_matches(&self, graph: GraphRef) -> Vec<PatternMatch<PatternID, NodeId>>
+    fn find_matches(&self, graph: &D) -> Vec<PatternMatch<PatternID, U>>
     where
-        GraphRef: IntoNodeIdentifiers + GraphBase<NodeId = NodeId>,
+        D: IterRootCandidates<U = U>,
     {
         let mut matches = Vec::new();
-        for root in graph.node_identifiers() {
-            matches.append(&mut self.find_rooted_matches(graph, root));
+        for root in graph.root_candidates() {
+            matches.append(&mut self.find_rooted_matches(root, graph));
         }
         matches
     }
 }
 
-type Match = PatternMatch<PatternID, NodeIndex>;
+/// A trait for iterating over all root candidates for port matching.
+pub trait IterRootCandidates {
+    /// The type of the root candidates.
+    type U;
+
+    /// Iterate over the root candidates.
+    fn root_candidates(&self) -> impl Iterator<Item = Self::U>;
+}
+
+/// A trait for variable names.
+pub trait VariableNaming: Debug + Hash + Eq + Clone {
+    /// Return the name of the root variable.
+    fn root_variable() -> Self;
+}
+
+/// A heuristic whether a set of constraints should be turned into a deterministic
+/// transition.
+pub trait DetHeuristic
+where
+    Self: Sized,
+{
+    fn make_det<'c>(constraints: &[&'c Self]) -> bool;
+}
 
 /// A match instance returned by a Portmatcher instance.
 ///
@@ -94,45 +108,5 @@ impl<'p, P, N> PatternMatch<&'p P, N> {
             pattern: self.pattern.clone(),
             root: self.root,
         }
-    }
-}
-
-impl<U: Universe, PNode: NodeProperty> PatternMatch<Pattern<U, PNode, UnweightedEdge>, NodeIndex> {
-    pub fn as_ref(&self) -> PatternMatch<&Pattern<U, PNode, UnweightedEdge>, NodeIndex> {
-        PatternMatch {
-            pattern: &self.pattern,
-            root: self.root,
-        }
-    }
-
-    pub fn to_match_map<G: LinkView + Copy>(&self, graph: G) -> Vec<HashMap<U, NodeIndex>> {
-        self.as_ref().to_match_map(graph)
-    }
-}
-
-impl<'p, U: Universe, PNode: NodeProperty>
-    PatternMatch<&'p Pattern<U, PNode, UnweightedEdge>, NodeIndex>
-{
-    pub fn to_match_map<G: LinkView + Copy>(&self, graph: G) -> Vec<HashMap<U, NodeIndex>> {
-        SinglePatternMatcher::from_pattern(self.pattern.clone())
-            .get_match_map(self.root, always_true, validate_unweighted_edge(graph))
-            .into_iter()
-            .map(|m| m.into_iter().collect())
-            .collect()
-    }
-}
-
-impl PatternMatch<PatternID, NodeIndex> {
-    pub fn to_match_map<G, M, U>(&self, graph: G, matcher: &M) -> Vec<HashMap<U, NodeIndex>>
-    where
-        G: LinkView + Copy,
-        M::PNode: NodeProperty,
-        M: PortMatcher<G, NodeIndex, U, PEdge = UnweightedEdge>,
-        U: Universe,
-    {
-        let Some(pattern) = matcher.get_pattern(self.pattern) else {
-            return Vec::new();
-        };
-        PatternMatch::new(pattern, self.root).to_match_map(graph)
     }
 }

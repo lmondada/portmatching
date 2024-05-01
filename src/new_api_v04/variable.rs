@@ -28,12 +28,12 @@ pub enum BindVariableError {
 }
 
 /// A map-like trait for variable bindings.
-pub trait VariableScope<V, U> {
+pub trait VariableScope<V, U>: Clone {
     fn get(&self, var: &V) -> Option<&U>;
     fn bind(&mut self, var: V, val: U) -> Result<(), BindVariableError>;
 }
 
-impl<V: Hash + Eq + Debug, U> VariableScope<V, U> for HashMap<V, U> {
+impl<V: Eq + Hash + Debug + Clone, U: Clone> VariableScope<V, U> for HashMap<V, U> {
     fn get(&self, var: &V) -> Option<&U> {
         self.get(var)
     }

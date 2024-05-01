@@ -128,6 +128,22 @@ pub struct Constraint<V, U, AP, FP> {
     args: Vec<ConstraintLiteral<V, U>>,
 }
 
+/// The type of constraint: either Assign or Filter.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ConstraintType<V> {
+    /// Assignment constraint to variable V.
+    Assign(V),
+    /// Filter constraint.
+    Filter,
+}
+
+impl<V, U, AP, FP> Constraint<V, U, AP, FP> {
+    /// The constraint predicate
+    pub fn predicate(&self) -> &Predicate<AP, FP> {
+        &self.predicate
+    }
+}
+
 impl<V, U, AP, FP> Constraint<V, U, AP, FP>
 where
     U: Debug,
@@ -173,11 +189,6 @@ where
         }
     }
 
-    /// The constraint predicate
-    pub fn predicate(&self) -> &Predicate<AP, FP> {
-        &self.predicate
-    }
-
     /// Return the arity of the constraint.
     pub fn arity(&self) -> usize {
         let arity = self.args.len();
@@ -195,7 +206,6 @@ where
     /// binding, or if the constraint is malformed.
     pub fn satisfy<S, D>(&self, data: &D, scope: S) -> Result<Vec<S>, InvalidConstraint>
     where
-        V: Debug,
         S: Clone + VariableScope<V, U>,
         AP: AssignPredicate<U, D>,
         FP: FilterPredicate<U, D>,
@@ -232,7 +242,9 @@ where
             }
         }
     }
+}
 
+impl<V, U, AP, FP> Constraint<V, U, AP, FP> {
     /// Return the variable that is assigned by this constraint, if any.
     ///
     /// Returns None if the constraint is not an AssignPredicate.
@@ -311,6 +323,15 @@ where
             .collect_vec();
         write!(f, "({:?})", args_str.join(", "))?;
         Ok(())
+    }
+}
+
+impl<'c, V: Clone, U, AP, FP> From<&'c Constraint<V, U, AP, FP>> for ConstraintType<V> {
+    fn from(c: &'c Constraint<V, U, AP, FP>) -> Self {
+        match c.assigned_variable() {
+            Some(var) => ConstraintType::Assign(var.clone()),
+            None => ConstraintType::Filter,
+        }
     }
 }
 
