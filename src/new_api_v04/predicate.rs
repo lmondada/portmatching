@@ -43,9 +43,8 @@ pub trait AssignPredicate {
 
 /// A binary predicate for a given data and variable bindings.
 ///
-/// A predicate of the form `<var1> pred <var2>`. Given a binding for <var1>,
-/// the predicate can return a set of valid values for <var2> for the given
-/// input data.
+/// A predicate of the form `<var1> pred <var2>`. Given bindings for <var1>
+/// and <var2> the predicate can check if it's satisfied on those values.
 pub trait FilterPredicate {
     /// The universe of valid symbols in the problem domain
     type U;
