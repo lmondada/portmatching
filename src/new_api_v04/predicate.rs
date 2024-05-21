@@ -19,6 +19,7 @@
 //! for <var2> is in the returned set.
 
 use std::collections::HashSet;
+use std::hash::Hash;
 
 /// A predicate for pattern matching.
 pub enum Predicate<AP, FP> {
@@ -46,11 +47,25 @@ pub trait AssignPredicate {
 /// A predicate of the form `<var1> pred <var2>`. Given bindings for <var1>
 /// and <var2> the predicate can check if it's satisfied on those values.
 pub trait FilterPredicate {
-    /// The universe of valid symbols in the problem domain
+    /// The universe of valid symbols in the problem domain.
     type U;
     /// The input data type in the problem domain.
     type D;
 
     /// Check if the predicate is satisfied by the given data and values.
     fn check(&self, data: &Self::D, value1: &Self::U, value2: &Self::U) -> bool;
+}
+
+impl<T> FilterPredicate for T
+where
+    T: AssignPredicate,
+    <T as AssignPredicate>::U: Eq + Hash,
+{
+    type U = T::U;
+
+    type D = T::D;
+
+    fn check(&self, data: &Self::D, value1: &Self::U, value2: &Self::U) -> bool {
+        self.check_assign(data, value1).contains(value2)
+    }
 }

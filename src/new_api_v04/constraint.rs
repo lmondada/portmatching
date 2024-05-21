@@ -8,27 +8,42 @@ use super::{
     predicate::{AssignPredicate, FilterPredicate, Predicate},
     variable::VariableScope,
 };
+use std::fmt::Debug;
+use thiserror::Error;
 
-/// A litteral for subject and object in constraints.
+/// A literal for subject and object in constraints.
 ///
-/// Litterals are either a value from the predicate universe, or a variable
+/// Literals are either a value from the predicate universe, or a variable
 /// that will be bound at runtime to a value in the universe.
-pub enum ConstraintLitteral<V, U> {
+#[derive(Clone, Debug)]
+pub enum ConstraintLiteral<V, U> {
     Variable(V),
     Value(U),
 }
 
-impl<V, U> ConstraintLitteral<V, U> {
-    /// Evaluate a litteral to a value in U.
+/// Errors that occur when evaluating literals.
+#[derive(Clone, Debug, Error)]
+pub enum LiteralEvalError {
+    #[error("Unbound variable: {0}")]
+    UnboundVariable(String),
+}
+
+impl<V: Debug, U> ConstraintLiteral<V, U> {
+    /// Evaluate a literal to a value in U.
     ///
-    /// If the litteral is a value, unwrap it. Otherwise, use the variable scope
+    /// If the literal is a value, unwrap it. Otherwise, use the variable scope
     /// to resolve the binding.
     ///
     /// If the variable is not defined, this will panic.
-    pub fn evaluate<'a>(&'a self, scope: &'a impl VariableScope<V, U>) -> &'a U {
+    pub fn evaluate<'a>(
+        &'a self,
+        scope: &'a impl VariableScope<V, U>,
+    ) -> Result<&'a U, LiteralEvalError> {
         match &self {
-            ConstraintLitteral::Variable(var) => scope.get(var).expect("Unbound variable"),
-            ConstraintLitteral::Value(val) => val,
+            ConstraintLiteral::Variable(var) => scope
+                .get(var)
+                .ok_or(LiteralEvalError::UnboundVariable(format!("{:?}", var))),
+            ConstraintLiteral::Value(val) => Ok(val),
         }
     }
 }
@@ -41,9 +56,9 @@ impl<V, U> ConstraintLitteral<V, U> {
 ///    and the rhs must always a variable.
 ///  - For FilterPredicates, both lhs and rhs must be bound if they are variables.
 pub struct Constraint<V, U, AP, FP> {
-    lhs: ConstraintLitteral<V, U>,
+    lhs: ConstraintLiteral<V, U>,
     predicate: Predicate<AP, FP>,
-    rhs: ConstraintLitteral<V, U>,
+    rhs: ConstraintLiteral<V, U>,
 }
 
 /// Errors that occur when constructing constraints.
@@ -54,6 +69,7 @@ pub enum InvalidConstraint {
 
 impl<V, U, AP, FP> Constraint<V, U, AP, FP>
 where
+    V: Debug,
     AP: AssignPredicate<U = U>,
     FP: FilterPredicate<U = U>,
 {
@@ -62,12 +78,11 @@ where
     /// Returns an error if the constraint is malformed, i.e. if the predicate is
     /// a Predicate::Assign and the object is not a variable.
     pub fn try_from_triple(
-        lhs: ConstraintLitteral<V, U>,
+        lhs: ConstraintLiteral<V, U>,
         predicate: Predicate<AP, FP>,
-        rhs: ConstraintLitteral<V, U>,
+        rhs: ConstraintLiteral<V, U>,
     ) -> Result<Self, InvalidConstraint> {
-        if matches!(predicate, Predicate::Assign(_)) && matches!(rhs, ConstraintLitteral::Value(_))
-        {
+        if matches!(predicate, Predicate::Assign(_)) && matches!(rhs, ConstraintLiteral::Value(_)) {
             return Err(InvalidConstraint::AssignToValue);
         }
         Ok(Self {
@@ -81,34 +96,34 @@ where
     ///
     /// This will panic if an `AssignPredicate` results in an invalid variable
     /// binding, or if the constraint is malformed.
-    pub fn satisfy<S, D>(&self, data: &D, scope: S) -> Vec<S>
+    pub fn satisfy<S, D>(&self, data: &D, scope: S) -> Result<Vec<S>, LiteralEvalError>
     where
         S: Clone + VariableScope<V, U>,
         AP: AssignPredicate<D = D>,
         FP: FilterPredicate<D = D>,
     {
-        let subject = self.lhs.evaluate(&scope);
+        let subject = self.lhs.evaluate(&scope)?;
         match &self.predicate {
             Predicate::Assign(ap) => {
                 let objects = ap.check_assign(data, subject);
-                let ConstraintLitteral::Variable(rhs) = &self.rhs else {
+                let ConstraintLiteral::Variable(rhs) = &self.rhs else {
                     panic!("Invalid constraint: rhs of AssignPredicate is a value");
                 };
-                objects
+                Ok(objects
                     .into_iter()
                     .map(|obj| {
                         let mut scope = scope.clone();
                         scope.bind(rhs, obj).unwrap();
                         scope
                     })
-                    .collect()
+                    .collect())
             }
             Predicate::Filter(fp) => {
-                let object = self.rhs.evaluate(&scope);
+                let object = self.rhs.evaluate(&scope)?;
                 if fp.check(data, subject, object) {
-                    [scope].to_vec()
+                    Ok([scope].to_vec())
                 } else {
-                    Vec::new()
+                    Ok(Vec::new())
                 }
             }
         }
