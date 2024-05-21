@@ -38,6 +38,12 @@ impl<AP: AssignPredicate, FP: FilterPredicate> Predicate<AP, FP> {
     }
 }
 
+/// A predicate with a fixed arity N.
+pub trait ArityPredicate {
+    /// Get Predicate arity
+    fn arity(&self) -> usize;
+}
+
 /// A N-ary predicate that can be queried to return valid RHS bindings.
 ///
 /// A predicate of the form `<var1>, <var2> ... pred <varN>`. Given a binding
@@ -45,14 +51,11 @@ impl<AP: AssignPredicate, FP: FilterPredicate> Predicate<AP, FP> {
 /// <varN> for the given input data.
 ///
 /// The arity N of an assign predicate must be N >= 1.
-pub trait AssignPredicate {
+pub trait AssignPredicate: ArityPredicate {
     /// The universe of valid symbols in the problem domain
     type U;
     /// The input data type in the problem domain.
     type D;
-
-    /// Get Predicate arity
-    fn arity(&self) -> usize;
 
     /// Find set of variable assignments that satisfy the predicate.
     ///
@@ -64,14 +67,11 @@ pub trait AssignPredicate {
 ///
 /// A predicate of the form `<var1>, <var2> ... pred <varN>`. Given bindings for
 /// <var1> to <varN>, the predicate checks if it's satisfied on those values.
-pub trait FilterPredicate {
+pub trait FilterPredicate: ArityPredicate {
     /// The universe of valid symbols in the problem domain.
     type U;
     /// The input data type in the problem domain.
     type D;
-
-    /// Get Predicate arity
-    fn arity(&self) -> usize;
 
     /// Check if the predicate is satisfied by the given data and values.
     ///
@@ -87,10 +87,6 @@ where
     type U = T::U;
 
     type D = T::D;
-
-    fn arity(&self) -> usize {
-        self.arity()
-    }
 
     fn check(&self, data: &Self::D, args: &[&Self::U]) -> bool {
         assert!(self.arity() >= 1, "AssignPredicate arity must be >= 1");
