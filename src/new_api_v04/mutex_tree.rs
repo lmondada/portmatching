@@ -113,6 +113,7 @@ impl<P> MutExTreeNode<P> {
 ///
 /// The `constraint_index` is the index of the constraint in the list of
 /// constraints associated with the tree.
+#[derive(Clone, Debug)]
 struct MutExTreeNode<P> {
     constraint_index: Option<usize>,
     children: Vec<MutExTreeNodeChild<P>>,
@@ -121,6 +122,7 @@ struct MutExTreeNode<P> {
 /// Pointer to child node in a mutually exclusive tree.
 ///
 /// Pointing is done using an index into the list of nodes in the tree.
+#[derive(Clone, Debug)]
 struct MutExTreeNodeChild<P> {
     #[allow(dead_code)]
     predicate: P,

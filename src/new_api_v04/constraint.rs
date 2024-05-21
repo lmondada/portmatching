@@ -55,6 +55,7 @@ impl<V: Debug, U> ConstraintLiteral<V, U> {
 ///  - For AssignPredicates, the lhs, if it is a variable, must be already bound,
 ///    and the rhs must always a variable.
 ///  - For FilterPredicates, both lhs and rhs must be bound if they are variables.
+#[derive(Clone, Debug)]
 pub struct Constraint<V, U, AP, FP> {
     lhs: ConstraintLiteral<V, U>,
     predicate: Predicate<AP, FP>,
@@ -62,8 +63,10 @@ pub struct Constraint<V, U, AP, FP> {
 }
 
 /// Errors that occur when constructing constraints.
+#[derive(Clone, Debug, Error)]
 pub enum InvalidConstraint {
     /// Cannot assign a value if the RHS is not a variable
+    #[error("Cannot assign a value if the RHS is not a variable")]
     AssignToValue,
 }
 

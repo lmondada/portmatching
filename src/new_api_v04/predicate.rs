@@ -22,6 +22,7 @@ use std::collections::HashSet;
 use std::hash::Hash;
 
 /// A predicate for pattern matching.
+#[derive(Clone, Debug)]
 pub enum Predicate<AP, FP> {
     Assign(AP),
     Filter(FP),
