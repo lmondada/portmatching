@@ -97,6 +97,6 @@ where
         assert_eq!(args.len(), self.arity(), "invalid predicate data");
 
         self.check_assign(data, &args[..self.arity() - 1])
-            .contains(&args[self.arity() - 1])
+            .contains(args[self.arity() - 1])
     }
 }
