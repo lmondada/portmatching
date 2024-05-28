@@ -277,3 +277,64 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct APredicate;
+    impl ArityPredicate for APredicate {
+        fn arity(&self) -> usize {
+            1
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct FPredicate;
+    impl ArityPredicate for FPredicate {
+        fn arity(&self) -> usize {
+            2
+        }
+    }
+
+    fn ass_pred(a: ConstraintLiteral<i32, i32>) -> Constraint<i32, i32, APredicate, FPredicate> {
+        Constraint::try_new(Predicate::Assign(APredicate), vec![a]).unwrap()
+    }
+
+    fn filt_pred(
+        a: ConstraintLiteral<i32, i32>,
+        b: ConstraintLiteral<i32, i32>,
+    ) -> Constraint<i32, i32, APredicate, FPredicate> {
+        Constraint::try_new(Predicate::Filter(FPredicate), vec![a, b]).unwrap()
+    }
+
+    #[test]
+    fn test_constraint_ordering() {
+        let a = ass_pred(ConstraintLiteral::<i32, i32>::Variable(1));
+        let b = filt_pred(
+            ConstraintLiteral::<i32, i32>::Variable(1),
+            ConstraintLiteral::<i32, i32>::Variable(0),
+        );
+        // For same literal, an AssignPredicate should be smaller
+        assert!(a < b);
+
+        let a = ass_pred(ConstraintLiteral::<i32, i32>::Variable(3));
+        let b = filt_pred(
+            ConstraintLiteral::<i32, i32>::Variable(4),
+            ConstraintLiteral::<i32, i32>::Variable(0),
+        );
+        // For smaller literal in assignment, AssignPredicate should still be smaller
+        assert!(a < b);
+
+        let a = ass_pred(ConstraintLiteral::<i32, i32>::Variable(3));
+        let b = filt_pred(
+            ConstraintLiteral::<i32, i32>::Variable(1),
+            ConstraintLiteral::<i32, i32>::Variable(0),
+        );
+        // For larger literal in assignment, AssignPredicate should be larger
+        assert!(a > b);
+    }
+}
