@@ -280,8 +280,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
