@@ -15,9 +15,7 @@ authors = ["Luca Mondada"]
 edition = "2021"
 rust-version = "1.75"
 
-exclude = [
-    "tests/legacy_saved_patterns/*",
-]
+exclude = ["tests/legacy_saved_patterns/*"]
 [lib]
 bench = false
 name = "portmatching"
@@ -26,8 +24,7 @@ path = "src/lib.rs"
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-# portgraph = { version = "0.8.0", features = ["petgraph"] }
-portgraph = { git = "https://github.com/CQCL/portgraph.git", rev = "aae4b5d", features = ["petgraph"] }
+portgraph = { version = "0.12.0", features = ["petgraph"] }
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 smallvec = "1.10.0"
 itertools = "0.10.5"
@@ -46,7 +43,14 @@ thiserror = "1.0.61"
 
 [features]
 serde = ["dep:serde", "portgraph/serde", "smallvec/serde"]
-datagen = ["dep:rand", "dep:serde_json", "dep:clap", "dep:rmp-serde", "dep:glob", "dep:csv"]
+datagen = [
+    "dep:rand",
+    "dep:serde_json",
+    "dep:clap",
+    "dep:rmp-serde",
+    "dep:glob",
+    "dep:csv",
+]
 
 [dev-dependencies]
 proptest = "1.1.0"
@@ -57,8 +61,7 @@ criterion = { version = "0.4.0", features = ["html_reports"] }
 
 [dev-dependencies.portgraph]
 features = ["proptest", "serde"]
-rev = "aae4b5d"
-git = "https://github.com/CQCL/portgraph.git"
+version = "0.12.0"
 
 [[example]]
 name = "large_graph"

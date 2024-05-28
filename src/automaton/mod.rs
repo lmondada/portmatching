@@ -4,12 +4,12 @@ mod traversal;
 mod view;
 
 pub use builders::LineBuilder;
+use portgraph::render::DotFormat;
 
 use std::fmt::Debug;
 
 use derive_more::{From, Into};
 
-use portgraph::dot::DotFormat;
 use portgraph::{NodeIndex, PortGraph, PortMut, PortView, Weights};
 
 use crate::predicate::{EdgePredicate, Symbol};
