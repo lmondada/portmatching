@@ -46,7 +46,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
             Some(StateID(new_state)) => new_state,
             None => {
                 added_state = true;
-                self.graph.add_node(None)
+                self.graph.add_node(None).into()
             }
         };
 
