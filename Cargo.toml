@@ -38,7 +38,7 @@ glob = { version = "0.3.1", optional = true }
 csv = { version = "1.2.2", optional = true }
 derive_more = "0.99.17"
 rustc-hash = "1.1.0"
-petgraph = { version = "0.6.3", default-features = false }
+petgraph = { version = "0.6.5", features = ["serde-1"] }
 thiserror = "1.0.61"
 
 [features]

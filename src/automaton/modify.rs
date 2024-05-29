@@ -1,12 +1,12 @@
 use itertools::izip;
-use portgraph::{LinkMut, PortMut, PortView};
+use petgraph::{graph::NodeIndex, Graph};
 
 use crate::{
     predicate::{EdgePredicate, Symbol},
     EdgeProperty, HashSet, PatternID,
 };
 
-use super::{ScopeAutomaton, State, StateID, Transition};
+use super::{view::graph_node_weight, ScopeAutomaton, State, StateID};
 
 impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
     pub(super) fn set_children<I>(
@@ -20,93 +20,90 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         I: Iterator<Item = EdgePredicate<PNode, PEdge, PEdge::OffsetID>> + ExactSizeIterator,
     {
         let preds = preds.into_iter();
-        if self.graph.num_outputs(state.0) != 0 {
+        if self.any_out_ports(state) {
             panic!("State already has outgoing ports");
         }
-        // Allocate new ports
-        self.add_ports(state, 0, preds.len());
-
         // Build the children
         izip!(preds, next_states, next_scopes)
             .enumerate()
             .map(|(i, (pred, &next_state, next_scope))| {
-                self.add_child(state, i, pred.into(), next_state, Some(next_scope))
+                self.add_transition(state, i, pred, next_state, Some(next_scope))
             })
             .collect()
     }
 
-    fn add_child(
+    fn add_transition(
         &mut self,
-        parent: StateID,
-        offset: usize,
-        pedge: Transition<PNode, PEdge, PEdge::OffsetID>,
+        StateID(parent): StateID,
+        position: usize,
+        predicate: EdgePredicate<PNode, PEdge, PEdge::OffsetID>,
         new_state: Option<StateID>,
         new_scope: Option<HashSet<Symbol>>,
     ) -> Option<StateID> {
+        // Create state if it does not exist
         let mut added_state = false;
-        let (new_state_id, new_offset) = if let Some(new_state) = new_state {
-            let in_offset = self.graph.num_inputs(new_state.0);
-            self.add_ports(new_state, 1, 0);
-            (new_state, in_offset)
-        } else {
-            added_state = true;
-            (self.graph.add_node(1, 0).into(), 0)
+        let new_state = match new_state {
+            Some(StateID(new_state)) => new_state,
+            None => {
+                added_state = true;
+                self.graph.add_node(None)
+            }
         };
-        self.graph
-            .link_nodes(parent.0, offset, new_state_id.0, new_offset)
-            .expect("Could not add child at offset p");
+
+        // Add edge to new state
+        let new_edge = self.graph.add_edge(parent, new_state, ());
+
+        // Update scope of new state
         let new_scope = new_scope.unwrap_or_else(|| {
             // By default, take scope of parent and add symbol if necessary
-            let mut old_scope = self.weights[parent.0]
-                .clone()
-                .expect("invalid parent")
-                .scope;
-            if let EdgePredicate::LinkNewNode { new_node, .. } = pedge.clone().into() {
+            let mut old_scope = graph_node_weight(&self.graph, parent).scope.clone();
+            if let EdgePredicate::LinkNewNode { new_node, .. } = predicate {
                 old_scope.insert(new_node);
             }
             old_scope
         });
-        let new_state = if let Some(mut new_state) = self.weights[new_state_id.0].take() {
-            new_state.scope.retain(|k| new_scope.contains(k));
-            new_state
+
+        let new_state_weight = self.graph.node_weight_mut(new_state).unwrap();
+        if let Some(new_state_weight) = new_state_weight {
+            new_state_weight.scope.retain(|k| new_scope.contains(k));
         } else {
-            State {
-                matches: Vec::new(),
+            *new_state_weight = Some(State {
+                matches: vec![],
+                predicates: vec![],
                 scope: new_scope,
                 deterministic: true,
-            }
-        };
-        self.weights.nodes[new_state_id.0] = Some(new_state);
-        self.weights[self.graph.output(parent.0, offset).unwrap()] = Some(pedge);
-        added_state.then_some(new_state_id)
-    }
-
-    fn add_ports(&mut self, state: StateID, incoming: usize, outgoing: usize) {
-        let incoming = incoming + self.graph.num_inputs(state.0);
-        let outgoing = outgoing + self.graph.num_outputs(state.0);
-        self.graph
-            .set_num_ports(state.0, incoming, outgoing, |old, new| {
-                self.weights.ports.rekey(old, new.new_index());
             });
+        }
+
+        // Finally, add predicate to parent at `position`
+        let parent_weight = graph_node_weight_mut(&mut self.graph, parent);
+        parent_weight
+            .predicates
+            .insert(position, (predicate, new_edge));
+
+        added_state.then_some(StateID(new_state))
     }
 
-    pub(crate) fn add_match(&mut self, state: StateID, pattern: PatternID) {
-        self.weights[state.0]
-            .as_mut()
-            .expect("invalid state")
+    pub(crate) fn add_match(&mut self, StateID(state): StateID, pattern: PatternID) {
+        graph_node_weight_mut(&mut self.graph, state)
             .matches
             .push(pattern);
     }
 
     pub(crate) fn make_non_det(&mut self, state: StateID) {
-        if self.graph.num_outputs(state.0) > 0 {
+        if self.any_out_ports(state) {
             panic!("Cannot make state non-deterministic: has outgoing ports");
         }
-        self.weights[state.0]
-            .as_mut()
-            .expect("invalid state")
-            .deterministic = false;
+        graph_node_weight_mut(&mut self.graph, state.0).deterministic = false;
     }
+}
+
+fn graph_node_weight_mut<N, E>(graph: &mut Graph<Option<N>, E>, state: NodeIndex) -> &mut N {
+    graph
+        .node_weight_mut(state)
+        .expect("unknown state")
+        .as_mut()
+        .expect("invalid state")
 }
 
 #[cfg(test)]
@@ -119,26 +116,23 @@ mod tests {
     #[test]
     fn intersect_scope() {
         let mut a = ScopeAutomaton::new();
-        a.add_ports(a.root(), 0, 2);
         let s_root = Symbol::root();
         let s1 = Symbol::new(IterationStatus::Finished, 0);
         let s2 = Symbol::new(IterationStatus::Finished, 1);
-        let t1: Transition<(), (), ()> = EdgePredicate::LinkNewNode {
+        let t1: EdgePredicate<(), (), ()> = EdgePredicate::LinkNewNode {
             node: s_root,
             property: (),
             new_node: s1,
-        }
-        .into();
-        let t2: Transition<(), (), ()> = EdgePredicate::LinkNewNode {
+        };
+        let t2 = EdgePredicate::LinkNewNode {
             node: s_root,
             property: (),
             new_node: s2,
-        }
-        .into();
-        let child = a.add_child(a.root(), 0, t1, None, None).unwrap();
+        };
+        let child = a.add_transition(a.root(), 0, t1, None, None).unwrap();
 
         assert_eq!(a.scope(child), &[s_root, s1].into_iter().collect());
-        a.add_child(a.root(), 1, t2, Some(child), None);
+        a.add_transition(a.root(), 1, t2, Some(child), None);
         assert_eq!(a.scope(child), &[s_root].into_iter().collect());
     }
 }
