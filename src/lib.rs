@@ -4,6 +4,7 @@
 
 pub mod automaton;
 pub mod matcher;
+pub mod new_api_v04;
 pub mod patterns;
 pub(crate) mod predicate;
 pub mod weighted_graph;
