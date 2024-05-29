@@ -27,7 +27,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         izip!(preds, next_states, next_scopes)
             .enumerate()
             .map(|(i, (pred, &next_state, next_scope))| {
-                self.add_transition(state, i, pred.into(), next_state, Some(next_scope))
+                self.add_transition(state, i, pred, next_state, Some(next_scope))
             })
             .collect()
     }
@@ -46,7 +46,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
             Some(StateID(new_state)) => new_state,
             None => {
                 added_state = true;
-                self.graph.add_node(None).into()
+                self.graph.add_node(None)
             }
         };
 
@@ -56,7 +56,7 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         // Update scope of new state
         let new_scope = new_scope.unwrap_or_else(|| {
             // By default, take scope of parent and add symbol if necessary
-            let mut old_scope = graph_node_weight(&mut self.graph, parent).scope.clone();
+            let mut old_scope = graph_node_weight(&self.graph, parent).scope.clone();
             if let EdgePredicate::LinkNewNode { new_node, .. } = predicate {
                 old_scope.insert(new_node);
             }
@@ -123,14 +123,12 @@ mod tests {
             node: s_root,
             property: (),
             new_node: s1,
-        }
-        .into();
+        };
         let t2 = EdgePredicate::LinkNewNode {
             node: s_root,
             property: (),
             new_node: s2,
-        }
-        .into();
+        };
         let child = a.add_transition(a.root(), 0, t1, None, None).unwrap();
 
         assert_eq!(a.scope(child), &[s_root, s1].into_iter().collect());
