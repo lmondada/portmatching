@@ -18,7 +18,7 @@
 //! `FilterPredicate` by calling `assign_check` and then checking that the binding
 //! for <var2> is in the returned set.
 
-use std::collections::HashSet;
+use crate::HashSet;
 use std::hash::Hash;
 
 /// A predicate for pattern matching.
@@ -28,33 +28,55 @@ pub enum Predicate<AP, FP> {
     Filter(FP),
 }
 
-/// A binary predicate that can be queried to return valid RHS bindings.
+impl<AP: AssignPredicate, FP: FilterPredicate> Predicate<AP, FP> {
+    /// Get Predicate arity
+    pub fn arity(&self) -> usize {
+        match self {
+            Predicate::Assign(ap) => ap.arity(),
+            Predicate::Filter(fp) => fp.arity(),
+        }
+    }
+}
+
+/// A predicate with a fixed arity N.
+pub trait ArityPredicate {
+    /// Get Predicate arity
+    fn arity(&self) -> usize;
+}
+
+/// A N-ary predicate that can be queried to return valid RHS bindings.
 ///
-/// A predicate of the form `<var1> pred <var2>`. Given a binding for <var1>,
-/// the predicate can return a set of valid values for <var2> for the given
-/// input data.
-pub trait AssignPredicate {
+/// A predicate of the form `<var1>, <var2> ... pred <varN>`. Given a binding
+/// for <var1> to <varN-1>, the predicate returns a set of valid values for
+/// <varN> for the given input data.
+///
+/// The arity N of an assign predicate must be N >= 1.
+pub trait AssignPredicate: ArityPredicate {
     /// The universe of valid symbols in the problem domain
     type U;
     /// The input data type in the problem domain.
     type D;
 
     /// Find set of variable assignments that satisfy the predicate.
-    fn check_assign(&self, data: &Self::D, value: &Self::U) -> HashSet<Self::U>;
+    ///
+    /// `values` must be of length `arity() - 1`.
+    fn check_assign(&self, data: &Self::D, args: &[&Self::U]) -> HashSet<Self::U>;
 }
 
-/// A binary predicate for a given data and variable bindings.
+/// A N-ary predicate for a given data and variable bindings.
 ///
-/// A predicate of the form `<var1> pred <var2>`. Given bindings for <var1>
-/// and <var2> the predicate can check if it's satisfied on those values.
-pub trait FilterPredicate {
+/// A predicate of the form `<var1>, <var2> ... pred <varN>`. Given bindings for
+/// <var1> to <varN>, the predicate checks if it's satisfied on those values.
+pub trait FilterPredicate: ArityPredicate {
     /// The universe of valid symbols in the problem domain.
     type U;
     /// The input data type in the problem domain.
     type D;
 
     /// Check if the predicate is satisfied by the given data and values.
-    fn check(&self, data: &Self::D, value1: &Self::U, value2: &Self::U) -> bool;
+    ///
+    /// `values` must be of length `arity()`.
+    fn check(&self, data: &Self::D, args: &[&Self::U]) -> bool;
 }
 
 impl<T> FilterPredicate for T
@@ -66,7 +88,11 @@ where
 
     type D = T::D;
 
-    fn check(&self, data: &Self::D, value1: &Self::U, value2: &Self::U) -> bool {
-        self.check_assign(data, value1).contains(value2)
+    fn check(&self, data: &Self::D, args: &[&Self::U]) -> bool {
+        assert!(self.arity() >= 1, "AssignPredicate arity must be >= 1");
+        assert_eq!(args.len(), self.arity(), "invalid predicate data");
+
+        self.check_assign(data, &args[..self.arity() - 1])
+            .contains(args[self.arity() - 1])
     }
 }
