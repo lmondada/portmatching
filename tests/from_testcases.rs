@@ -5,7 +5,7 @@ use std::{
 };
 
 use petgraph::visit::{GraphBase, IntoNodeIdentifiers};
-use portgraph::{dot::DotFormat, LinkView, MultiPortGraph, NodeIndex, PortGraph};
+use portgraph::{render::DotFormat, LinkView, MultiPortGraph, NodeIndex, PortGraph};
 use portmatching::{
     matcher::{ManyMatcher, PatternMatch, PortMatcher},
     PatternID, UnweightedPattern,
@@ -48,7 +48,7 @@ where
 fn load_graph<G>(dir: &Path) -> io::Result<G>
 where
     G: for<'de> serde::Deserialize<'de>,
-    G: LinkView,
+    G: LinkView + DotFormat,
 {
     for entry in fs::read_dir(dir)? {
         let Ok(entry) = entry else { continue };
