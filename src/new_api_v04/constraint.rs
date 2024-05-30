@@ -122,7 +122,6 @@ impl<V: Debug, U> ConstraintLiteral<V, U> {
 ///    variables bound by previous constraints.
 ///  - For FilterPredicates, all arguments must be bound by previous constraints
 ///    if they are variables.
-///
 #[derive(Clone, PartialEq, Eq)]
 pub struct Constraint<V, U, AP, FP> {
     predicate: Predicate<AP, FP>,
@@ -434,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn test_constraint_ordering() {
+    fn test_constraint_ordering_same_literal() {
         let a = TestConstraint::try_binary_from_triple(
             ConstraintLiteral::Variable("b".to_string()),
             Predicate::Assign(AssignEq),
@@ -449,7 +448,10 @@ mod tests {
         .unwrap();
         // For same literal, an AssignPredicate should be smaller
         assert!(a < b);
+    }
 
+    #[test]
+    fn test_constraint_ordering_smaller_literal() {
         let a = TestConstraint::try_binary_from_triple(
             ConstraintLiteral::Variable("d".to_string()),
             Predicate::Assign(AssignEq),
@@ -464,7 +466,10 @@ mod tests {
         .unwrap();
         // For smaller literal in assignment, AssignPredicate should still be smaller
         assert!(a < b);
+    }
 
+    #[test]
+    fn test_constraint_ordering_larger_literal() {
         let a = TestConstraint::try_binary_from_triple(
             ConstraintLiteral::Variable("d".to_string()),
             Predicate::Assign(AssignEq),
