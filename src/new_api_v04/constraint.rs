@@ -137,8 +137,8 @@ where
 
     /// Return the arity of the constraint.
     pub fn arity(&self) -> usize {
-        let arity = self.predicate.arity();
-        assert_eq!(self.args.len(), arity, "invalid constraint: arity mismatch");
+        let arity = self.args.len();
+        debug_assert_eq!(arity, self.predicate.arity(), "invalid constraint: arity mismatch");
         arity
     }
 
