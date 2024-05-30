@@ -18,7 +18,7 @@
 //! `FilterPredicate` by calling `assign_check` and then checking that the binding
 //! for <var2> is in the returned set.
 
-use std::collections::HashSet;
+use crate::HashSet;
 use std::hash::Hash;
 
 /// A predicate for pattern matching.
