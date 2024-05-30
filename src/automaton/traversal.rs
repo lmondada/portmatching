@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use portgraph::{LinkView, PortGraph, PortView};
 
 use crate::{predicate::PredicateSatisfied, EdgeProperty, NodeProperty, PatternID, Universe};
 
@@ -31,7 +30,7 @@ impl<PNode: NodeProperty, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Vec<Option<U>>,
     ) -> Vec<(OutPort, Option<(Symbol, U)>)> {
         let mut predicate_results = self
-            .outputs(state)
+            .out_ports(state)
             .map(move |edge| {
                 (
                     edge,
@@ -127,7 +126,7 @@ impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty, FnN, FnE>
         mut ass: AssignMap<U>,
         new_symb: Option<(Symbol, U)>,
     ) {
-        let next_state = next_state(&self.automaton.graph, out_port);
+        let next_state = self.automaton.next_state(out_port);
         let next_scope = self.automaton.scope(next_state);
         ass.state_id = next_state;
         ass.map.retain(|s, _| next_scope.contains(s));
@@ -165,18 +164,6 @@ where
         }
         self.matches_queue.pop_front()
     }
-}
-
-/// Follow edge from an OutPort to the next state
-fn next_state(g: &PortGraph, edge: OutPort) -> StateID {
-    let OutPort(out_node, out_offset) = edge;
-    let out_port_index = g
-        .output(out_node.into(), out_offset)
-        .expect("invalid OutPort");
-    let in_port_index = g.port_link(out_port_index).expect("invalid transition");
-    g.port_node(in_port_index)
-        .expect("invalid port index")
-        .into()
 }
 
 fn broadcast<V: Debug, U: Eq + Clone>(

@@ -1,15 +1,17 @@
-use portgraph::PortView;
+use petgraph::{graph::NodeIndex, visit::IntoNodeIdentifiers, Graph};
 
 use crate::{EdgeProperty, HashSet, PatternID};
 
 use super::{EdgePredicate, OutPort, ScopeAutomaton, StateID, Symbol};
 
 impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
-    pub(super) fn outputs(&self, state: StateID) -> impl Iterator<Item = OutPort> + '_ {
-        self.graph.outputs(state.0).map(move |p| {
-            let offset = self.graph.port_offset(p).expect("invalid port").index();
-            OutPort(state, offset)
-        })
+    pub(super) fn out_ports(&self, StateID(state): StateID) -> impl Iterator<Item = OutPort> + '_ {
+        let n_out = graph_node_weight(&self.graph, state).predicates.len();
+        (0..n_out).map(move |position| OutPort { state, position })
+    }
+
+    pub(super) fn any_out_ports(&self, state: StateID) -> bool {
+        self.out_ports(state).any(|_| true)
     }
 
     #[allow(unused)]
@@ -17,37 +19,49 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         self.graph.node_count()
     }
 
-    pub(super) fn predicate(&self, edge: OutPort) -> &EdgePredicate<PNode, PEdge, PEdge::OffsetID> {
-        let OutPort(state, offset) = edge;
-        let port = self.graph.output(state.0, offset).unwrap();
-        let Some(transition) = self.weights[port].as_ref() else {
-            panic!("Invalid outgoing port transition");
-        };
-        &transition.predicate
+    pub(super) fn predicate(
+        &self,
+        out_port: OutPort,
+    ) -> &EdgePredicate<PNode, PEdge, PEdge::OffsetID> {
+        let predicates = &graph_node_weight(&self.graph, out_port.state).predicates;
+        &predicates[out_port.position].0
     }
 
-    pub(super) fn scope(&self, state: StateID) -> &HashSet<Symbol> {
-        &self.weights[state.0].as_ref().expect("invalid state").scope
+    pub(super) fn scope(&self, StateID(state): StateID) -> &HashSet<Symbol> {
+        &graph_node_weight(&self.graph, state).scope
     }
 
-    pub(super) fn matches(&self, state: StateID) -> impl Iterator<Item = PatternID> + '_ {
-        self.weights[state.0]
-            .as_ref()
-            .expect("invalid state")
+    pub(super) fn matches(&self, StateID(state): StateID) -> impl Iterator<Item = PatternID> + '_ {
+        graph_node_weight(&self.graph, state)
             .matches
             .iter()
             .copied()
     }
 
-    pub(super) fn is_deterministic(&self, state: StateID) -> bool {
-        self.weights[state.0]
-            .as_ref()
-            .expect("invalid state")
-            .deterministic
+    pub(super) fn is_deterministic(&self, StateID(state): StateID) -> bool {
+        graph_node_weight(&self.graph, state).deterministic
     }
 
     #[allow(unused)]
     pub(crate) fn states(&self) -> impl Iterator<Item = StateID> + '_ {
-        self.graph.nodes_iter().map(StateID)
+        self.graph.node_identifiers().map(StateID)
     }
+
+    /// Follow edge from an OutPort to the next state
+    pub(super) fn next_state(&self, out_port: OutPort) -> StateID {
+        let edge = graph_node_weight(&self.graph, out_port.state).predicates[out_port.position].1;
+        self.graph
+            .edge_endpoints(edge)
+            .expect("invalid edge")
+            .1
+            .into()
+    }
+}
+
+pub(super) fn graph_node_weight<N, E>(graph: &Graph<Option<N>, E>, state: NodeIndex) -> &N {
+    graph
+        .node_weight(state)
+        .expect("unknown state")
+        .as_ref()
+        .expect("invalid state")
 }

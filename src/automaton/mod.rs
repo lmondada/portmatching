@@ -4,13 +4,13 @@ mod traversal;
 mod view;
 
 pub use builders::LineBuilder;
-use portgraph::render::DotFormat;
+use petgraph::dot::{Config, Dot};
+use petgraph::graph::{EdgeIndex, NodeIndex};
+use petgraph::Graph;
 
 use std::fmt::Debug;
 
 use derive_more::{From, Into};
-
-use portgraph::{NodeIndex, PortGraph, PortMut, PortView, Weights};
 
 use crate::predicate::{EdgePredicate, Symbol};
 use crate::{BiMap, EdgeProperty, HashSet, PatternID, Universe};
@@ -20,16 +20,10 @@ use crate::{BiMap, EdgeProperty, HashSet, PatternID, Universe};
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StateID(NodeIndex);
 
-/// the n-th outport of a state
-#[derive(Clone, Copy, Debug)]
-pub struct OutPort(StateID, usize);
-
-impl OutPort {
-    /// The state the outport belongs to
-    #[allow(unused)]
-    pub fn state(&self) -> StateID {
-        self.0
-    }
+#[derive(Copy, Clone, Debug)]
+struct OutPort {
+    state: NodeIndex,
+    position: usize,
 }
 
 /// A node in the automaton
@@ -37,45 +31,16 @@ impl OutPort {
 /// Nodes have zero, one or many markers that are output when the state is traversed
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct State {
+struct State<PNode, PEdge, OffsetID> {
+    /// The pattern matches at current state
     matches: Vec<PatternID>,
+    /// The ordered transitions to next states
+    predicates: Vec<(EdgePredicate<PNode, PEdge, OffsetID>, EdgeIndex)>,
+    /// The scope of the state
     scope: HashSet<Symbol>,
+    /// Whether the state is deterministic
     deterministic: bool,
 }
-
-/// Weight of outgoing ports
-///
-/// Leaving a state, we need to satisfy the predicate P
-#[derive(Clone, Debug, Copy, From, Into)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct Transition<PNode, PEdge, OffsetID> {
-    predicate: EdgePredicate<PNode, PEdge, OffsetID>,
-}
-
-// #[cfg(feature = "serde")]
-// impl<PNode, PEdge> serde::Serialize for Transition<PNode, PEdge>
-// where
-//     PEdge: EdgeProperty + Debug,
-//     PNode: Debug,
-// {
-//     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-//         serializer.serialize_str(&format!("{:?}", self.predicate))
-//     }
-// }
-
-// #[cfg(feature = "serde")]
-// impl<'g, PNode, PEdge> serde::Deserialize<'g> for Transition<PNode, PEdge>
-// where
-//     PEdge: EdgeProperty + Debug,
-//     PNode: Debug,
-// {
-//     fn deserialize<D: serde::Deserializer<'g>>(deserializer: D) -> Result<Self, D::Error> {
-//         let s = String::deserialize(deserializer)?;
-//         Ok(Self {
-//             predicate: EdgePredicate::from_str(&s).map_err(serde::de::Error::custom)?,
-//         })
-//     }
-// }
 
 /// An automaton-like datastructure that follows transitions based on input and state
 ///
@@ -87,28 +52,22 @@ struct Transition<PNode, PEdge, OffsetID> {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScopeAutomaton<PNode, PEdge, OffsetID = <PEdge as EdgeProperty>::OffsetID> {
-    graph: PortGraph,
-    weights: Weights<Option<State>, Option<Transition<PNode, PEdge, OffsetID>>>,
+    graph: Graph<Option<State<PNode, PEdge, OffsetID>>, ()>,
     root: StateID,
 }
 
 impl<PNode: Clone, PEdge: EdgeProperty> Default for ScopeAutomaton<PNode, PEdge> {
     fn default() -> Self {
-        let mut graph = PortGraph::new();
-        let root: StateID = graph.add_node(0, 0).into();
-        let weights = {
-            let mut w = Weights::new();
-            w[root.0] = Some(State {
-                matches: Vec::new(),
-                scope: HashSet::from_iter([Symbol::root()]),
-                deterministic: true,
-            });
-            w
-        };
+        let mut graph = Graph::new();
+        let root = graph.add_node(Some(State {
+            matches: Vec::new(),
+            predicates: Vec::new(),
+            scope: HashSet::from_iter([Symbol::root()]),
+            deterministic: true,
+        }));
         Self {
             graph,
-            weights,
-            root,
+            root: root.into(),
         }
     }
 }
@@ -119,31 +78,6 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         Default::default()
     }
 
-    pub(crate) fn str_weights(&self) -> Weights<String, String>
-    where
-        PNode: Debug,
-        PEdge: Debug,
-        <PEdge as EdgeProperty>::OffsetID: Debug,
-    {
-        let mut str_weights = Weights::new();
-        for n in self.graph.nodes_iter() {
-            if let Some(w) = self.weights[n].as_ref() {
-                str_weights[n] = format!("{:?}", w);
-                if let Some(w) = self.weights[n].as_ref().map(|w| &w.matches) {
-                    if !w.is_empty() {
-                        str_weights[n] += &format!("[{:?}]", w);
-                    }
-                }
-            }
-        }
-        for p in self.graph.ports_iter() {
-            if let Some(w) = self.weights[p].as_ref() {
-                str_weights[p] = format!("{:?}", w);
-            }
-        }
-        str_weights
-    }
-
     /// Get its dot string representation
     pub fn dot_string(&self) -> String
     where
@@ -151,10 +85,10 @@ impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
         PEdge: Debug,
         <PEdge as EdgeProperty>::OffsetID: Debug,
     {
-        self.graph
-            .dot_format()
-            .with_weights(&self.str_weights())
-            .finish()
+        format!(
+            "{:?}",
+            Dot::with_config(&self.graph, &[Config::EdgeNoLabel])
+        )
     }
 
     pub(crate) fn root(&self) -> StateID {

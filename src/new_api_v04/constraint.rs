@@ -6,7 +6,7 @@
 
 use super::{
     predicate::{ArityPredicate, AssignPredicate, FilterPredicate, Predicate},
-    variable::VariableScope,
+    variable::{BindVariableError, VariableScope},
 };
 use itertools::Itertools;
 use std::{cmp, fmt::Debug};
@@ -33,22 +33,53 @@ pub enum LiteralEvalError {
 #[derive(Clone, Debug, Error)]
 pub enum InvalidConstraint {
     /// Cannot assign a value if the RHS is not a variable
-    #[error("Cannot assign a value if the RHS is not a variable")]
-    AssignToValue,
+    #[error("Cannot assign a value to {0}, it is not a variable")]
+    AssignToValue(String),
 
     /// Invalid predicate arity
-    #[error("Mismatching predicate arity and argument length")]
-    InvalidArity,
+    #[error(
+        "Mismatching arity: constraint expected arity {arguments_arity} but got predicate arity {predicate_arity}"
+    )]
+    InvalidArity {
+        /// The arity of the predicate
+        predicate_arity: usize,
+        /// The actual arity of the arguments
+        arguments_arity: usize,
+    },
 
     /// Constraints refers to an unbound variable
     #[error("Constraint refered to unbound variable: {0}")]
     UnboundVariable(String),
+
+    /// Bind a variable to a value that already exists
+    #[error("Cannot bind variable {0}: already exists")]
+    BindVariableExists(String),
+
+    /// Bind a value to a variable that already exists
+    #[error("Cannot bind value {value} to variable {variable}: value already exists")]
+    BindValueExists {
+        /// The value that already exists
+        value: String,
+        /// The variable binding the value to
+        variable: String,
+    },
 }
 
 impl From<LiteralEvalError> for InvalidConstraint {
     fn from(e: LiteralEvalError) -> Self {
         match e {
             LiteralEvalError::UnboundVariable(var) => InvalidConstraint::UnboundVariable(var),
+        }
+    }
+}
+
+impl From<BindVariableError> for InvalidConstraint {
+    fn from(e: BindVariableError) -> Self {
+        match e {
+            BindVariableError::VariableExists(var) => InvalidConstraint::BindVariableExists(var),
+            BindVariableError::ValueExists { value, variable } => {
+                InvalidConstraint::BindValueExists { value, variable }
+            }
         }
     }
 }
@@ -100,6 +131,7 @@ pub struct Constraint<V, U, AP, FP> {
 
 impl<V, U, AP, FP> Constraint<V, U, AP, FP>
 where
+    U: Debug,
     V: Debug,
     AP: ArityPredicate,
     FP: ArityPredicate,
@@ -114,12 +146,6 @@ where
         predicate: Predicate<AP, FP>,
         rhs: ConstraintLiteral<V, U>,
     ) -> Result<Self, InvalidConstraint> {
-        if predicate.arity() != 2 {
-            return Err(InvalidConstraint::InvalidArity);
-        }
-        if matches!(predicate, Predicate::Assign(_)) && matches!(rhs, ConstraintLiteral::Value(_)) {
-            return Err(InvalidConstraint::AssignToValue);
-        }
         Self::try_new(predicate, vec![lhs, rhs])
     }
 
@@ -132,11 +158,17 @@ where
         args: Vec<ConstraintLiteral<V, U>>,
     ) -> Result<Self, InvalidConstraint> {
         if args.len() != predicate.arity() {
-            Err(InvalidConstraint::InvalidArity)
+            Err(InvalidConstraint::InvalidArity {
+                predicate_arity: predicate.arity(),
+                arguments_arity: args.len(),
+            })
         } else if matches!(predicate, Predicate::Assign(_))
-            && matches!(args.last(), Some(ConstraintLiteral::Value(_)))
+            && matches!(args.first(), Some(ConstraintLiteral::Value(_)))
         {
-            Err(InvalidConstraint::AssignToValue)
+            Err(InvalidConstraint::AssignToValue(format!(
+                "{:?}",
+                args.first().unwrap()
+            )))
         } else {
             Ok(Self { args, predicate })
         }
@@ -149,8 +181,12 @@ where
 
     /// Return the arity of the constraint.
     pub fn arity(&self) -> usize {
-        let arity = self.predicate.arity();
-        assert_eq!(self.args.len(), arity, "invalid constraint: arity mismatch");
+        let arity = self.args.len();
+        debug_assert_eq!(
+            arity,
+            self.predicate.arity(),
+            "invalid constraint: arity mismatch"
+        );
         arity
     }
 
@@ -163,6 +199,7 @@ where
         S: Clone + VariableScope<V, U>,
         AP: AssignPredicate<U, D>,
         FP: FilterPredicate<U, D>,
+        V: Clone,
     {
         let args = |n_args| {
             let start_ind = self.args.len() - n_args;
@@ -177,14 +214,13 @@ where
                 let Some(ConstraintLiteral::Variable(lhs)) = &self.args.first() else {
                     panic!("Invalid constraint: rhs of AssignPredicate is not a variable");
                 };
-                Ok(rhs
-                    .into_iter()
+                rhs.into_iter()
                     .map(|obj| {
                         let mut scope = scope.clone();
-                        scope.bind(lhs, obj).unwrap();
-                        scope
+                        scope.bind(lhs.clone(), obj)?;
+                        Ok(scope)
                     })
-                    .collect())
+                    .collect()
             }
             Predicate::Filter(fp) => {
                 let args = args(self.arity())?;
@@ -280,58 +316,167 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::{new_api_v04::predicate::ArityPredicate, HashMap, HashSet};
+
     use super::*;
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-    struct APredicate;
-    impl ArityPredicate for APredicate {
-        fn arity(&self) -> usize {
-            1
-        }
-    }
-
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-    struct FPredicate;
-    impl ArityPredicate for FPredicate {
+    struct AssignEq;
+    impl ArityPredicate for AssignEq {
         fn arity(&self) -> usize {
             2
         }
     }
-
-    fn ass_pred(a: ConstraintLiteral<i32, i32>) -> Constraint<i32, i32, APredicate, FPredicate> {
-        Constraint::try_new(Predicate::Assign(APredicate), vec![a]).unwrap()
+    impl AssignPredicate<usize, ()> for AssignEq {
+        fn check_assign(&self, _: &(), args: &[&usize]) -> HashSet<usize> {
+            assert_eq!(args.len(), 1);
+            HashSet::from_iter(args.iter().cloned().cloned())
+        }
     }
 
-    fn filt_pred(
-        a: ConstraintLiteral<i32, i32>,
-        b: ConstraintLiteral<i32, i32>,
-    ) -> Constraint<i32, i32, APredicate, FPredicate> {
-        Constraint::try_new(Predicate::Filter(FPredicate), vec![a, b]).unwrap()
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct FilterEq;
+    impl ArityPredicate for FilterEq {
+        fn arity(&self) -> usize {
+            2
+        }
+    }
+    impl FilterPredicate<usize, ()> for FilterEq {
+        fn check(&self, _: &(), args: &[&usize]) -> bool {
+            let [arg0, arg1] = args else {
+                panic!("Invalid constraint: arity mismatch");
+            };
+            arg0 == arg1
+        }
+    }
+    type TestConstraint = Constraint<String, usize, AssignEq, FilterEq>;
+
+    #[test]
+    fn test_construct_constraint() {
+        let c = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable("x".to_string()),
+            Predicate::Assign(AssignEq),
+            ConstraintLiteral::Value(1),
+        )
+        .unwrap();
+        assert_eq!(c.arity(), 2);
+
+        TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Value(1),
+            Predicate::Assign(AssignEq),
+            ConstraintLiteral::Value(1),
+        )
+        .expect_err("Invalid constraint: rhs of AssignPredicate is not a variable");
+
+        TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Value(1),
+            Predicate::Filter(FilterEq),
+            ConstraintLiteral::Value(1),
+        )
+        .expect("A value RHS is valid for filters");
+
+        TestConstraint::try_new(
+            Predicate::Filter(FilterEq),
+            vec![ConstraintLiteral::Value(1)],
+        )
+        .expect_err("Invalid constraint: arity mismatch");
+    }
+
+    #[test]
+    fn test_assign_satisfy() {
+        let c = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable("x".to_string()),
+            Predicate::Assign(AssignEq),
+            ConstraintLiteral::Value(1),
+        )
+        .unwrap();
+        let result = c.satisfy(&(), HashMap::default()).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].get("x"), Some(&1));
+    }
+
+    #[test]
+    fn test_filter_satisfy_value_to_value() {
+        let c = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Value(1),
+            Predicate::Filter(FilterEq),
+            ConstraintLiteral::Value(1),
+        )
+        .unwrap();
+        let result = c.satisfy(&(), HashMap::default()).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_satisfy_value_to_different_value() {
+        let c = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Value(1),
+            Predicate::Filter(FilterEq),
+            ConstraintLiteral::Value(2),
+        )
+        .unwrap();
+        let result = c.satisfy(&(), HashMap::default()).unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_assign_satisfy_value_to_variable() {
+        let c = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable("y".to_string()),
+            Predicate::Assign(AssignEq),
+            ConstraintLiteral::Value(1),
+        )
+        .unwrap();
+        let scope = HashMap::from_iter([("x".to_string(), 1)]);
+        let result = c.satisfy(&(), scope).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].get("y"), Some(&1));
     }
 
     #[test]
     fn test_constraint_ordering() {
-        let a = ass_pred(ConstraintLiteral::<i32, i32>::Variable(1));
-        let b = filt_pred(
-            ConstraintLiteral::<i32, i32>::Variable(1),
-            ConstraintLiteral::<i32, i32>::Variable(0),
-        );
+        let a = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable("b".to_string()),
+            Predicate::Assign(AssignEq),
+            ConstraintLiteral::Variable("b".to_string()),
+        )
+        .unwrap();
+        let b = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable("b".to_string()),
+            Predicate::Filter(FilterEq),
+            ConstraintLiteral::Variable("a".to_string()),
+        )
+        .unwrap();
         // For same literal, an AssignPredicate should be smaller
         assert!(a < b);
 
-        let a = ass_pred(ConstraintLiteral::<i32, i32>::Variable(3));
-        let b = filt_pred(
-            ConstraintLiteral::<i32, i32>::Variable(4),
-            ConstraintLiteral::<i32, i32>::Variable(0),
-        );
+        let a = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable("d".to_string()),
+            Predicate::Assign(AssignEq),
+            ConstraintLiteral::Variable("d".to_string()),
+        )
+        .unwrap();
+        let b = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable("e".to_string()),
+            Predicate::Filter(FilterEq),
+            ConstraintLiteral::Variable("a".to_string()),
+        )
+        .unwrap();
         // For smaller literal in assignment, AssignPredicate should still be smaller
         assert!(a < b);
 
-        let a = ass_pred(ConstraintLiteral::<i32, i32>::Variable(3));
-        let b = filt_pred(
-            ConstraintLiteral::<i32, i32>::Variable(1),
-            ConstraintLiteral::<i32, i32>::Variable(0),
-        );
+        let a = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable("d".to_string()),
+            Predicate::Assign(AssignEq),
+            ConstraintLiteral::Variable("d".to_string()),
+        )
+        .unwrap();
+        let b = TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable("b".to_string()),
+            Predicate::Filter(FilterEq),
+            ConstraintLiteral::Variable("a".to_string()),
+        )
+        .unwrap();
         // For larger literal in assignment, AssignPredicate should be larger
         assert!(a > b);
     }
