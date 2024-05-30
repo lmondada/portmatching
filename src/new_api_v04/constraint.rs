@@ -32,12 +32,19 @@ pub enum LiteralEvalError {
 #[derive(Clone, Debug, Error)]
 pub enum InvalidConstraint {
     /// Cannot assign a value if the RHS is not a variable
-    #[error("Cannot assign a value if the RHS is not a variable")]
-    AssignToValue,
+    #[error("Cannot assign a value to {0}, it is not a variable")]
+    AssignToValue(String),
 
     /// Invalid predicate arity
-    #[error("Mismatching predicate arity and argument length")]
-    InvalidArity,
+    #[error(
+        "Mismatching arity: constraint expected arity {arguments_arity} but got predicate arity {predicate_arity}"
+    )]
+    InvalidArity {
+        /// The arity of the predicate
+        predicate_arity: usize,
+        /// The actual arity of the arguments
+        arguments_arity: usize,
+    },
 
     /// Constraints refers to an unbound variable
     #[error("Constraint refered to unbound variable: {0}")]
@@ -93,6 +100,7 @@ pub struct Constraint<V, U, AP, FP> {
 
 impl<V, U, AP, FP> Constraint<V, U, AP, FP>
 where
+    U: Debug,
     V: Debug,
     AP: AssignPredicate<U = U>,
     FP: FilterPredicate<U = U>,
@@ -108,10 +116,13 @@ where
         rhs: ConstraintLiteral<V, U>,
     ) -> Result<Self, InvalidConstraint> {
         if predicate.arity() != 2 {
-            return Err(InvalidConstraint::InvalidArity);
+            return Err(InvalidConstraint::InvalidArity {
+                predicate_arity: predicate.arity(),
+                arguments_arity: 2,
+            });
         }
         if matches!(predicate, Predicate::Assign(_)) && matches!(rhs, ConstraintLiteral::Value(_)) {
-            return Err(InvalidConstraint::AssignToValue);
+            return Err(InvalidConstraint::AssignToValue(format!("{:?}", rhs)));
         }
         Self::try_new(predicate, vec![lhs, rhs])
     }
@@ -125,11 +136,17 @@ where
         args: Vec<ConstraintLiteral<V, U>>,
     ) -> Result<Self, InvalidConstraint> {
         if args.len() != predicate.arity() {
-            Err(InvalidConstraint::InvalidArity)
+            Err(InvalidConstraint::InvalidArity {
+                predicate_arity: predicate.arity(),
+                arguments_arity: args.len(),
+            })
         } else if matches!(predicate, Predicate::Assign(_))
             && matches!(args.last(), Some(ConstraintLiteral::Value(_)))
         {
-            Err(InvalidConstraint::AssignToValue)
+            Err(InvalidConstraint::AssignToValue(format!(
+                "{:?}",
+                args.last().unwrap()
+            )))
         } else {
             Ok(Self { args, predicate })
         }
@@ -138,7 +155,11 @@ where
     /// Return the arity of the constraint.
     pub fn arity(&self) -> usize {
         let arity = self.args.len();
-        debug_assert_eq!(arity, self.predicate.arity(), "invalid constraint: arity mismatch");
+        debug_assert_eq!(
+            arity,
+            self.predicate.arity(),
+            "invalid constraint: arity mismatch"
+        );
         arity
     }
 
