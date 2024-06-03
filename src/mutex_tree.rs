@@ -92,14 +92,16 @@ impl<P> MutuallyExclusiveTree<P> {
     }
 
     /// Add children to a node in the tree.
-    pub fn add_children(&mut self, node: usize, predicates: impl IntoIterator<Item = P>) {
-        for p in predicates.into_iter() {
-            self.add_child(node, p);
-        }
+    pub fn add_children<'a>(
+        &'a mut self,
+        node: usize,
+        predicates: impl IntoIterator<Item = P> + 'a,
+    ) -> impl Iterator<Item = usize> + 'a {
+        predicates.into_iter().map(move |p| self.add_child(node, p))
     }
 
     /// Add a child to a node in the tree.
-    pub fn add_child(&mut self, node: usize, predicate: P) {
+    pub fn add_child(&mut self, node: usize, predicate: P) -> usize {
         if self.nodes.len() <= node {
             panic!("Cannot add child to node that does not exist");
         }
@@ -109,6 +111,7 @@ impl<P> MutuallyExclusiveTree<P> {
             predicate,
             node_index: child_index,
         });
+        child_index
     }
 
     /// Set the constraint index for a node in the tree.

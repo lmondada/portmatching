@@ -4,7 +4,7 @@ mod traversal;
 mod view;
 
 pub use builder::AutomatonBuilder;
-use petgraph::dot::{Config, Dot};
+use petgraph::dot::Dot;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::stable_graph::{StableDiGraph, StableGraph};
 
@@ -32,10 +32,7 @@ pub struct ConstraintAutomaton<C> {
 impl<C> Default for ConstraintAutomaton<C> {
     fn default() -> Self {
         let mut graph = StableGraph::new();
-        let root = graph.add_node(State {
-            matches: Vec::new(),
-            deterministic: true,
-        });
+        let root = graph.add_node(State::default());
         Self {
             graph,
             root: root.into(),
@@ -55,10 +52,7 @@ impl<C> ConstraintAutomaton<C> {
     where
         C: Debug,
     {
-        format!(
-            "{:?}",
-            Dot::with_config(&self.graph, &[Config::EdgeNoLabel])
-        )
+        format!("{:?}", Dot::new(&self.graph))
     }
 
     /// Get the root state ID
@@ -80,7 +74,7 @@ struct TransitionID(EdgeIndex);
 /// A node in the automaton
 ///
 /// Nodes have zero, one or many markers that are output when the state is traversed
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 struct State {
     /// The pattern matches at current state

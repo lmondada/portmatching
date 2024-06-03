@@ -34,6 +34,8 @@ impl<C> AutomatonBuilder<C> {
     }
 }
 
+type Automaton<V, U, AP, FP> = ConstraintAutomaton<Constraint<V, U, AP, FP>>;
+
 impl<V, U, AP, FP> AutomatonBuilder<Constraint<V, U, AP, FP>>
 where
     AP: ArityPredicate,
@@ -51,10 +53,7 @@ where
     pub fn build(
         mut self,
         make_det: impl for<'c> Fn(&[&'c Constraint<V, U, AP, FP>]) -> bool,
-    ) -> (
-        ConstraintAutomaton<Constraint<V, U, AP, FP>>,
-        Vec<PatternID>,
-    ) {
+    ) -> (Automaton<V, U, AP, FP>, Vec<PatternID>) {
         // Construct a prefix tree by adding all constraints non-deterministically
         let pattern_ids = mem::take(&mut self.patterns)
             .into_iter()
@@ -94,6 +93,10 @@ where
     fn make_mutex(&mut self, state: StateID) {
         assert!(!self.matcher.is_deterministic(state));
 
+        if !self.matcher.constraints(state).any(|_| true) {
+            // There are no constraints, already in a deterministic state
+            return;
+        }
         // Disconnect all children
         let constraints_children = self.matcher.drain_constraints(state).collect_vec();
         let old_fail_state = constraints_children
@@ -117,19 +120,20 @@ where
         //  - add edges to children when the constraint index is set
         let mut curr_states = vec![(mutex_tree.root(), state)];
         while let Some((tree_state, matcher_state)) = curr_states.pop() {
-            if let Some(index) = mutex_tree.constraint_index(tree_state) {
-                added_constraints[index] = true;
-                self.matcher.add_transition_known_child(
-                    matcher_state,
-                    children[index],
-                    Some(constraints[index].clone()),
-                );
-            }
             for (child_tree_state, c) in mutex_tree.children(tree_state) {
-                let child_matcher_state = self
-                    .matcher
-                    .add_transition_unknown_child(matcher_state, Some(c.clone()));
-                curr_states.push((child_tree_state, child_matcher_state));
+                if let Some(index) = mutex_tree.constraint_index(child_tree_state) {
+                    added_constraints[index] = true;
+                    self.matcher.add_transition_known_child(
+                        matcher_state,
+                        children[index],
+                        Some(constraints[index].clone()),
+                    );
+                } else {
+                    let child_matcher_state = self
+                        .matcher
+                        .add_transition_unknown_child(matcher_state, Some(c.clone()));
+                    curr_states.push((child_tree_state, child_matcher_state));
+                }
             }
         }
 
@@ -139,7 +143,7 @@ where
             .filter(|&i| !added_constraints[i])
             .collect_vec();
         // Restore failed state (or create if necessary)
-        if not_added.len() > 0 || old_fail_state.is_some() {
+        if !not_added.is_empty() || old_fail_state.is_some() {
             let fail_state = if let Some(fail_state) = old_fail_state {
                 self.matcher
                     .add_transition_known_child(state, fail_state, None);
@@ -174,5 +178,86 @@ impl<C> FromIterator<Vec<C>> for AutomatonBuilder<C> {
             patterns: iter.into_iter().collect(),
             matcher: ConstraintAutomaton::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        constraint::tests::{assign_constraint, TestConstraint},
+        mutex_tree::MutuallyExclusiveTree,
+        ConstraintLiteral, HashSet,
+    };
+
+    use super::*;
+
+    // Dummy ToMutuallyExclusiveTree implementation for TestConstraint
+    impl ToMutuallyExclusiveTree for TestConstraint {
+        fn to_mutually_exclusive_tree(preds: Vec<Self>) -> MutuallyExclusiveTree<Self> {
+            // Only process the first two smallest constraints
+            let (inds, preds): (Vec<_>, Vec<_>) = preds
+                .into_iter()
+                .enumerate()
+                .sorted_by(|(_, p1), (_, p2)| p1.cmp(p2))
+                .unzip();
+            let first_two = preds.into_iter().take(2);
+            let mut tree = MutuallyExclusiveTree::new();
+            let new_children = tree.add_children(tree.root(), first_two).collect_vec();
+            for (index, child) in inds.into_iter().zip(new_children) {
+                tree.set_constraint_index(child, index);
+            }
+            tree
+        }
+    }
+
+    #[test]
+    fn test_build() {
+        let a_constraint = assign_constraint("a", ConstraintLiteral::new_value(2));
+        let p1 = vec![
+            assign_constraint("x", ConstraintLiteral::new_value(1)),
+            a_constraint.clone(),
+        ];
+        let b_constraint = assign_constraint("b", ConstraintLiteral::new_value(2));
+        let p2 = vec![
+            assign_constraint("x", ConstraintLiteral::new_value(1)),
+            b_constraint.clone(),
+        ];
+        let c_constraint = assign_constraint("c", ConstraintLiteral::new_value(2));
+        let p3 = vec![
+            assign_constraint("x", ConstraintLiteral::new_value(1)),
+            c_constraint.clone(),
+        ];
+        let d_constraint = assign_constraint("d", ConstraintLiteral::new_value(2));
+        let p4 = vec![
+            assign_constraint("x", ConstraintLiteral::new_value(1)),
+            d_constraint.clone(),
+        ];
+        let builder = AutomatonBuilder::from_constraints(vec![p1, p2, p3, p4]);
+        let (matcher, pattern_ids) = builder.build(|_| false);
+        assert_eq!(matcher.graph.node_count(), 7);
+        assert_eq!(
+            pattern_ids,
+            vec![PatternID(0), PatternID(1), PatternID(2), PatternID(3)]
+        );
+        let x_child = matcher.children(matcher.root()).exactly_one().ok().unwrap();
+
+        // The two first patterns were kept at the root
+        assert_eq!(
+            matcher
+                .transitions(x_child)
+                .map(|t| { matcher.constraint(t) })
+                .collect::<HashSet<_>>(),
+            HashSet::from_iter([Some(&a_constraint), Some(&b_constraint), None])
+        );
+        // The remaining two patterns are children of an epsilon transition
+        let epsilon = matcher.find_constraint(x_child, None).unwrap();
+        let epsilon_child = matcher.next_state(epsilon);
+        assert_eq!(
+            matcher
+                .transitions(epsilon_child)
+                .map(|t| { matcher.constraint(t) })
+                .collect::<HashSet<_>>(),
+            HashSet::from_iter([Some(&c_constraint), Some(&d_constraint)])
+        );
     }
 }

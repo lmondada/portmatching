@@ -18,3 +18,29 @@ pub trait Pattern {
     /// Get the root of the pattern.
     fn root(&self) -> Self::U;
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use derive_more::{From, Into};
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Into)]
+    pub(crate) struct TestPattern<C>(Vec<C>);
+    impl<C: Clone> Pattern for TestPattern<C> {
+        type Constraint = C;
+        type Host = ();
+        type U = usize;
+
+        fn to_constraint_vec(&self) -> Vec<Self::Constraint> {
+            self.0.clone()
+        }
+
+        fn as_host(&self) -> &Self::Host {
+            &()
+        }
+
+        fn root(&self) -> Self::U {
+            0
+        }
+    }
+}

@@ -30,7 +30,7 @@ pub trait ArityPredicate: Eq {
 ///
 /// Assign predicates must be of arity N >= 1 and bind the variable passed as its
 /// first argument.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Predicate<AP, FP> {
     Assign(AP),
     Filter(FP),
@@ -77,4 +77,53 @@ pub trait FilterPredicate<U, D>: ArityPredicate {
     ///
     /// `values` must be of length `arity()`.
     fn check(&self, data: &D, args: &[&U]) -> bool;
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use crate::{predicate::Predicate, ArityPredicate, AssignPredicate, FilterPredicate, HashSet};
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub(crate) struct AssignEq;
+    impl ArityPredicate for AssignEq {
+        fn arity(&self) -> usize {
+            2
+        }
+    }
+    impl AssignPredicate<usize, ()> for AssignEq {
+        fn check_assign(&self, _: &(), args: &[&usize]) -> HashSet<usize> {
+            assert_eq!(args.len(), 1);
+            HashSet::from_iter(args.iter().cloned().cloned())
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub(crate) struct FilterEq;
+    impl ArityPredicate for FilterEq {
+        fn arity(&self) -> usize {
+            2
+        }
+    }
+    impl FilterPredicate<usize, ()> for FilterEq {
+        fn check(&self, _: &(), args: &[&usize]) -> bool {
+            let [arg0, arg1] = args else {
+                panic!("Invalid constraint: arity mismatch");
+            };
+            arg0 == arg1
+        }
+    }
+
+    type TestPredicate = Predicate<AssignEq, FilterEq>;
+
+    #[test]
+    fn test_arity_filter() {
+        let p = TestPredicate::Filter(FilterEq);
+        assert_eq!(p.arity(), 2);
+    }
+
+    #[test]
+    fn test_arity_assign() {
+        let p = TestPredicate::Assign(AssignEq);
+        assert_eq!(p.arity(), 2);
+    }
 }

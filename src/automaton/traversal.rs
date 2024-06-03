@@ -165,3 +165,109 @@ where
     let n_unique = scopes.into_iter().flat_map(|s| s.get(var)).unique().count();
     n_unique == n_scopes
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        constraint,
+        predicate::{tests::AssignEq, Predicate::Filter},
+        HashSet,
+    };
+
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ConstFilterPredicate(bool);
+    impl ArityPredicate for ConstFilterPredicate {
+        fn arity(&self) -> usize {
+            0
+        }
+    }
+    impl FilterPredicate<usize, ()> for ConstFilterPredicate {
+        fn check(&self, _: &(), _: &[&usize]) -> bool {
+            self.0
+        }
+    }
+    type Constraint = constraint::Constraint<String, usize, AssignEq, ConstFilterPredicate>;
+
+    fn true_constraint() -> Constraint {
+        Constraint::try_new(Filter(ConstFilterPredicate(true)), vec![]).unwrap()
+    }
+
+    fn false_constraint() -> Constraint {
+        Constraint::try_new(Filter(ConstFilterPredicate(false)), vec![]).unwrap()
+    }
+
+    #[test]
+    fn legal_transitions() {
+        let mut automaton = ConstraintAutomaton::<Constraint>::new();
+        // Add a True, False and None constraint
+        let true_child =
+            automaton.add_transition_unknown_child(automaton.root(), Some(true_constraint()));
+        automaton.add_transition_unknown_child(automaton.root(), Some(false_constraint()));
+        let fail_child = automaton.add_transition_unknown_child(automaton.root(), None);
+        let ass = AssignMap::default();
+        let transitions = HashSet::from_iter(
+            automaton
+                .legal_transitions(automaton.root(), &(), ass.clone())
+                .into_iter()
+                .map(|(transition, _)| automaton.next_state(transition)),
+        );
+        // Non-deterministic, so both true and none children should be returned
+        assert_eq!(transitions, HashSet::from_iter([true_child, fail_child]));
+
+        let root = automaton.root();
+        automaton.graph[root.0].deterministic = true;
+        let transitions = HashSet::from_iter(
+            automaton
+                .legal_transitions(automaton.root(), &(), ass)
+                .into_iter()
+                .map(|(transition, _)| automaton.next_state(transition)),
+        );
+        // Deterministic, so only true child should be returned
+        assert_eq!(transitions, HashSet::from_iter([true_child]));
+    }
+
+    #[test]
+    fn legal_transitions_all_false() {
+        let mut automaton = ConstraintAutomaton::<Constraint>::new();
+        automaton.add_transition_unknown_child(automaton.root(), Some(false_constraint()));
+        let ass = AssignMap::default();
+        // Only a False transition, so no legal moves
+        assert!(automaton
+            .legal_transitions(automaton.root(), &(), ass.clone())
+            .is_empty());
+
+        // Add an epsilon transition
+        automaton.add_transition_unknown_child(automaton.root(), None);
+        // Now there is a valid move
+        assert!(!automaton
+            .legal_transitions(automaton.root(), &(), ass.clone())
+            .is_empty());
+        // Still valid when deterministic
+        let root = automaton.root();
+        automaton.graph[root.0].deterministic = true;
+        assert!(!automaton
+            .legal_transitions(automaton.root(), &(), ass)
+            .is_empty());
+    }
+
+    #[test]
+    fn run_automaton() {
+        let mut automaton = ConstraintAutomaton::<Constraint>::new();
+        automaton.add_constraints(vec![true_constraint(), false_constraint()]);
+        let p2 = automaton.add_constraints(vec![true_constraint(), true_constraint()]);
+        let p3 = automaton.add_constraints(vec![
+            true_constraint(),
+            true_constraint(),
+            true_constraint(),
+        ]);
+        automaton.add_constraints(vec![
+            true_constraint(),
+            true_constraint(),
+            false_constraint(),
+        ]);
+        let matches: HashSet<_> = automaton.run(0, &()).collect();
+        assert_eq!(matches, HashSet::from_iter([p2, p3]));
+    }
+}

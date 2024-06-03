@@ -30,7 +30,7 @@ use thiserror::Error;
 ///    variables bound by previous constraints.
 ///  - For FilterPredicates, all arguments must be bound by previous constraints
 ///    if they are variables.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Constraint<V, U, AP, FP> {
     predicate: Predicate<AP, FP>,
     args: Vec<ConstraintLiteral<V, U>>,
@@ -49,7 +49,7 @@ pub enum ConstraintType<V> {
 ///
 /// Literals are either a value from the predicate universe, or a variable
 /// that will be bound at runtime to a value in the universe.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ConstraintLiteral<V, U> {
     Variable(V),
     Value(U),
@@ -61,7 +61,7 @@ pub trait DetHeuristic
 where
     Self: Sized,
 {
-    fn make_det<'c>(constraints: &[&'c Self]) -> bool;
+    fn make_det(constraints: &[&Self]) -> bool;
 }
 
 /// Errors that occur when evaluating literals.
@@ -127,6 +127,16 @@ impl From<BindVariableError> for InvalidConstraint {
 }
 
 impl<V: Debug, U> ConstraintLiteral<V, U> {
+    /// Construct a new value literal
+    pub fn new_value(value: U) -> Self {
+        ConstraintLiteral::Value(value)
+    }
+
+    /// Construct a new variable literal
+    pub fn new_variable(variable: V) -> Self {
+        ConstraintLiteral::Variable(variable)
+    }
+
     /// Evaluate a literal to a value in U.
     ///
     /// If the literal is a value, unwrap it. Otherwise, use the variable scope
@@ -345,50 +355,37 @@ impl<'c, V: Clone, U, AP, FP> From<&'c Constraint<V, U, AP, FP>> for ConstraintT
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::{predicate::ArityPredicate, HashMap, HashSet};
+pub(crate) mod tests {
+    use crate::predicate::tests::{AssignEq, FilterEq};
+    use crate::HashMap;
 
     use super::*;
+    pub(crate) type TestConstraint = Constraint<String, usize, AssignEq, FilterEq>;
 
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-    struct AssignEq;
-    impl ArityPredicate for AssignEq {
-        fn arity(&self) -> usize {
-            2
-        }
-    }
-    impl AssignPredicate<usize, ()> for AssignEq {
-        fn check_assign(&self, _: &(), args: &[&usize]) -> HashSet<usize> {
-            assert_eq!(args.len(), 1);
-            HashSet::from_iter(args.iter().cloned().cloned())
-        }
+    /// Construct a test assignment constraint
+    pub(crate) fn assign_constraint(
+        lhs: &str,
+        rhs: ConstraintLiteral<String, usize>,
+    ) -> TestConstraint {
+        TestConstraint::try_binary_from_triple(
+            ConstraintLiteral::Variable(lhs.to_string()),
+            Predicate::Assign(AssignEq),
+            rhs,
+        )
+        .unwrap()
     }
 
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-    struct FilterEq;
-    impl ArityPredicate for FilterEq {
-        fn arity(&self) -> usize {
-            2
-        }
+    /// Construct a test filter constraint
+    pub(crate) fn filter_constraint(
+        lhs: ConstraintLiteral<String, usize>,
+        rhs: ConstraintLiteral<String, usize>,
+    ) -> TestConstraint {
+        TestConstraint::try_binary_from_triple(lhs, Predicate::Filter(FilterEq), rhs).unwrap()
     }
-    impl FilterPredicate<usize, ()> for FilterEq {
-        fn check(&self, _: &(), args: &[&usize]) -> bool {
-            let [arg0, arg1] = args else {
-                panic!("Invalid constraint: arity mismatch");
-            };
-            arg0 == arg1
-        }
-    }
-    type TestConstraint = Constraint<String, usize, AssignEq, FilterEq>;
 
     #[test]
     fn test_construct_constraint() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("x".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Value(1),
-        )
-        .unwrap();
+        let c = assign_constraint("x", ConstraintLiteral::Value(1));
         assert_eq!(c.arity(), 2);
 
         TestConstraint::try_binary_from_triple(
@@ -414,12 +411,7 @@ mod tests {
 
     #[test]
     fn test_assign_satisfy() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("x".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Value(1),
-        )
-        .unwrap();
+        let c = assign_constraint("x", ConstraintLiteral::Value(1));
         let result = c.satisfy(&(), HashMap::default()).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].get("x"), Some(&1));
@@ -427,36 +419,21 @@ mod tests {
 
     #[test]
     fn test_filter_satisfy_value_to_value() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Value(1),
-            Predicate::Filter(FilterEq),
-            ConstraintLiteral::Value(1),
-        )
-        .unwrap();
+        let c = filter_constraint(ConstraintLiteral::Value(1), ConstraintLiteral::Value(1));
         let result = c.satisfy(&(), HashMap::default()).unwrap();
         assert_eq!(result.len(), 1);
     }
 
     #[test]
     fn test_filter_satisfy_value_to_different_value() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Value(1),
-            Predicate::Filter(FilterEq),
-            ConstraintLiteral::Value(2),
-        )
-        .unwrap();
+        let c = filter_constraint(ConstraintLiteral::Value(1), ConstraintLiteral::Value(2));
         let result = c.satisfy(&(), HashMap::default()).unwrap();
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_assign_satisfy_value_to_variable() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("y".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Value(1),
-        )
-        .unwrap();
+        let c = assign_constraint("y", ConstraintLiteral::Value(1));
         let scope = HashMap::from_iter([("x".to_string(), 1)]);
         let result = c.satisfy(&(), scope).unwrap();
         assert_eq!(result.len(), 1);
@@ -465,55 +442,40 @@ mod tests {
 
     #[test]
     fn test_constraint_ordering_same_literal() {
-        let a = TestConstraint::try_binary_from_triple(
+        let a = assign_constraint("b", ConstraintLiteral::Variable("b".to_string()));
+        let b = filter_constraint(
             ConstraintLiteral::Variable("b".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Variable("b".to_string()),
-        )
-        .unwrap();
-        let b = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("b".to_string()),
-            Predicate::Filter(FilterEq),
             ConstraintLiteral::Variable("a".to_string()),
-        )
-        .unwrap();
+        );
         // For same literal, an AssignPredicate should be smaller
         assert!(a < b);
     }
 
     #[test]
     fn test_constraint_ordering_smaller_literal() {
-        let a = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("d".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Variable("d".to_string()),
-        )
-        .unwrap();
-        let b = TestConstraint::try_binary_from_triple(
+        let a = assign_constraint("d", ConstraintLiteral::Variable("d".to_string()));
+        let b = filter_constraint(
             ConstraintLiteral::Variable("e".to_string()),
-            Predicate::Filter(FilterEq),
             ConstraintLiteral::Variable("a".to_string()),
-        )
-        .unwrap();
+        );
         // For smaller literal in assignment, AssignPredicate should still be smaller
         assert!(a < b);
     }
 
     #[test]
     fn test_constraint_ordering_larger_literal() {
-        let a = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("d".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Variable("d".to_string()),
-        )
-        .unwrap();
-        let b = TestConstraint::try_binary_from_triple(
+        let a = assign_constraint("d", ConstraintLiteral::Variable("d".to_string()));
+        let b = filter_constraint(
             ConstraintLiteral::Variable("b".to_string()),
-            Predicate::Filter(FilterEq),
             ConstraintLiteral::Variable("a".to_string()),
-        )
-        .unwrap();
+        );
         // For larger literal in assignment, AssignPredicate should be larger
         assert!(a > b);
+    }
+
+    #[test]
+    fn test_assigned_variable() {
+        let c = assign_constraint("x", ConstraintLiteral::Value(1));
+        assert_eq!(c.assigned_variable(), Some(&"x".to_string()));
     }
 }

@@ -156,3 +156,37 @@ where
     }
     final_match_maps
 }
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+
+    use crate::{
+        constraint::tests::{assign_constraint, TestConstraint},
+        pattern::tests::TestPattern,
+        ConstraintLiteral,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_get_match_map() {
+        let x_eq_2 = assign_constraint("x", ConstraintLiteral::new_value(2));
+        let y_eq_x = assign_constraint("y", ConstraintLiteral::new_variable("x".to_string()));
+        let pattern: TestPattern<TestConstraint> = vec![x_eq_2, y_eq_x].into();
+        let matcher = SinglePatternMatcher::from_pattern(&pattern);
+
+        // The patterns records three variables: root, x, y with bindings 0, 2 and 2
+        assert_eq!(matcher.variable_to_pattern.len(), 3);
+        assert_eq!(matcher.variable_to_pattern["root"], 0);
+        assert_eq!(matcher.variable_to_pattern["x"], 2);
+        assert_eq!(matcher.variable_to_pattern["y"], 2);
+
+        // Matching against itself works
+        let matches = matcher.get_match_map(0, &()).collect_vec();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].len(), 2);
+        assert_eq!(matches[0][&2], 2);
+        assert_eq!(matches[0][&0], 0);
+    }
+}

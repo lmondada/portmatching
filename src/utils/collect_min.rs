@@ -15,7 +15,7 @@ impl<T: Iterator, K: Ord> CollectMin<K> for T {
             acc.push(item, key);
             acc
         });
-        (acc.vec, acc.min.to_val())
+        (acc.vec, acc.min.into_option())
     }
 }
 
@@ -70,7 +70,7 @@ impl<V> ValOrInf<V> {
         ValOrInf(Reverse(Some(Reverse(val))))
     }
 
-    pub fn to_val(self) -> Option<V> {
+    pub fn into_option(self) -> Option<V> {
         self.0 .0.map(|x| x.0)
     }
 
@@ -105,7 +105,7 @@ impl<V> From<Option<V>> for ValOrInf<V> {
 
 impl<V> From<ValOrInf<V>> for Option<V> {
     fn from(val: ValOrInf<V>) -> Self {
-        val.to_val()
+        val.into_option()
     }
 }
 

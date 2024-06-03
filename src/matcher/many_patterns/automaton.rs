@@ -100,7 +100,6 @@ where
         let single_matcher = SinglePatternMatcher::from_pattern(p);
         single_matcher
             .get_match_map(m.root, host)
-            .into_iter()
             .map(|m| m.into_iter().collect())
             .collect()
     }

@@ -52,3 +52,14 @@ impl<V: Eq + Hash + Debug + Clone, U: Clone> VariableScope<V, U> for HashMap<V, 
         Ok(())
     }
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    impl VariableNaming for String {
+        fn root_variable() -> Self {
+            "root".to_string()
+        }
+    }
+}
