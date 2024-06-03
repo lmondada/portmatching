@@ -3,10 +3,10 @@ use std::mem;
 use itertools::Itertools;
 
 use crate::{
-    automaton::{ScopeAutomaton, StateID},
-    new_api_v04::{
-        constraint::Constraint, mutex_tree::ToMutuallyExclusiveTree, predicate::ArityPredicate,
-    },
+    automaton::{ConstraintAutomaton, StateID},
+    constraint::Constraint,
+    mutex_tree::ToMutuallyExclusiveTree,
+    predicate::ArityPredicate,
     PatternID,
 };
 
@@ -14,7 +14,7 @@ pub struct AutomatonBuilder<C> {
     /// A vector of patterns, made of a vector of constraints.
     patterns: Vec<Vec<C>>,
     /// The matcher being built
-    matcher: ScopeAutomaton<C>,
+    matcher: ConstraintAutomaton<C>,
 }
 
 impl<C> AutomatonBuilder<C> {
@@ -25,7 +25,7 @@ impl<C> AutomatonBuilder<C> {
     pub fn from_constraints(patterns: Vec<Vec<C>>) -> Self {
         Self {
             patterns,
-            matcher: ScopeAutomaton::new(),
+            matcher: ConstraintAutomaton::new(),
         }
     }
 
@@ -51,7 +51,10 @@ where
     pub fn build(
         mut self,
         make_det: impl for<'c> Fn(&[&'c Constraint<V, U, AP, FP>]) -> bool,
-    ) -> (ScopeAutomaton<Constraint<V, U, AP, FP>>, Vec<PatternID>) {
+    ) -> (
+        ConstraintAutomaton<Constraint<V, U, AP, FP>>,
+        Vec<PatternID>,
+    ) {
         // Construct a prefix tree by adding all constraints non-deterministically
         let pattern_ids = mem::take(&mut self.patterns)
             .into_iter()
@@ -160,7 +163,7 @@ impl<C> Default for AutomatonBuilder<C> {
     fn default() -> Self {
         Self {
             patterns: Vec::new(),
-            matcher: ScopeAutomaton::new(),
+            matcher: ConstraintAutomaton::new(),
         }
     }
 }
@@ -169,7 +172,7 @@ impl<C> FromIterator<Vec<C>> for AutomatonBuilder<C> {
     fn from_iter<T: IntoIterator<Item = Vec<C>>>(iter: T) -> Self {
         Self {
             patterns: iter.into_iter().collect(),
-            matcher: ScopeAutomaton::new(),
+            matcher: ConstraintAutomaton::new(),
         }
     }
 }

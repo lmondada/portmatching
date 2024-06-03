@@ -11,6 +11,8 @@ pub mod single_pattern;
 use derive_more::{From, Into};
 use std::{fmt::Debug, hash::Hash};
 
+use crate::IterRootCandidates;
+
 pub use self::many_patterns::{ManyMatcher, NaiveManyMatcher};
 pub use self::single_pattern::SinglePatternMatcher;
 
@@ -47,30 +49,6 @@ pub trait PortMatcher<U, D> {
         }
         matches
     }
-}
-
-/// A trait for iterating over all root candidates for port matching.
-pub trait IterRootCandidates {
-    /// The type of the root candidates.
-    type U;
-
-    /// Iterate over the root candidates.
-    fn root_candidates(&self) -> impl Iterator<Item = Self::U>;
-}
-
-/// A trait for variable names.
-pub trait VariableNaming: Debug + Hash + Eq + Clone {
-    /// Return the name of the root variable.
-    fn root_variable() -> Self;
-}
-
-/// A heuristic whether a set of constraints should be turned into a deterministic
-/// transition.
-pub trait DetHeuristic
-where
-    Self: Sized,
-{
-    fn make_det<'c>(constraints: &[&'c Self]) -> bool;
 }
 
 /// A match instance returned by a Portmatcher instance.

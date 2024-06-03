@@ -10,6 +10,18 @@ use crate::HashMap;
 use std::{fmt::Debug, hash::Hash};
 use thiserror::Error;
 
+/// A map-like trait for variable bindings.
+pub trait VariableScope<V, U>: Clone {
+    fn get(&self, var: &V) -> Option<&U>;
+    fn bind(&mut self, var: V, val: U) -> Result<(), BindVariableError>;
+}
+
+/// A trait for variable names.
+pub trait VariableNaming: Debug + Hash + Eq + Clone {
+    /// Return the name of the root variable.
+    fn root_variable() -> Self;
+}
+
 /// Errors that occur when binding variables in scope.
 #[derive(Debug, Clone, Error)]
 pub enum BindVariableError {
@@ -25,12 +37,6 @@ pub enum BindVariableError {
         /// The variable binding the value to
         variable: String,
     },
-}
-
-/// A map-like trait for variable bindings.
-pub trait VariableScope<V, U>: Clone {
-    fn get(&self, var: &V) -> Option<&U>;
-    fn bind(&mut self, var: V, val: U) -> Result<(), BindVariableError>;
 }
 
 impl<V: Eq + Hash + Debug + Clone, U: Clone> VariableScope<V, U> for HashMap<V, U> {

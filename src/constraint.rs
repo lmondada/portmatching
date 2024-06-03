@@ -12,6 +12,39 @@ use itertools::Itertools;
 use std::{cmp, fmt::Debug};
 use thiserror::Error;
 
+/// A constraint for pattern matching.
+///
+/// Given by a predicate of arity N and a vector of N arguments. For assign
+/// predicates, N >= 1 and the first argument is always a variable: the variable
+/// to be bound by the assignment.
+///
+///
+/// ## Total ordering of constraints
+/// Constraints implement Ord, determining the order in which constraints
+/// will be satisfied during pattern matching. An assignment of variable `v`
+/// will be smaller than any filter predicate containing `v` or any variable
+/// larger than `v`.
+///
+/// For any totally ordered vector of constraints, the following must hold:
+///  - For AssignPredicates, all but the first argument must be constants or be
+///    variables bound by previous constraints.
+///  - For FilterPredicates, all arguments must be bound by previous constraints
+///    if they are variables.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Constraint<V, U, AP, FP> {
+    predicate: Predicate<AP, FP>,
+    args: Vec<ConstraintLiteral<V, U>>,
+}
+
+/// The type of constraint: either Assign or Filter.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ConstraintType<V> {
+    /// Assignment constraint to variable V.
+    Assign(V),
+    /// Filter constraint.
+    Filter,
+}
+
 /// A variable `V` or value `U` argument in a constraint.
 ///
 /// Literals are either a value from the predicate universe, or a variable
@@ -20,6 +53,15 @@ use thiserror::Error;
 pub enum ConstraintLiteral<V, U> {
     Variable(V),
     Value(U),
+}
+
+/// A heuristic whether a set of constraints should be turned into a deterministic
+/// transition.
+pub trait DetHeuristic
+where
+    Self: Sized,
+{
+    fn make_det<'c>(constraints: &[&'c Self]) -> bool;
 }
 
 /// Errors that occur when evaluating literals.
@@ -102,39 +144,6 @@ impl<V: Debug, U> ConstraintLiteral<V, U> {
             ConstraintLiteral::Value(val) => Ok(val),
         }
     }
-}
-
-/// A constraint for pattern matching.
-///
-/// Given by a predicate of arity N and a vector of N arguments. For assign
-/// predicates, N >= 1 and the first argument is always a variable: the variable
-/// to be bound by the assignment.
-///
-///
-/// ## Total ordering of constraints
-/// Constraints implement Ord, determining the order in which constraints
-/// will be satisfied during pattern matching. An assignment of variable `v`
-/// will be smaller than any filter predicate containing `v` or any variable
-/// larger than `v`.
-///
-/// For any totally ordered vector of constraints, the following must hold:
-///  - For AssignPredicates, all but the first argument must be constants or be
-///    variables bound by previous constraints.
-///  - For FilterPredicates, all arguments must be bound by previous constraints
-///    if they are variables.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Constraint<V, U, AP, FP> {
-    predicate: Predicate<AP, FP>,
-    args: Vec<ConstraintLiteral<V, U>>,
-}
-
-/// The type of constraint: either Assign or Filter.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ConstraintType<V> {
-    /// Assignment constraint to variable V.
-    Assign(V),
-    /// Filter constraint.
-    Filter,
 }
 
 impl<V, U, AP, FP> Constraint<V, U, AP, FP> {
@@ -337,7 +346,7 @@ impl<'c, V: Clone, U, AP, FP> From<&'c Constraint<V, U, AP, FP>> for ConstraintT
 
 #[cfg(test)]
 mod tests {
-    use crate::{new_api_v04::predicate::ArityPredicate, HashMap, HashSet};
+    use crate::{predicate::ArityPredicate, HashMap, HashSet};
 
     use super::*;
 

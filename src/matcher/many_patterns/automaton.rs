@@ -6,22 +6,20 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-    automaton::{AutomatonBuilder, ScopeAutomaton},
-    matcher::{DetHeuristic, PatternMatch, VariableNaming},
-    new_api_v04::{
-        constraint::Constraint,
-        mutex_tree::ToMutuallyExclusiveTree,
-        predicate::{ArityPredicate, AssignPredicate, FilterPredicate},
-    },
+    automaton::{AutomatonBuilder, ConstraintAutomaton},
+    constraint::{Constraint, DetHeuristic},
+    matcher::PatternMatch,
+    mutex_tree::ToMutuallyExclusiveTree,
     pattern::Pattern,
-    HashMap, PatternID, SinglePatternMatcher, Universe,
+    predicate::{ArityPredicate, AssignPredicate, FilterPredicate},
+    HashMap, PatternID, SinglePatternMatcher, Universe, VariableNaming,
 };
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ManyMatcher<P, C> {
-    automaton: ScopeAutomaton<C>,
+    automaton: ConstraintAutomaton<C>,
     patterns: HashMap<PatternID, P>,
 }
 
@@ -114,5 +112,3 @@ impl<C: Debug, P> ManyMatcher<P, C> {
         self.automaton.dot_string()
     }
 }
-
-// pub type UnweightedManyMatcher = ManyMatcher<(), C>;

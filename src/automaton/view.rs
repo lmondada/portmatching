@@ -2,9 +2,9 @@ use petgraph::{graph::NodeIndex, stable_graph::StableGraph, visit::EdgeRef, Dire
 
 use crate::PatternID;
 
-use super::{ScopeAutomaton, StateID, TransitionID};
+use super::{ConstraintAutomaton, StateID, TransitionID};
 
-impl<C> ScopeAutomaton<C> {
+impl<C> ConstraintAutomaton<C> {
     pub(super) fn transitions(
         &self,
         StateID(state): StateID,

@@ -5,15 +5,13 @@
 use std::{collections::VecDeque, fmt::Debug, hash::Hash};
 
 use crate::{
-    new_api_v04::{
-        constraint::Constraint,
-        predicate::{AssignPredicate, FilterPredicate},
-    },
+    constraint::Constraint,
     pattern::Pattern,
-    HashMap, Universe,
+    predicate::{AssignPredicate, FilterPredicate},
+    HashMap, Universe, VariableNaming,
 };
 
-use super::{Match, PatternMatch, PortMatcher, VariableNaming};
+use super::{Match, PatternMatch, PortMatcher};
 
 /// A simple matcher for a single pattern.
 pub struct SinglePatternMatcher<C, V, U> {

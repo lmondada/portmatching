@@ -3,9 +3,9 @@ use petgraph::{graph::NodeIndex, stable_graph::StableGraph};
 
 use crate::PatternID;
 
-use super::{ScopeAutomaton, State, StateID, Transition};
+use super::{ConstraintAutomaton, State, StateID, Transition};
 
-impl<C: Eq + Clone> ScopeAutomaton<C> {
+impl<C: Eq + Clone> ConstraintAutomaton<C> {
     /// Add a transition from `parent` to `child` with the given `constraint`.
     ///
     /// Note that it could be that such a transition already exists at `parent`
@@ -65,7 +65,7 @@ impl<C: Eq + Clone> ScopeAutomaton<C> {
         }
     }
 
-    pub(crate) fn add_match(&mut self, StateID(state): StateID, pattern: PatternID) {
+    pub(super) fn add_match(&mut self, StateID(state): StateID, pattern: PatternID) {
         graph_node_weight_mut(&mut self.graph, state)
             .matches
             .push(pattern);
@@ -85,7 +85,7 @@ impl<C: Eq + Clone> ScopeAutomaton<C> {
         id
     }
 
-    pub(crate) fn drain_constraints(
+    pub(super) fn drain_constraints(
         &mut self,
         state: StateID,
     ) -> impl Iterator<Item = (Option<C>, StateID)> + '_ {
@@ -109,7 +109,7 @@ impl<C: Eq + Clone> ScopeAutomaton<C> {
     /// it exists, to every other child of `state`.
     ///
     /// This will turn the epsilon transition into a FAIL (fallback) transition.
-    pub(crate) fn make_det(&mut self, state: StateID) {
+    pub(super) fn make_det(&mut self, state: StateID) {
         // Change the flag
         let det_flag = &mut graph_node_weight_mut(&mut self.graph, state.0).deterministic;
         if *det_flag {

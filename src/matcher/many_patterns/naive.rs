@@ -1,11 +1,9 @@
 use crate::{
-    matcher::{Match, PatternMatch, PortMatcher, SinglePatternMatcher, VariableNaming},
-    new_api_v04::{
-        constraint::Constraint,
-        predicate::{AssignPredicate, FilterPredicate},
-    },
+    constraint::Constraint,
+    matcher::{Match, PatternMatch, PortMatcher, SinglePatternMatcher},
     pattern::Pattern,
-    Universe,
+    predicate::{AssignPredicate, FilterPredicate},
+    Universe, VariableNaming,
 };
 
 /// A simple matcher for matching multiple patterns.
