@@ -210,9 +210,7 @@ where
         match &self.predicate {
             Predicate::Assign(ap) => {
                 let rhs = ap.check_assign(data, &args(self.arity() - 1)?);
-                let Some(ConstraintLiteral::Variable(lhs)) = &self.args.first() else {
-                    panic!("Invalid constraint: rhs of AssignPredicate is not a variable");
-                };
+                let lhs = self.assigned_variable();
                 rhs.into_iter()
                     .map(|obj| {
                         let mut scope = scope.clone();
