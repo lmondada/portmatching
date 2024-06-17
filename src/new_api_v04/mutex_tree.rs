@@ -47,7 +47,7 @@ where
 ///
 /// A set of constraints are mutually exclusive if for any data input and for
 /// any variable assignent, only one of the constraints is satisfied. All
-/// assign predicates must have the same variable RHS, and a constraint is
+/// assign predicates must have the same variable LHS, and a constraint is
 /// satisfied if one of the variable assignments returned by `check_assign`
 /// corresponds to the assignment in the scope assignment.
 /// In other words, the sets of variable assignments returned by the assign
