@@ -30,6 +30,8 @@ pub trait ArityPredicate: Eq {
 ///
 /// Assign predicates must be of arity N >= 1 and bind the variable passed as its
 /// first argument.
+///
+/// It always holds `Assign < Filter`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Predicate<AP, FP> {
     Assign(AP),

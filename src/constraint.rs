@@ -208,6 +208,11 @@ where
         }
     }
 
+    /// The constraint predicate
+    pub fn predicate(&self) -> &Predicate<AP, FP> {
+        &self.predicate
+    }
+
     /// Return the arity of the constraint.
     pub fn arity(&self) -> usize {
         let arity = self.args.len();
@@ -240,9 +245,9 @@ where
         match &self.predicate {
             Predicate::Assign(ap) => {
                 let rhs = ap.check_assign(data, &args(self.arity() - 1)?);
-                let Some(ConstraintLiteral::Variable(lhs)) = &self.args.first() else {
-                    panic!("Invalid constraint: rhs of AssignPredicate is not a variable");
-                };
+                let lhs = self
+                    .assigned_variable()
+                    .expect("Invalid constraint: No assigned variable in AssignPredicate");
                 rhs.into_iter()
                     .map(|obj| {
                         let mut scope = scope.clone();
@@ -260,6 +265,86 @@ where
                 }
             }
         }
+    }
+
+    /// Return the variable that is assigned by this constraint, if any.
+    ///
+    /// Returns None if the constraint is not an AssignPredicate.
+    pub fn assigned_variable(&self) -> Option<&V> {
+        match &self {
+            &Constraint {
+                predicate: Predicate::Assign(_),
+                args,
+            } => {
+                let Some(ConstraintLiteral::Variable(var)) = args.first() else {
+                    panic!("Invalid constraint: rhs of AssignPredicate is not a variable");
+                };
+                Some(var)
+            }
+            _ => None,
+        }
+    }
+}
+
+impl<V, U, AP, FP> PartialOrd for Constraint<V, U, AP, FP>
+where
+    V: Ord,
+    U: Ord,
+    AP: PartialOrd,
+    FP: PartialOrd,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        self.cmp_key().partial_cmp(&other.cmp_key())
+    }
+}
+
+type CmpKey<'a, V, U, AP, FP> = (
+    Option<&'a ConstraintLiteral<V, U>>,
+    &'a Predicate<AP, FP>,
+    &'a [ConstraintLiteral<V, U>],
+);
+impl<V: Ord, U: Ord, AP, FP> Constraint<V, U, AP, FP> {
+    fn cmp_key(&self) -> CmpKey<V, U, AP, FP> {
+        match &self.predicate {
+            Predicate::Assign(_) => self.assign_key(),
+            Predicate::Filter(_) => self.filter_key(),
+        }
+    }
+    fn assign_key(&self) -> CmpKey<V, U, AP, FP> {
+        (self.args.first(), &self.predicate, &self.args)
+    }
+
+    fn filter_key(&self) -> CmpKey<V, U, AP, FP> {
+        (self.args.iter().max(), &self.predicate, &self.args)
+    }
+}
+
+impl<V, U, AP, FP> Ord for Constraint<V, U, AP, FP>
+where
+    V: Ord,
+    U: Ord,
+    AP: Ord,
+    FP: Ord,
+{
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+impl<V, U, AP, FP> Debug for Constraint<V, U, AP, FP>
+where
+    Predicate<AP, FP>: Debug,
+    ConstraintLiteral<V, U>: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{:?}]", self.predicate)?;
+        let args_str = self
+            .args
+            .iter()
+            .map(|arg| format!("{:?}", arg))
+            .collect_vec();
+        write!(f, "({:?})", args_str.join(", "))?;
+        Ok(())
     }
 }
 
