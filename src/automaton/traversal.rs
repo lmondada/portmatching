@@ -152,13 +152,10 @@ where
 }
 
 /// Check if all the assignments of `var` are distinct
-fn all_mutex_assignments<'s, V, U, S: 's>(
-    scopes: impl Iterator<Item = &'s S> + ExactSizeIterator,
-    var: &V,
-) -> bool
+fn all_mutex_assignments<'s, V, U, S>(scopes: impl ExactSizeIterator<Item = &'s S>, var: &V) -> bool
 where
     U: Eq + Hash,
-    S: VariableScope<V, U>,
+    S: VariableScope<V, U> + 's,
 {
     let scopes = scopes.into_iter();
     let n_scopes = scopes.len();

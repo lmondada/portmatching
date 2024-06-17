@@ -67,23 +67,23 @@ rstest = "0.21.0"
 features = ["proptest", "serde"]
 version = "0.12.0"
 
-[[example]]
-name = "large_graph"
-required-features = ["serde", "datagen"]
+# [[example]]
+# name = "large_graph"
+# required-features = ["serde", "datagen"]
 
-[[example]]
-name = "optimise_graph"
-required-features = ["serde", "datagen"]
+# [[example]]
+# name = "optimise_graph"
+# required-features = ["serde", "datagen"]
 
-[[test]]
-name = "from_testcases"
-required-features = ["serde"]
+# [[test]]
+# name = "from_testcases"
+# required-features = ["serde"]
 
-[[bin]]
-name = "data_generation"
-required-features = ["datagen", "serde"]
+# [[bin]]
+# name = "data_generation"
+# required-features = ["datagen", "serde"]
 
-[[bench]]
-name = "criterion"
-harness = false
-required-features = ["datagen", "serde"]
+# [[bench]]
+# name = "criterion"
+# harness = false
+# required-features = ["datagen", "serde"]

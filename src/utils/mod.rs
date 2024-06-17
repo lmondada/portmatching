@@ -1,12 +1,13 @@
 //! Utility functions.
 
-#[cfg(test)]
-#[cfg(portgraph)]
-pub(crate) mod test;
+// #[cfg(test)]
+// #[cfg(feature = "portgraph")]
+// pub(crate) mod test;
 
-pub(crate) mod collect_min;
-#[cfg(portgraph)]
+// #[cfg(feature = "portgraph")]
+// pub(crate) mod collect_min;
+#[cfg(feature = "portgraph")]
 mod connected_components;
 
-#[cfg(portgraph)]
+#[cfg(feature = "portgraph")]
 pub use connected_components::{connected_components, is_connected};
