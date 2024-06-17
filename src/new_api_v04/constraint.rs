@@ -210,7 +210,9 @@ where
         match &self.predicate {
             Predicate::Assign(ap) => {
                 let rhs = ap.check_assign(data, &args(self.arity() - 1)?);
-                let lhs = self.assigned_variable();
+                let lhs = self
+                    .assigned_variable()
+                    .expect("Invalid constraint: No assigned variable in AssignPredicate");
                 rhs.into_iter()
                     .map(|obj| {
                         let mut scope = scope.clone();
