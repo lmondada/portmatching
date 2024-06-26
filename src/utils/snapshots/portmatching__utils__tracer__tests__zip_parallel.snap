@@ -1,0 +1,13 @@
+---
+source: src/utils/tracer.rs
+assertion_line: 362
+expression: tracer_parallel.dot_string()
+---
+digraph {
+    0 [ label = "State(0)" ]
+    1 [ label = "Terminal" ]
+    3 [ label = "State(1)" ]
+    0 -> 3 [ label = "ExistingEdge(())" ]
+    3 -> 1 [ label = "NewEdge { to: 2, weight: () }" ]
+    0 -> 3 [ label = "ExistingEdge(())" ]
+}

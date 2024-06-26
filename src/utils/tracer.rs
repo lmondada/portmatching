@@ -73,7 +73,7 @@ impl<NodeId, EdgeId, EdgeWeight> Tracer<NodeId, EdgeId, EdgeWeight>
 where
     NodeId: Copy + Eq + Ord,
     EdgeId: Copy + Eq + Ord,
-    EdgeWeight: Eq,
+    EdgeWeight: Eq + Clone,
 {
     /// Create a new tracer for paths starting in `initial_node`.
     pub fn new(initial_node: NodeId) -> Self {
@@ -213,15 +213,28 @@ where
 
         self.trace.reverse();
     }
+}
 
+impl<NodeId, EdgeId, EdgeWeight> Tracer<NodeId, EdgeId, EdgeWeight> {
     #[allow(dead_code)]
-    fn dot_string(&self) -> String
+    pub fn dot_string(&self) -> String
     where
         NodeId: Debug,
         EdgeId: Debug,
         EdgeWeight: Debug,
     {
         format!("{:?}", Dot::new(&self.trace))
+    }
+}
+
+impl<NodeId: Debug, EdgeId: Debug, EdgeWeight: Debug> Debug for Tracer<NodeId, EdgeId, EdgeWeight>
+where
+    NodeId: Debug,
+    EdgeId: Debug,
+    EdgeWeight: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.dot_string())
     }
 }
 
@@ -250,15 +263,15 @@ fn partition_children<N: Eq + Ord, E: Eq>(
         .sorted_by_key(|child| key_of(*child).0)
         .group_by(|child| key_of(*child))
         .into_iter()
-        .map(|(_, indices)| indices.collect_vec())
+        .map(|(_, indices)| indices.unique().collect_vec())
         .collect_vec()
 }
 
-/// Merge the node `merge_from` into `merge_into`, transfering all outgoing edges.
+/// Adds outgoing edges of `merge_from` to `merge_into`.
 ///
-/// Remove all outgoing edges of `merge_from` but not the node itself. The caller
-/// should remove it when appropriate.
-fn merge_nodes<N: Eq, E: Eq>(
+/// Does not remove any edges or vertices to not mess up the toposort traversal.
+/// The caller should remove the `merge_from` node when appropriate.
+fn merge_nodes<N: Eq, E: Eq + Clone>(
     merge_from: NodeIndex,
     merge_into: NodeIndex,
     graph: &mut StableDiGraph<N, E>,
@@ -268,7 +281,7 @@ fn merge_nodes<N: Eq, E: Eq>(
         .map(|e| (e.id(), e.target()))
         .collect_vec();
     for (edge_id, edge_target) in from_out {
-        let edge_weight = graph.remove_edge(edge_id).unwrap();
+        let edge_weight = graph.edge_weight(edge_id).unwrap().clone();
         graph.add_edge(merge_into, edge_target, edge_weight);
     }
 }
@@ -314,6 +327,20 @@ mod tests {
         tracer
     }
 
+    #[fixture]
+    fn tracer_parallel() -> Tracer<usize, (), ()> {
+        // Trace paths starting at 0 (of some graph we don't build)
+        let mut tracer = Tracer::new(0);
+        // Traverse 0 -> 1, then add 1 -> 2
+        let traced_1 = tracer.traverse_edge((), tracer.initial_node(), 1);
+        tracer.add_edge((), traced_1, 2);
+        // Traverse 0 -> 1, then add 1 -> 2 (again)
+        let traced_1 = tracer.traverse_edge((), tracer.initial_node(), 1);
+        tracer.add_edge((), traced_1, 2);
+
+        tracer
+    }
+
     #[rstest]
     fn test_tracer(tracer: Tracer<usize, (), ()>) {
         insta::assert_snapshot!(tracer.dot_string());
@@ -325,5 +352,13 @@ mod tests {
         tracer.zip();
         assert_eq!(tracer.trace.node_count(), 7);
         insta::assert_snapshot!(tracer.dot_string());
+    }
+
+    #[rstest]
+    fn test_zip_parallel(mut tracer_parallel: Tracer<usize, (), ()>) {
+        assert_eq!(tracer_parallel.trace.node_count(), 4);
+        tracer_parallel.zip();
+        assert_eq!(tracer_parallel.trace.node_count(), 3);
+        insta::assert_snapshot!(tracer_parallel.dot_string());
     }
 }
