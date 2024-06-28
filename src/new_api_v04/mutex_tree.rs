@@ -14,9 +14,8 @@
 //! Its interpretation is most easily explained by viewing the tree as a state
 //! automaton, where we say that node `n` is reachable for a given input if
 //!  - `n` is the root, or
-//!  - the parent `p` of `n` is reachable, the constraint on the edge from `p`
-//!    to `n` is satisfied and none of the constraints on the edges between `p`
-//!    and a sibling of `n` that is smaller than `n` are satisfied.
+//!  - the parent `p` of `n` is reachable and `n` is the smallest sibling for 
+//!    which the edge constraint from `p` to the sibling is satisfied.
 //!
 //! Then, a constraint tree encodes a list of constraints C[0], ... C[k] if the
 //! following equivalence holds:
