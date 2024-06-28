@@ -14,7 +14,7 @@ use crate::HashSet;
 /// The particularity of this implemention is that graph mutations during
 /// traversal are supported, as long as node indices are stable. As a tradeoff,
 /// this traversal is not particularly efficient: each call to `next` may take
-/// up to time O(V + E).
+/// up to O(V + E) time.
 ///
 /// ## Supported graph modifications
 ///
