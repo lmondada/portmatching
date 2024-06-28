@@ -7,7 +7,7 @@ use petgraph::{visit::IntoNeighborsDirected, Direction};
 
 use crate::HashSet;
 
-/// Perform a topological sort of a graph, without reference to it.
+/// Perform a topological sort of a graph, without keeping a reference to it.
 ///
 /// This will only traverse the descendants of `root`.
 ///
