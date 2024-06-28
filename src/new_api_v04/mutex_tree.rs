@@ -1,27 +1,41 @@
-//! Express lists of constraints as trees of constraints.
+//! Express logic relations between constraints as trees.
 //!
 //! The idea is to define the semantics of constraints by how they interact
-//! with one another.
+//! with one another. Siblings in the tree model mutually exclusive constraints,
+//! whereas a path from the root is a conjunction of constraints: the grandchildren
+//! of a child thus represent further refinements of the child's constraint.
 //!
-//! A constraint tree is a tree along with the following data and properties:
-//!  - data
-//!     - tree edges are labelled with constraints
-//!     - tree nodes may be labelled with an integer, to be interpreted
-//!       as an index with respect to a list of constraints.
-//!  - properties
-//!     - for any edge with constraint label A, the constraint labels on children
-//!       edges B must be such that B => A.
-//!     - for a node n with index i, with constraints A1, ..., Ak on the edges
-//!       of the path from n to the root, we have
-//!                           C[i] <=> A1 ∧ A2 ∧ ... ∧ Ak
-//!       where C[i] is the i-th constraint in the list of constraints associated
-//!       with the tree.
-//!     - index labels in nodes are unique.
+//! More concretely, a constraint tree is a tree along with the following data:
+//!   - tree edges are labelled with constraints
+//!   - tree leaves may be labelled with one or more integers, to be interpreted as
+//!     indices with respect to a list of constraints.
+//!   - an ordering of the children for any node.
+//!
+//! Its interpretation is most easily explained by viewing the tree as a state
+//! automaton, where we say that node `n` is reachable for a given input if
+//!  - `n` is the root, or
+//!  - the parent `p` of `n` is reachable, the constraint on the edge from `p`
+//!    to `n` is satisfied and none of the constraints on the edges between `p`
+//!    and a sibling of `n` that is smaller than `n` are satisfied.
+//!
+//! Then, a constraint tree encodes a list of constraints C[0], ... C[k] if the
+//! following equivalence holds:
+//!      C[i] is satisfied on input D
+//!          <=>
+//!      a state with label i in the constraint tree is reachable on input D.
+//!
+//! Note that siblings are mutually exclusive by definition: constraints A, B, C
+//! on children of a node are interpreted as A, B ∧ ¬A, and C ∧ ¬A ∧ ¬B
+//! respectively.
 
-/// A trait to define the semantics of predicate enums.
+use std::fmt;
+
+use thiserror::Error;
+
+/// Define the semantics of constraints using Constraint trees.
 ///
-/// The client must provide a way to decompose a list of (arbitrary) constraints
-/// into a mutually exclusive tree of predicates. In the worst case, this is
+/// Provide a way to decompose a list of (arbitrary) constraints
+/// into a tree of constraints. In the worst case, this is
 /// always possible by choosing a single constraint and returning the tree with
 /// one root and one leaf node, with the single edge labelled with the chosen
 /// constraint.
@@ -31,36 +45,53 @@
 /// processes the "smallest" constraints first, according to some total order
 /// of the constraints. This will ensure a maximum overlap between different
 /// patterns in the final pattern matching data structure.
-pub trait ToMutuallyExclusiveTree
+pub trait ToConstraintsTree
 where
     Self: Sized,
 {
-    fn to_mutually_exclusive_tree(preds: Vec<Self>) -> MutuallyExclusiveTree<Self>;
+    /// Organise a list of constraints into a tree of constraints.
+    ///
+    /// Node indices must be in [0, constraints.len()). Not all indices must be
+    /// present in the tree. If so the tree is interpreted as the constraint tree
+    /// of the subset of constraints present in the tree.
+    fn to_constraints_tree(constraints: Vec<Self>) -> MutuallyExclusiveTree<Self>;
 }
 
-/// A constraint tree with mutually exclusive constraints on root.
+/// The constraint tree datastructure expected by `ToConstraintsTree`.
 ///
-/// A constraint tree is a valid mutually exclusive tree if the following
-/// additional properties hold:
-///  - all constraints on the edges outgoing from the root are mutually exclusive,
-///  - there is at least one vertex with an index label.
+/// The constraints at the root are interpreted as mutually exclusive, i.e.
+/// constraints A, B, C on children of root are interpreted as A, B ∧ ¬A, and
+/// C ∧ ¬A ∧ ¬B respectively.
+/// All constraints will be evaluated on the same set of bindings, with a binding
+/// provided for all index keys used by the constraints.
 ///
-/// A set of constraints are mutually exclusive if for any data input and for
-/// any variable assignent, only one of the constraints is satisfied. All
-/// assign predicates must have the same variable LHS, and a constraint is
-/// satisfied if one of the variable assignments returned by `check_assign`
-/// corresponds to the assignment in the scope assignment.
-/// In other words, the sets of variable assignments returned by the assign
-/// predicates must be disjoint.
+/// If a index label appears at least once, then it is assumed that the
+/// constraint is satisfied exactly when a labelled state is reacheable.
+#[derive(Clone, Debug)]
 pub struct MutuallyExclusiveTree<P> {
     nodes: Vec<MutExTreeNode<P>>,
 }
 
 impl<P> MutuallyExclusiveTree<P> {
-    /// Construct a new mutually exclusive tree with a root node.
+    /// Construct a new constraint tree with a root node.
     pub fn new() -> Self {
         let root = MutExTreeNode::new();
         Self { nodes: vec![root] }
+    }
+
+    /// Construct a new constraint tree that has depth one.
+    ///
+    /// Each element in `children` is a child of the root, with constraint
+    /// indices given by the second element of the tuple.
+    pub fn with_children(children: impl IntoIterator<Item = (P, Vec<usize>)>) -> Self {
+        let mut tree = Self::new();
+        for (child, indices) in children {
+            let child_index = tree.add_child(tree.root(), child);
+            for index in indices {
+                tree.add_constraint_index(child_index, index).unwrap();
+            }
+        }
+        tree
     }
 
     /// Get the index of the root node.
@@ -68,15 +99,30 @@ impl<P> MutuallyExclusiveTree<P> {
         0
     }
 
+    /// Get the indices of the constraints at a node.
+    pub fn constraint_indices(&self, node: usize) -> &[usize] {
+        &self.nodes[node].constraint_indices
+    }
+
+    /// The set of constraints at node `node`.
+    pub fn children(&self, node: usize) -> impl Iterator<Item = (usize, &P)> {
+        self.nodes[node]
+            .children
+            .iter()
+            .map(|child| (child.node_index, &child.predicate))
+    }
+
     /// Add children to a node in the tree.
-    pub fn add_children(&mut self, node: usize, predicates: impl IntoIterator<Item = P>) {
-        for p in predicates.into_iter() {
-            self.add_child(node, p);
-        }
+    pub fn add_children<'a>(
+        &'a mut self,
+        node: usize,
+        predicates: impl IntoIterator<Item = P> + 'a,
+    ) -> impl Iterator<Item = usize> + 'a {
+        predicates.into_iter().map(move |p| self.add_child(node, p))
     }
 
     /// Add a child to a node in the tree.
-    pub fn add_child(&mut self, node: usize, predicate: P) {
+    pub fn add_child(&mut self, node: usize, predicate: P) -> usize {
         if self.nodes.len() <= node {
             panic!("Cannot add child to node that does not exist");
         }
@@ -86,11 +132,30 @@ impl<P> MutuallyExclusiveTree<P> {
             predicate,
             node_index: child_index,
         });
+        child_index
     }
 
     /// Set the constraint index for a node in the tree.
-    pub fn set_constraint_index(&mut self, node: usize, index: usize) {
-        self.nodes[node].constraint_index = Some(index);
+    pub fn add_constraint_index(
+        &mut self,
+        node: usize,
+        index: usize,
+    ) -> Result<(), IndexOnNonLeaf> {
+        if self.children(node).next().is_some() {
+            return Err(IndexOnNonLeaf);
+        }
+        self.nodes[node].constraint_indices.push(index);
+        Ok(())
+    }
+}
+
+/// Constraint indices may not appear on non-leaf nodes.
+#[derive(Debug, Clone, Error)]
+pub struct IndexOnNonLeaf;
+
+impl fmt::Display for IndexOnNonLeaf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Cannot add constraint index to non-leaf node")
     }
 }
 
@@ -103,7 +168,7 @@ impl<P> Default for MutuallyExclusiveTree<P> {
 impl<P> MutExTreeNode<P> {
     fn new() -> Self {
         Self {
-            constraint_index: None,
+            constraint_indices: vec![],
             children: vec![],
         }
     }
@@ -111,11 +176,11 @@ impl<P> MutExTreeNode<P> {
 
 /// A node in a mutually exclusive tree.
 ///
-/// The `constraint_index` is the index of the constraint in the list of
-/// constraints associated with the tree.
+/// The `constraint_indices` is the (possibly empty) list of the indices
+/// in the list of constraints associated with the tree.
 #[derive(Clone, Debug)]
 struct MutExTreeNode<P> {
-    constraint_index: Option<usize>,
+    constraint_indices: Vec<usize>,
     children: Vec<MutExTreeNodeChild<P>>,
 }
 
@@ -124,8 +189,6 @@ struct MutExTreeNode<P> {
 /// Pointing is done using an index into the list of nodes in the tree.
 #[derive(Clone, Debug)]
 struct MutExTreeNodeChild<P> {
-    #[allow(dead_code)]
     predicate: P,
-    #[allow(dead_code)]
     node_index: usize,
 }
