@@ -121,6 +121,8 @@ impl<P> MutuallyExclusiveTree<P> {
     }
 
     /// Add a child to a node in the tree.
+    ///
+    /// Returns the index of the inserted node.
     pub fn add_child(&mut self, node: usize, predicate: P) -> usize {
         if self.nodes.len() <= node {
             panic!("Cannot add child to node that does not exist");
