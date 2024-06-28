@@ -1,9 +1,9 @@
-mod builders;
+mod builder;
 mod modify;
 mod traversal;
 mod view;
 
-pub use builders::LineBuilder;
+pub use builder::LineBuilder;
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::Graph;
