@@ -4,8 +4,12 @@
 pub(crate) mod test;
 
 mod connected_components;
+mod toposort;
+mod tracer;
+
 pub use connected_components::{connected_components, is_connected};
 use portgraph::{LinkView, NodeIndex, SecondaryMap};
+pub(crate) use toposort::online_toposort;
 
 use crate::{patterns::UnweightedEdge, WeightedGraphRef};
 
