@@ -7,6 +7,7 @@ pub(crate) mod mark_last;
 // pub mod test;
 mod toposort;
 pub(crate) mod tracer;
+pub(crate) mod unique_stack;
 
 use itertools::Itertools;
 pub(crate) use mark_last::mark_last;
@@ -16,6 +17,7 @@ pub(crate) use mark_last::mark_last;
 // pub use test::gen_portgraph_connected;
 pub(crate) use toposort::{online_toposort, OnlineToposort};
 pub(crate) use tracer::{TracedNode, Tracer};
+pub(crate) use unique_stack::UniqueStack;
 
 /// Sort a vector and return a vector of pairs of the original value and its position.
 #[allow(dead_code)]

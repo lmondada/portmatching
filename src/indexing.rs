@@ -6,7 +6,7 @@
 //! The bindings are stored and retrieved in a map-like struct that implements
 //! the [IndexMap] trait.
 
-use crate::HashMap;
+use crate::{utils::UniqueStack, HashMap};
 use std::{fmt::Debug, hash::Hash};
 use thiserror::Error;
 
@@ -73,38 +73,45 @@ pub trait IndexMap<K, V>: Default + Clone {
     /// Return all possible binding maps.
     fn bind_with_scheme<D>(
         self,
-        keys: Vec<K>,
+        keys: impl IntoIterator<Item = K>,
         data: &D,
         scheme: &impl IndexingScheme<D, V, Key = K>,
     ) -> Result<Vec<Self>, BindVariableError>
     where
-        K: Copy,
+        K: IndexKey,
         V: Clone,
     {
-        if keys.is_empty() {
-            return Ok(vec![self]);
-        }
+        // It's important that we process the keys first-in first-out, to ensure
+        // progress (otherwise we might be processing the same key over and over
+        // again).
+        let keys: UniqueStack<_> = keys.into_iter().collect();
         let mut curr_bindings = vec![(keys, self)];
         let mut final_bindings = Vec::new();
         while let Some((mut missing_keys, known_bindings)) = curr_bindings.pop() {
-            let key = *missing_keys.last().unwrap();
-            let binding_options = scheme.valid_bindings(&key, &known_bindings, data);
-            match binding_options {
-                BindingOptions::ValidBindings(values) => {
-                    missing_keys.pop();
-                    for value in values {
-                        let mut new_bindings = known_bindings.clone();
-                        new_bindings.bind(key, value)?;
-                        if missing_keys.is_empty() {
-                            final_bindings.push(new_bindings);
-                        } else {
+            let Some(&key) = missing_keys.top() else {
+                // All keys have been bound, we can return the current binding
+                final_bindings.push(known_bindings);
+                continue;
+            };
+            if known_bindings.get(&key).is_some() {
+                // Already bound
+                missing_keys.pop();
+                curr_bindings.push((missing_keys, known_bindings));
+            } else {
+                let binding_options = scheme.valid_bindings(&key, &known_bindings, data);
+                match binding_options {
+                    BindingOptions::ValidBindings(values) => {
+                        missing_keys.pop();
+                        for value in values {
+                            let mut new_bindings = known_bindings.clone();
+                            new_bindings.bind(key, value)?;
                             curr_bindings.push((missing_keys.clone(), new_bindings));
                         }
                     }
-                }
-                BindingOptions::MissingIndexKeys(new_missing_keys) => {
-                    missing_keys.extend(new_missing_keys);
-                    curr_bindings.push((missing_keys, known_bindings));
+                    BindingOptions::MissingIndexKeys(new_missing_keys) => {
+                        missing_keys.extend(new_missing_keys);
+                        curr_bindings.push((missing_keys, known_bindings));
+                    }
                 }
             }
         }
