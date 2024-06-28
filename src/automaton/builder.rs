@@ -1,577 +1,343 @@
-use std::{
-    collections::{BTreeSet, VecDeque},
-    hash::{BuildHasher, Hash},
-};
+use std::mem;
 
-use itertools::{Either, Itertools};
+use itertools::Itertools;
+use petgraph::graph::NodeIndex;
 
 use crate::{
-    automaton::{ScopeAutomaton, StateID},
-    patterns::{IterationStatus, LinePattern, PredicatesIter},
-    predicate::{are_compatible_predicates, EdgePredicate, PredicateCompatibility, Symbol},
-    EdgeProperty, HashMap, HashSet, NodeProperty, Universe,
+    automaton::{ConstraintAutomaton, StateID},
+    constraint::Constraint,
+    mutex_tree::ToConstraintsTree,
+    PatternID,
 };
 
-pub struct LineBuilder<U: Universe, PNode, PEdge> {
-    patterns: Vec<LinePattern<U, PNode, PEdge>>,
-    // Map from ({pattern_id} x line_nb) to automaton state
-    det_states: HashMap<(BTreeSet<usize>, usize), StateID>,
+use super::TransitionID;
+
+/// Create constraint automata from lists of patterns, given by lists of
+/// constraints.
+pub struct AutomatonBuilder<C, I> {
+    /// A vector of patterns, each expressed as a vector of constraints.
+    patterns: Vec<Vec<C>>,
+    /// The matcher being built
+    matcher: ConstraintAutomaton<C, I>,
 }
 
-impl<U: Universe, PNode, PEdge> LineBuilder<U, PNode, PEdge> {
-    #[allow(unused)]
-    pub fn new() -> Self {
+impl<C: Eq + Clone, I> AutomatonBuilder<C, I> {
+    /// Construct an empty automaton builder.
+    pub fn new() -> Self
+    where
+        I: Default,
+    {
         Self::default()
     }
 
-    pub fn from_patterns(patterns: Vec<LinePattern<U, PNode, PEdge>>) -> Self {
+    /// Construct an automaton builder from a list of patterns, given by lists of
+    /// constraints.
+    ///
+    /// Use `I::default()` as the indexing scheme.
+    pub fn from_constraints(patterns: Vec<Vec<C>>) -> Self
+    where
+        I: Default,
+    {
         Self {
             patterns,
-            det_states: HashMap::default(),
+            matcher: ConstraintAutomaton::new(),
         }
     }
 
-    #[allow(unused)]
-    pub fn add_pattern(&mut self, pattern: LinePattern<U, PNode, PEdge>) {
+    /// Construct an automaton builder from a list of patterns with a custom
+    /// indexing scheme.
+    pub fn from_constraints_with_index_scheme(patterns: Vec<Vec<C>>, host_indexing: I) -> Self {
+        Self {
+            patterns,
+            matcher: ConstraintAutomaton::with_indexing_scheme(host_indexing),
+        }
+    }
+
+    /// Add a pattern to the automaton builder.
+    pub fn add_pattern(&mut self, pattern: Vec<C>) {
         self.patterns.push(pattern);
     }
-
-    pub fn build(mut self) -> ScopeAutomaton<PNode, PEdge>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-        PEdge::OffsetID: Eq + Hash,
-    {
-        let mut matcher = ScopeAutomaton::<PNode, PEdge>::new();
-
-        // Convert patterns to pattern in construction
-        let patterns = self
-            .patterns
-            .iter()
-            .enumerate()
-            .map(|(i, p)| PatternInConstruction::new(p.edge_predicates(), i))
-            .collect::<Vec<_>>();
-
-        let mut to_insert = VecDeque::new();
-        to_insert.push_back((matcher.root(), patterns));
-        while let Some((state, patterns)) = to_insert.pop_front() {
-            // Filter out done patterns
-            let (patterns_stages, done_ids): (Vec<_>, Vec<_>) =
-                patterns.into_iter().partition_map(|mut p| {
-                    let stage = p.edges.traversal_stage();
-                    match stage {
-                        IterationStatus::Finished => Either::Right(p.pattern_id),
-                        _ => Either::Left((p, stage)),
-                    }
-                });
-            // Insert flags for done patterns
-            for p in done_ids {
-                matcher.add_match(state, p.into());
-            }
-            let (patterns, stages): (Vec<_>, Vec<_>) = patterns_stages.into_iter().unzip();
-            // The current stage of the iteration is the minimum of all stages
-            let Some(&current_stage) = stages.iter().min() else {
-                continue;
-            };
-            // Compute the next transitions
-            let transitions = if matches!(current_stage, IterationStatus::LeftOver(_)) {
-                // In the leftover stage, only use det transitions
-                // Store predicates as a map (stage -> predicates)
-                let stage_patterns = stages
-                    .into_iter()
-                    .map(|stage| match stage {
-                        IterationStatus::LeftOver(i) => i,
-                        _ => unreachable!("finished was filtered out and skeleton is smaller"),
-                    })
-                    .zip(patterns)
-                    .into_grouping_map()
-                    .collect();
-                self.only_det_predicates(state, stage_patterns)
-            } else {
-                self.get_compatible_predicates(state, patterns)
-            };
-            let new_children = self.add_transitions(&mut matcher, &transitions);
-
-            // Enqueue new states
-            for (new_state, mut new_transition) in new_children.into_iter().zip(transitions) {
-                if let Some(new_state) = new_state {
-                    if let Some(stage) = leftover_stage(&mut new_transition.patterns) {
-                        // Insert into our catalog of deterministic states
-                        let pattern_ids = new_transition
-                            .patterns
-                            .iter()
-                            .map(|p| p.pattern_id)
-                            .collect();
-                        self.det_states
-                            .entry((pattern_ids, stage))
-                            .or_insert(new_state);
-                    }
-                    to_insert.push_back((new_state, new_transition.patterns));
-                }
-            }
-        }
-        matcher
-    }
-
-    fn add_transitions(
-        &self,
-        matcher: &mut ScopeAutomaton<PNode, PEdge>,
-        transitions: &[TransitionInConstruction<'_, U, PNode, PEdge>],
-    ) -> Vec<Option<StateID>>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-        PEdge::OffsetID: Eq,
-    {
-        let mut new_states = vec![None; transitions.len()];
-        // Enumerate them so that we can restore their ordering
-        let transitions = transitions.iter().enumerate();
-
-        for (source, transitions) in partition_by(transitions, |(_, t)| t.source) {
-            let (inds, targets, preds, scopes): (Vec<_>, Vec<_>, Vec<_>, Vec<_>) = transitions
-                .into_iter()
-                .map(|(i, t)| (i, t.target, t.pred.clone(), t.scope()))
-                .multiunzip();
-
-            // make source non-deterministic if necessary
-            match are_compatible_predicates(&preds) {
-                PredicateCompatibility::Deterministic => {}
-                PredicateCompatibility::NonDeterministic => matcher.make_non_det(source),
-                PredicateCompatibility::Incompatible => {
-                    panic!("trying to insert non-compatible transitions");
-                }
-            }
-
-            let added_states = matcher.set_children(source, preds, &targets, scopes);
-
-            for (i, new_state) in inds.into_iter().zip(added_states) {
-                new_states[i] = new_state;
-            }
-        }
-
-        new_states
-    }
-
-    /// The next predicate of each pattern
-    ///
-    /// Tries to consume the first predicate of each pattern. If there is a mix
-    /// of deterministic and non-deterministic transitions, then prioritise
-    /// non-deterministic ones and bundle all deterministc ones behind a single
-    /// True transition.
-    fn get_compatible_predicates<'a>(
-        &self,
-        source: StateID,
-        patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-        PEdge::OffsetID: Hash,
-    {
-        let mut patterns = patterns
-            .into_iter()
-            .map(|mut p| (p.edges.peek().expect("Not finished").transition_type(), p))
-            .into_group_map();
-        let nondet_patterns = patterns.remove(&PredicateCompatibility::NonDeterministic);
-        let det_patterns = patterns.remove(&PredicateCompatibility::Deterministic);
-        debug_assert!(patterns.is_empty());
-
-        let mut transitions = Vec::new();
-        if let Some(patterns) = nondet_patterns {
-            transitions.append(&mut create_transitions(
-                source,
-                patterns
-                    .into_iter()
-                    .map(|mut p| (p.next_edge().expect("Not finished"), p)),
-            ));
-        }
-        if let Some(patterns) = det_patterns {
-            if transitions.is_empty() {
-                // No non-det, so we can just add all deterministic transitions
-                transitions.append(&mut create_transitions(
-                    source,
-                    patterns
-                        .into_iter()
-                        .map(|mut p| (p.next_edge().expect("Not finished"), p)),
-                ));
-            } else {
-                // Add a single True transition, and put all det transitions there
-                transitions.push(TransitionInConstruction {
-                    source,
-                    target: None,
-                    pred: EdgePredicate::True,
-                    patterns,
-                })
-            }
-        }
-        transitions
-    }
-
-    /// Force deterministic transitions
-    ///
-    /// Unlike other transition functions, this does the patterns in the children
-    /// states do not necessary form a partition: patterns might be cloned up
-    /// to `n` times, yielding an exponential overhead if this is called repeatedly.
-    fn only_det_predicates<'a, H: BuildHasher>(
-        &self,
-        source: StateID,
-        mut patterns: std::collections::HashMap<
-            usize,
-            Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
-            H,
-        >,
-    ) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-        PEdge::OffsetID: Hash,
-    {
-        // Find the min stage
-        let Some(&min_stage) = patterns.keys().min() else {
-            return Vec::new();
-        };
-        // Split patterns between min stage and other stages
-        let min_patterns = patterns.remove(&min_stage).unwrap();
-        let mut other_patterns = patterns.into_values().flatten().collect_vec();
-
-        // Introduce the transitions as normal for the minimal stage
-        // We need to be careful about the "scope" of the patterns
-        // If the scope is smaller than the total scope, then we need to add
-        // a child node to handle the smaller scope.
-        let min_scopes = min_patterns.iter().map(|p| p.scope.clone()).collect_vec();
-        let scope = min_scopes.iter().max_by_key(|s| s.len()).unwrap();
-        let (mut in_scope_patterns, mut out_scope_patterns): (Vec<_>, Vec<_>) = min_patterns
-            .iter()
-            .cloned()
-            .partition(|p| scope.is_superset(&p.scope));
-        if !out_scope_patterns.is_empty() {
-            // we need to split the predicates into two halves, because
-            // the scopes do not have a join
-            in_scope_patterns.extend(other_patterns.iter().cloned());
-            out_scope_patterns.extend(other_patterns.iter().cloned());
-            return vec![
-                TransitionInConstruction {
-                    source,
-                    target: None,
-                    pred: EdgePredicate::True,
-                    patterns: in_scope_patterns,
-                },
-                TransitionInConstruction {
-                    source,
-                    target: None,
-                    pred: EdgePredicate::True,
-                    patterns: out_scope_patterns,
-                },
-            ];
-        }
-        // We handle the predicates with maximal scope
-        let min_predicates = in_scope_patterns
-            .iter_mut()
-            .map(|p| p.next_edge().expect("Not finished"))
-            .collect_vec();
-        let mut transitions =
-            create_transitions(source, min_predicates.into_iter().zip(in_scope_patterns));
-        // Then add all other patterns to each possible transition
-        for t in &mut transitions {
-            t.patterns.append(&mut other_patterns.clone());
-        }
-
-        // Finally, we add a Fail transition to all other stages together
-        // Also add patterns with smaller scope
-        other_patterns.extend(
-            min_patterns
-                .into_iter()
-                // The scope is contained, so just check the size
-                .filter(|p| p.scope.len() < scope.len()),
-        );
-        if !other_patterns.is_empty() {
-            let next_state = self.try_reuse_det_state(&mut other_patterns);
-            transitions.push(TransitionInConstruction {
-                source,
-                target: next_state,
-                pred: EdgePredicate::Fail,
-                patterns: other_patterns,
-            });
-        }
-        transitions
-    }
-
-    /// Find out whether a state that we can reuse exists
-    fn try_reuse_det_state(
-        &self,
-        patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge>],
-    ) -> Option<StateID>
-    where
-        PNode: NodeProperty,
-        PEdge: EdgeProperty,
-    {
-        let Some(stage) = leftover_stage(patterns) else {
-            panic!("Can only reuse states in the LeftOver stage")
-        };
-        let pattern_ids = patterns.iter().map(|p| p.pattern_id).collect();
-        self.det_states.get(&(pattern_ids, stage)).copied()
-    }
 }
 
-fn leftover_stage<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty>(
-    patterns: &mut [PatternInConstruction<'_, U, PNode, PEdge>],
-) -> Option<usize> {
-    patterns
-        .iter_mut()
-        .map(|p| {
-            if let IterationStatus::LeftOver(i) = p.edges.traversal_stage() {
-                Some(i)
-            } else {
-                None
-            }
-        })
-        .min()
-        .flatten()
-}
+type Automaton<K, P, I> = ConstraintAutomaton<Constraint<K, P>, I>;
 
-fn create_transitions<'a, U, PNode, PEdge>(
-    source: StateID,
-    iter: impl IntoIterator<
-        Item = (
-            EdgePredicate<PNode, PEdge, PEdge::OffsetID>,
-            PatternInConstruction<'a, U, PNode, PEdge>,
-        ),
-    >,
-) -> Vec<TransitionInConstruction<'a, U, PNode, PEdge>>
+impl<K, P, I> AutomatonBuilder<Constraint<K, P>, I>
 where
-    U: Universe,
-    PNode: NodeProperty,
-    PEdge: EdgeProperty,
-    PEdge::OffsetID: Hash,
+    Constraint<K, P>: Eq + Clone + ToConstraintsTree,
 {
-    iter.into_iter()
-        .into_group_map()
-        .into_iter()
-        .map(|(pred, patterns)| TransitionInConstruction {
-            source,
-            target: None,
-            pred,
-            patterns,
-        })
-        .collect()
-}
+    /// Construct the automaton.
+    ///
+    /// The returned automaton will be able to match `self.patterns` and will
+    /// respect the automaton invariants: at every state and for any input, the transitions are mutually exclusive
+    /// or an epsilon transition.
+    ///
+    /// The `make_det` predicate specifies the heuristic used to determine whether
+    /// to turn a state into a deterministic one.
+    pub fn build(
+        mut self,
+        mut make_det: impl for<'c> FnMut(&[&'c Constraint<K, P>]) -> bool,
+    ) -> (Automaton<K, P, I>, Vec<PatternID>) {
+        // Construct a prefix tree by adding all constraints non-deterministically
+        let pattern_ids = mem::take(&mut self.patterns)
+            .into_iter()
+            .enumerate()
+            .map(|(id, constraints)| {
+                let id = PatternID(id);
+                self.matcher.add_pattern(constraints, id);
+                id
+            })
+            .collect_vec();
 
-#[derive(Clone)]
-struct PatternInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
-    /// Predicates of the pattern yet to be inserted
-    edges: PredicatesIter<'a, U, PNode, PEdge>,
-    /// Pattern ID
-    pattern_id: usize,
-    /// The scope required to interpret the predicates
-    /// This is initially empty, but is updated as predicates are consumed
-    scope: HashSet<Symbol>,
-}
+        // Traverse the prefix tree from root to leaves and do two things:
+        // 1. Make the mutually exclusivity invariant hold:
+        //    at every node for any input, at most one constraint may be satisfied
+        // 2. Turn some of the states into deterministic transitions, according to
+        //    `make_det`
 
-struct TransitionInConstruction<'a, U: Universe, PNode, PEdge: EdgeProperty> {
-    source: StateID,
-    target: Option<StateID>,
-    pred: EdgePredicate<PNode, PEdge, PEdge::OffsetID>,
-    patterns: Vec<PatternInConstruction<'a, U, PNode, PEdge>>,
-}
+        // With this `toposort` we are allowed to add vertices and edges
+        let mut traverser = self.matcher.toposort();
+        while let Some(state) = traverser.next(&self.matcher) {
+            // Make the mutually exclusivity invariant hold
+            self.make_mutex(state);
+            // Turn some of the states into deterministic transitions, according to
+            // `make_det`
+            let constraints = self.matcher.constraints(state).collect_vec();
+            if make_det(&constraints) {
+                self.matcher.make_det(state);
+            }
+        }
+        (self.matcher, pattern_ids)
+    }
 
-impl<'a, U: Universe, PNode, PEdge: EdgeProperty> TransitionInConstruction<'a, U, PNode, PEdge> {
-    fn scope(&self) -> HashSet<Symbol> {
-        self.patterns
+    /// Turn outgoing constraints at `state` into a mutually exclusive set.
+    ///
+    /// Use `ToMutuallyExclusiveTree` to turn the constraints into a mutually
+    /// exclusive tree, which is inserted in place of `state`.
+    ///
+    /// This may insert epsilon transitions, i.e. edges with no associated
+    /// constraint. These will always be last in the constraint order.
+    fn make_mutex(&mut self, state: StateID) {
+        assert!(!self.matcher.is_deterministic(state));
+
+        if !self.matcher.constraints(state).any(|_| true) {
+            // There are no constraints, already in a deterministic state
+            return;
+        }
+        // Disconnect all children
+        let constraints_children = self.matcher.drain_constraints(state).collect_vec();
+        let old_fail_state = constraints_children
             .iter()
-            .flat_map(|p| p.scope.iter().copied())
-            .collect()
+            .find_map(|(cons, child)| cons.is_none().then_some(*child));
+
+        // Filter out None constraint
+        let (constraints, children): (Vec<_>, Vec<_>) = constraints_children
+            .into_iter()
+            .filter_map(|(cons, child)| Some((cons?, child)))
+            .unzip();
+
+        // Organise constraints into a tree of mutually exclusive constraints
+        let mutex_tree = Constraint::to_constraints_tree(constraints.clone());
+        let mut added_constraints = vec![false; constraints.len()];
+
+        // Traverse the mutex tree, making sure to
+        //  - add new state to the matcher as we go
+        //  - keep track of the matcher state corresponding to tree states
+        //  - add edges to children when the constraint index is set
+        let mut curr_states = vec![(mutex_tree.root(), state)];
+        while let Some((tree_state, matcher_state)) = curr_states.pop() {
+            for (child_tree_state, c) in mutex_tree.children(tree_state) {
+                let indices = mutex_tree.constraint_indices(child_tree_state);
+                for &index in indices {
+                    added_constraints[index] = true;
+                }
+                // It is always safe to add transitions in `make_mutex` without
+                // tracing, since we only add edges to states that we just created
+                // or drained all transitions from
+                if !indices.is_empty() {
+                    self.matcher.append_edge_cascade(
+                        matcher_state,
+                        indices.iter().map(|&ind| children[ind]),
+                        Some(c.clone()),
+                    );
+                } else {
+                    let child_matcher_state =
+                        self.matcher.add_transition(matcher_state, Some(c.clone()));
+                    curr_states.push((child_tree_state, child_matcher_state));
+                }
+            }
+        }
+
+        // All constraints that were not present in the mutex tree are added as
+        // children of an epsilon transition at `state`.
+        let not_added = (0..constraints.len())
+            .filter(|&i| !added_constraints[i])
+            .collect_vec();
+
+        // Add/hide any constraints that were not added under a fail transition
+        if !not_added.is_empty() {
+            let fail_state = self.matcher.create_fail_state(state);
+            // Add edges to children
+            for i in not_added {
+                self.matcher
+                    .append_edge(fail_state, children[i], Some(constraints[i].clone()));
+            }
+        }
+
+        // And finally, restore original fail state
+        if let Some(old_fail_state) = old_fail_state {
+            self.matcher.restore_fail_state(state, old_fail_state);
+        }
     }
 }
 
-impl<'a, U: Universe, PNode: Clone, PEdge: EdgeProperty>
-    PatternInConstruction<'a, U, PNode, PEdge>
-{
-    fn new(edges: PredicatesIter<'a, U, PNode, PEdge>, pattern_id: usize) -> Self {
-        Self {
-            edges,
-            pattern_id,
-            scope: [Symbol::root()].into_iter().collect(),
-        }
+// Small, private utils functions
+impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
+    /// Add a new fail state.
+    ///
+    /// Recursively traverse existing fail transitions until a new one can
+    /// be created.
+    fn create_fail_state(&mut self, state: StateID) -> StateID {
+        let last_fail_state = self.find_last_fail_state(state);
+        self.add_transition(last_fail_state, None)
     }
 
-    fn next_edge(&mut self) -> Option<EdgePredicate<PNode, PEdge, PEdge::OffsetID>>
-    where
-        PNode: NodeProperty,
-    {
-        let edge = self.edges.next()?;
-        if let EdgePredicate::LinkNewNode { new_node, .. } = edge {
-            self.scope.insert(new_node);
+    /// Restore the original fail state.
+    ///
+    /// The same as `create_fail_state`, but linking to `old_fail_state` instead
+    /// of creating a new state.
+    fn restore_fail_state(&mut self, state: StateID, old_fail_state: StateID) {
+        let last_fail_state = self.find_last_fail_state(state);
+        self.append_edge(last_fail_state, old_fail_state, None);
+    }
+
+    fn find_last_fail_state(&mut self, mut state: StateID) -> StateID {
+        loop {
+            if let Some(transition) = self.find_fail_transition(state) {
+                // Recurse down the Fail-transition chain
+                state = self.next_state(transition);
+            } else {
+                // Found a `state` with no Fail transition!
+                break state;
+            }
         }
-        Some(edge)
     }
 }
 
-impl<U: Universe, PNode, PEdge> Default for LineBuilder<U, PNode, PEdge> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TracedStateID {
+    state: StateID,
+    node: NodeIndex,
+}
+
+impl From<TracedStateID> for StateID {
+    fn from(state: TracedStateID) -> Self {
+        state.state
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TracedTransitionID {
+    transition: TransitionID,
+    parent: NodeIndex,
+}
+
+impl From<TracedTransitionID> for TransitionID {
+    fn from(transition: TracedTransitionID) -> Self {
+        transition.transition
+    }
+}
+
+impl<C, I: Default> Default for AutomatonBuilder<C, I> {
     fn default() -> Self {
         Self {
             patterns: Vec::new(),
-            det_states: HashMap::default(),
+            matcher: ConstraintAutomaton::new(),
         }
     }
 }
 
-impl<U: Universe, PNode, PEdge> FromIterator<LinePattern<U, PNode, PEdge>>
-    for LineBuilder<U, PNode, PEdge>
-{
-    fn from_iter<T: IntoIterator<Item = LinePattern<U, PNode, PEdge>>>(iter: T) -> Self {
+impl<C, I: Default> FromIterator<Vec<C>> for AutomatonBuilder<C, I> {
+    fn from_iter<T: IntoIterator<Item = Vec<C>>>(iter: T) -> Self {
         Self {
             patterns: iter.into_iter().collect(),
-            det_states: HashMap::default(),
+            matcher: ConstraintAutomaton::new(),
         }
     }
-}
-
-fn partition_by<V, U, F>(iter: impl IntoIterator<Item = V>, f: F) -> HashMap<U, Vec<V>>
-where
-    U: Eq + Hash,
-    F: for<'a> Fn(&'a mut V) -> U,
-{
-    let mut partitions = HashMap::default();
-    for mut v in iter {
-        let u = f(&mut v);
-        partitions.entry(u).or_insert_with(Vec::new).push(v);
-    }
-    partitions
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{patterns::LinePattern, EdgeProperty};
+    use crate::{constraint::tests::TestConstraint, mutex_tree::MutuallyExclusiveTree};
 
-    use super::LineBuilder;
+    use super::*;
 
-    impl EdgeProperty for usize {
-        type OffsetID = usize;
-
-        fn reverse(&self) -> Option<Self> {
-            Some(*self)
+    // Dummy ToMutuallyExclusiveTree implementation for TestConstraint
+    impl ToConstraintsTree for TestConstraint {
+        fn to_constraints_tree(preds: Vec<Self>) -> MutuallyExclusiveTree<Self> {
+            // Only process the first two smallest constraints
+            let (inds, preds): (Vec<_>, Vec<_>) = preds
+                .into_iter()
+                .enumerate()
+                .sorted_by(|(_, p1), (_, p2)| p1.cmp(p2))
+                .unzip();
+            let first_two = preds.into_iter().take(2);
+            let mut tree = MutuallyExclusiveTree::new();
+            let new_children = tree.add_children(tree.root(), first_two).collect_vec();
+            for (index, child) in inds.into_iter().zip(new_children) {
+                tree.add_constraint_index(child, index).unwrap();
+            }
+            tree
         }
-
-        fn offset_id(&self) -> Self::OffsetID {
-            0
-        }
     }
 
-    #[test]
-    fn test_simple_build() {
-        let mut p1 = LinePattern::new();
-        p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
+    // #[test]
+    // fn test_build() {
+    //     let a_constraint = assign_constraint("a", ConstraintLiteral::new_value(2));
+    //     let p1 = vec![
+    //         assign_constraint("x", ConstraintLiteral::new_value(1)),
+    //         a_constraint.clone(),
+    //     ];
+    //     let b_constraint = assign_constraint("b", ConstraintLiteral::new_value(2));
+    //     let p2 = vec![
+    //         assign_constraint("x", ConstraintLiteral::new_value(1)),
+    //         b_constraint.clone(),
+    //     ];
+    //     let c_constraint = assign_constraint("c", ConstraintLiteral::new_value(2));
+    //     let p3 = vec![
+    //         assign_constraint("x", ConstraintLiteral::new_value(1)),
+    //         c_constraint.clone(),
+    //     ];
+    //     let d_constraint = assign_constraint("d", ConstraintLiteral::new_value(2));
+    //     let p4 = vec![
+    //         assign_constraint("x", ConstraintLiteral::new_value(1)),
+    //         d_constraint.clone(),
+    //     ];
+    //     let builder = AutomatonBuilder::from_constraints(vec![p1, p2, p3, p4]);
+    //     let (matcher, pattern_ids) = builder.build(|_| false);
+    //     assert_eq!(matcher.graph.node_count(), 7);
+    //     assert_eq!(
+    //         pattern_ids,
+    //         vec![PatternID(0), PatternID(1), PatternID(2), PatternID(3)]
+    //     );
+    //     let x_child = matcher.children(matcher.root()).exactly_one().ok().unwrap();
 
-        let mut p2 = LinePattern::new();
-        p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (1, 2, 1)]);
-
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
-        let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 7);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_incompatible_preds() {
-        let mut p1 = LinePattern::new();
-        p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-
-        let mut p2 = LinePattern::new();
-        p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (0, 2, 1)]);
-
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
-        builder.build();
-    }
-
-    #[test]
-    fn test_build_two_dir() {
-        let mut p1 = LinePattern::new();
-        p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p1.add_line(0, vec![(0, 3, 1), (3, 4, 0)]);
-        p1.add_line(1, vec![(1, 5, 0)]);
-
-        let mut p2 = LinePattern::new();
-        p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p2.add_line(0, vec![(0, 3, 1), (3, 4, 0)]);
-        p2.add_line(3, vec![(3, 5, 0)]);
-
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
-        let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 18);
-    }
-
-    #[test]
-    fn test_build_two_different_length() {
-        let mut p1 = LinePattern::new();
-        p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p1.add_line(0, vec![(0, 3, 0), (3, 4, 0)]);
-        p1.add_line(1, vec![(1, 5, 0)]);
-
-        let mut p2 = LinePattern::new();
-        p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0)]);
-        p2.add_line(0, vec![(0, 3, 0), (3, 4, 0)]);
-
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
-        let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 15);
-    }
-
-    #[test]
-    fn test_build_full_det() {
-        let mut p1 = LinePattern::new();
-        p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0), (2, 3, 0), (3, 4, 0)]);
-        p1.add_line(0, vec![(0, 1, 1), (1, 5, 0)]);
-
-        let mut p2 = LinePattern::new();
-        p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p2.add_line(0, vec![(0, 1, 1)]);
-
-        let builder: LineBuilder<_, _, _> = [p1, p2].into_iter().collect();
-        let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 13);
-    }
-
-    #[test]
-    fn test_build_full_3_det() {
-        let mut p1 = LinePattern::new();
-        p1.require(0, 1);
-        p1.add_line(0, vec![(0, 1, 0), (1, 2, 0), (2, 3, 0), (3, 4, 0)]);
-        p1.add_line(0, vec![(0, 1, 1), (1, 5, 0)]);
-        p1.add_line(0, vec![(0, 1, 2), (1, 6, 0)]);
-
-        let mut p2 = LinePattern::new();
-        p2.require(0, 1);
-        p2.add_line(0, vec![(0, 1, 0), (1, 2, 0)]);
-        p2.add_line(0, vec![(0, 1, 1)]);
-        p2.add_line(0, vec![(0, 1, 2), (1, 6, 0)]);
-
-        let mut p3 = LinePattern::new();
-        p3.require(0, 1);
-        p3.add_line(0, vec![(0, 1, 0)]);
-        p3.add_line(0, vec![(0, 1, 1)]);
-        p3.add_line(0, vec![(0, 1, 2)]);
-
-        let builder: LineBuilder<_, _, _> = [p1, p2, p3].into_iter().collect();
-        let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 23);
-    }
-
-    #[test]
-    fn test_build_empty() {
-        let p1 = LinePattern::<usize, usize, usize>::new();
-
-        let builder: LineBuilder<_, _, _> = [p1].into_iter().collect();
-        let matcher = builder.build();
-        assert_eq!(matcher.n_states(), 1);
-    }
+    //     // The two first patterns were kept at the root
+    //     assert_eq!(
+    //         matcher
+    //             .transitions(x_child)
+    //             .map(|t| { matcher.constraint(t) })
+    //             .collect::<HashSet<_>>(),
+    //         HashSet::from_iter([Some(&a_constraint), Some(&b_constraint), None])
+    //     );
+    //     // The remaining two patterns are children of an epsilon transition
+    //     let epsilon = matcher.find_constraint(x_child, None).unwrap();
+    //     let epsilon_child = matcher.next_state(epsilon);
+    //     assert_eq!(
+    //         matcher
+    //             .transitions(epsilon_child)
+    //             .map(|t| { matcher.constraint(t) })
+    //             .collect::<HashSet<_>>(),
+    //         HashSet::from_iter([Some(&c_constraint), Some(&d_constraint)])
+    //     );
+    // }
 }

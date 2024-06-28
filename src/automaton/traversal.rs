@@ -1,206 +1,251 @@
 use std::collections::VecDeque;
-use std::fmt::Debug;
 
 use itertools::Itertools;
+use petgraph::graph::NodeIndex;
 
-use crate::{predicate::PredicateSatisfied, EdgeProperty, NodeProperty, PatternID, Universe};
+use crate::{
+    indexing::IndexKey, utils, Constraint, IndexMap, IndexingScheme, PatternID, Predicate,
+};
 
-use super::{AssignMap, OutPort, ScopeAutomaton, StateID, Symbol};
+use super::{AssignMap, ConstraintAutomaton, StateID, TransitionID};
 
-impl<PNode: NodeProperty, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
-    pub fn run<'s, U: Universe + 's>(
-        &'s self,
-        root: U,
-        node_prop: impl for<'a> Fn(U, &'a PNode) -> bool + 's,
-        edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Vec<Option<U>> + 's,
-    ) -> impl Iterator<Item = PatternID> + 's {
-        let ass = AssignMap::new(self.root, root);
-        if !self.is_valid_assignment(self.root, &ass) {
-            panic!("Input is not a valid assignment of root scope");
-        }
-        Traverser::new(self, ass, node_prop, edge_prop)
+impl<K: IndexKey, P: Eq + Clone, I> ConstraintAutomaton<Constraint<K, P>, I> {
+    /// Run the automaton on the `host` input data.
+    pub fn run<'a, 'd, D>(
+        &'a self,
+        host: &'d D,
+    ) -> AutomatonTraverser<'a, 'd, AssignMap<K, P::Value>, Constraint<K, P>, I, D>
+    where
+        P: Predicate<D>,
+    {
+        AutomatonTraverser::new(self, host)
     }
 
     /// An iterator of the allowed transitions
-    fn legal_transitions<U: Universe>(
-        &self,
+    fn legal_transitions<'a, D, S>(
+        &'a self,
         state: StateID,
-        ass: &AssignMap<U>,
-        node_prop: impl for<'a> Fn(U, &'a PNode) -> bool,
-        edge_prop: impl for<'a> Fn(U, &'a PEdge) -> Vec<Option<U>>,
-    ) -> Vec<(OutPort, Option<(Symbol, U)>)> {
-        let mut predicate_results = self
-            .out_ports(state)
-            .map(move |edge| {
-                (
-                    edge,
-                    self.predicate(edge)
-                        .is_satisfied(&ass.map, &node_prop, &edge_prop),
-                )
-            })
+        host: &'a D,
+        known_bindings: S,
+    ) -> impl Iterator<Item = (TransitionID, S)> + 'a
+    where
+        P: Predicate<D>,
+        S: IndexMap<K, P::Value>,
+        I: IndexingScheme<D, P::Value, Key = K>,
+        S: 'a,
+        P::Value: Clone,
+    {
+        let non_fails = self
+            .transitions(state)
+            .filter_map(|id| Some((id, self.constraint(id)?)))
             .collect_vec();
-        if self.is_deterministic(state) {
-            let mut det_predicate_results = Vec::new();
-            // All predicate results are broadcast to have length `n_opts`
-            if let Some(n_opts) = broadcast(&mut predicate_results) {
-                // For all 0 <= i < n_opts, find the first edge with a satisfied predicate
-                for i in 0..n_opts {
-                    let (edge, res) = predicate_results
-                        .iter()
-                        .map(|(edge, all_res)| (*edge, all_res.get(i).expect("invalid broadcast")))
-                        .find_or_last(|&(_, res)| res != &PredicateSatisfied::No)
-                        .expect("n_opts != None so predicates_results.len() > 0");
-                    if let Some(action) = res.to_option() {
-                        det_predicate_results.push((edge, action));
-                    }
-                }
-            }
-            det_predicate_results
-        } else {
-            // All satisfied predicates are considered
-            predicate_results
-                .into_iter()
-                .flat_map(|(edge, all_res)| {
-                    all_res
-                        .into_iter()
-                        .filter_map(move |res| res.to_option().map(|action| (edge, action)))
-                })
-                .collect()
-        }
-    }
+        let required_keys = non_fails
+            .iter()
+            .flat_map(|(_, constraint)| constraint.required_bindings())
+            .copied()
+            .unique()
+            .collect_vec();
 
-    fn is_valid_assignment<U: Universe>(&self, state: StateID, ass: &AssignMap<U>) -> bool {
-        if state != ass.state_id {
-            return false;
-        }
-        let ass = &ass.map;
-        self.scope(state).iter().all(|s| ass.contains_left(s))
+        let all_bindings = known_bindings
+            .bind_with_scheme(required_keys, host, &self.host_indexing)
+            .unwrap();
+
+        all_bindings.into_iter().flat_map(move |bindings| {
+            let bindings_clone = bindings.clone();
+            let mut valid_non_fails = non_fails
+                .clone()
+                .into_iter()
+                .filter_map(move |(id, constraint)| {
+                    let is_satisfied = constraint.is_satisfied(host, &bindings).unwrap();
+                    is_satisfied.then_some((id, bindings.clone()))
+                })
+                .peekable();
+            let is_empty = valid_non_fails.peek().is_none();
+            let needs_fail_transition = !self.is_deterministic(state) || is_empty;
+            let fail_transition = if needs_fail_transition {
+                self.find_fail_transition(state)
+            } else {
+                None
+            };
+            valid_non_fails.chain(fail_transition.map(move |id| (id, bindings_clone)))
+        })
     }
 }
 
-/// An iterator for traversing a scope automaton
+/// An iterator for traversing a constraint automaton
 ///
 /// ## Type parameters
-///  - U: the universe that the symbols in scope get interpreted to
-///  - A: scope assignments mapping symbols to value in U
-///  - M: Markers
-///  - Symb: the symbol type used to refer to values in scope
-///  - P: a predicate to check for allowed transitions
-///  - SU: scope updater, to modify scope as we transition along edges
-///  - D: arbitrary input data that the automaton can refer to
-struct Traverser<Map, A, FnN, FnE> {
-    matches_queue: VecDeque<PatternID>,
-    state_queue: VecDeque<(StateID, Map)>,
-    automaton: A,
-    node_prop: FnN,
-    edge_prop: FnE,
+///  - S: scope assignments mapping variable names to values
+///  - C: constraint type on transitions
+///  - D: arbitrary input "host" data to evaluate constraints on.
+pub struct AutomatonTraverser<'a, 'd, S, C, I, D> {
+    matches_queue: VecDeque<(PatternID, S)>,
+    state_queue: VecDeque<(StateID, S)>,
+    automaton: &'a ConstraintAutomaton<C, I>,
+    host: &'d D,
 }
 
-impl<'a, Map, PNode, PEdge: EdgeProperty, FnN, FnE>
-    Traverser<Map, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
-{
-    fn new(
-        automaton: &'a ScopeAutomaton<PNode, PEdge>,
-        ass: Map,
-        node_prop: FnN,
-        edge_prop: FnE,
-    ) -> Self {
+impl<'a, 'd, S: Default, C, I, D> AutomatonTraverser<'a, 'd, S, C, I, D> {
+    fn new(automaton: &'a ConstraintAutomaton<C, I>, host: &'d D) -> Self {
         let matches_queue = VecDeque::new();
-        let state_queue = VecDeque::from_iter([(automaton.root, ass)]);
+        let state_queue = VecDeque::from_iter([(automaton.root, S::default())]);
         Self {
             matches_queue,
             state_queue,
             automaton,
-            node_prop,
-            edge_prop,
+            host,
         }
     }
 }
 
-impl<'a, U: Universe, PNode: NodeProperty, PEdge: EdgeProperty, FnN, FnE>
-    Traverser<AssignMap<U>, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
-{
-    fn enqueue_state(
-        &mut self,
-        out_port: OutPort,
-        mut ass: AssignMap<U>,
-        new_symb: Option<(Symbol, U)>,
-    ) {
-        let next_state = self.automaton.next_state(out_port);
-        let next_scope = self.automaton.scope(next_state);
-        ass.state_id = next_state;
-        ass.map.retain(|s, _| next_scope.contains(s));
-        if let Some((symb, val)) = new_symb {
-            let failed = ass.map.insert(symb, val).did_overwrite();
-            if failed {
-                panic!("Tried to overwrite in assignment map");
-            }
-        }
-        self.state_queue.push_back((next_state, ass))
-    }
-}
-
-impl<'a, U: Universe, PNode, PEdge: EdgeProperty, FnN, FnE> Iterator
-    for Traverser<AssignMap<U>, &'a ScopeAutomaton<PNode, PEdge>, FnN, FnE>
+impl<'a, 'd, S, K, P, D, I> Iterator for AutomatonTraverser<'a, 'd, S, Constraint<K, P>, I, D>
 where
-    PNode: NodeProperty,
-    FnN: for<'b> Fn(U, &'b PNode) -> bool,
-    FnE: for<'b> Fn(U, &'b PEdge) -> Vec<Option<U>>,
+    I: IndexingScheme<D, P::Value, Key = K>,
+    P: Predicate<D> + Eq + Clone,
+    S: IndexMap<K, P::Value>,
+    K: IndexKey,
+    P::Value: Clone,
 {
-    type Item = PatternID;
+    type Item = (PatternID, S);
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.matches_queue.is_empty() {
-            let Some((state, ass)) = self.state_queue.pop_front() else {
+            let Some((state, known_bindings)) = self.state_queue.pop_front() else {
                 break;
             };
-            self.matches_queue.extend(self.automaton.matches(state));
-            let transitions =
+            self.matches_queue.extend(
                 self.automaton
-                    .legal_transitions(state, &ass, &self.node_prop, &self.edge_prop);
-            for (edge, new_symb) in transitions {
-                self.enqueue_state(edge, ass.clone(), new_symb);
+                    .matches(state)
+                    .iter()
+                    .map(|&id| (id, known_bindings.clone())),
+            );
+            let transitions = self
+                .automaton
+                .legal_transitions(state, self.host, known_bindings);
+            for (transition, new_ass) in transitions {
+                let next_state = self.automaton.next_state(transition);
+                self.state_queue.push_back((next_state, new_ass))
             }
         }
         self.matches_queue.pop_front()
     }
 }
 
-fn broadcast<V: Debug, U: Eq + Clone>(
-    vec: &mut [(V, Vec<PredicateSatisfied<U>>)],
-) -> Option<usize> {
-    let Some(mut len) = vec
-        .iter()
-        .find(|(_, res)| {
-            // Singleton `Yes` predicates can be broadcast
-            res != &vec![PredicateSatisfied::Yes]
-        })
-        .map(|(_, res)| res.len())
-    else {
-        return vec.first().map(|(_, res)| res.len());
-    };
-    if len < 1 {
-        // All non-broadcastable vecs are empty
-        // There might still be a `Yes` predicate that we cannot get rid of,
-        // so we broadcast all vecs to length 1
-        len = 1;
-        for (_, res) in vec.iter_mut() {
-            if res.is_empty() {
-                *res = vec![PredicateSatisfied::No];
-            }
-        }
-    } else {
-        // Broadcast all vecs to length `len`
-        for (_, res) in vec.iter_mut() {
-            if res.len() != len {
-                if *res != vec![PredicateSatisfied::Yes] {
-                    panic!(
-                        "Could not broadcast predicate outputs. Are they all of the same length?"
-                    );
-                }
-                *res = vec![PredicateSatisfied::Yes; len];
-            }
+pub(crate) struct OnlineToposort {
+    traverser: utils::OnlineToposort<NodeIndex>,
+}
+
+impl OnlineToposort {
+    fn new(root: StateID) -> Self {
+        Self {
+            traverser: utils::online_toposort(root.0),
         }
     }
-    Some(len)
+
+    pub(super) fn next<C, I>(&mut self, automaton: &ConstraintAutomaton<C, I>) -> Option<StateID> {
+        self.traverser.next(&automaton.graph).map(StateID)
+    }
+}
+
+impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
+    pub(crate) fn toposort(&self) -> OnlineToposort {
+        OnlineToposort::new(self.root())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{constraint::tests::TestConstraint, indexing::tests::TestIndexingScheme, HashSet};
+
+    use super::*;
+
+    fn true_constraint() -> TestConstraint {
+        TestConstraint::new(vec![])
+    }
+
+    fn false_constraint() -> TestConstraint {
+        TestConstraint::new(vec![3, 4])
+    }
+
+    #[test]
+    fn legal_transitions() {
+        let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::new();
+        // Add a True, False and None constraint
+        let true_child = automaton.add_transition(automaton.root(), Some(true_constraint()));
+        automaton.add_transition(automaton.root(), Some(false_constraint()));
+        let fail_child = automaton.add_transition(automaton.root(), None);
+        let ass = AssignMap::default();
+        let transitions = HashSet::from_iter(
+            automaton
+                .legal_transitions(automaton.root(), &(), ass.clone())
+                .map(|(transition, _)| automaton.next_state(transition)),
+        );
+        // Non-deterministic, so both true and none children should be returned
+        assert_eq!(transitions, HashSet::from_iter([true_child, fail_child]));
+
+        let root = automaton.root();
+        automaton.graph[root.0].deterministic = true;
+        let transitions = HashSet::from_iter(
+            automaton
+                .legal_transitions(automaton.root(), &(), ass)
+                .map(|(transition, _)| automaton.next_state(transition)),
+        );
+        // Deterministic, so only true child should be returned
+        assert_eq!(transitions, HashSet::from_iter([true_child]));
+    }
+
+    #[test]
+    fn legal_transitions_all_false() {
+        let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::new();
+        automaton.add_transition(automaton.root(), Some(false_constraint()));
+        let ass = AssignMap::default();
+        // Only a False transition, so no legal moves
+        assert_eq!(
+            automaton
+                .legal_transitions(automaton.root(), &(), ass.clone())
+                .count(),
+            0
+        );
+
+        // Add an epsilon transition
+        automaton.add_transition(automaton.root(), None);
+        // Now there is a valid move
+        assert_eq!(
+            automaton
+                .legal_transitions(automaton.root(), &(), ass.clone())
+                .count(),
+            1
+        );
+        // Still valid when deterministic
+        let root = automaton.root();
+        automaton.graph[root.0].deterministic = true;
+        assert_eq!(
+            automaton
+                .legal_transitions(automaton.root(), &(), ass)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn run_automaton() {
+        let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::new();
+        automaton.add_pattern(vec![true_constraint(), false_constraint()], PatternID(0));
+        let match_pattern1 = PatternID(1);
+        automaton.add_pattern(vec![true_constraint(), true_constraint()], match_pattern1);
+        let match_pattern2 = PatternID(2);
+        automaton.add_pattern(
+            vec![true_constraint(), true_constraint(), true_constraint()],
+            match_pattern2,
+        );
+        automaton.add_pattern(
+            vec![true_constraint(), true_constraint(), false_constraint()],
+            PatternID(3),
+        );
+        let matches: HashSet<_> = automaton.run(&()).map(|(id, _)| id).collect();
+        assert_eq!(
+            matches,
+            HashSet::from_iter([match_pattern1, match_pattern2])
+        );
+    }
 }

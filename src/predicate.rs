@@ -18,65 +18,76 @@
 //! `FilterPredicate` by calling `assign_check` and then checking that the binding
 //! for <var2> is in the returned set.
 
-use crate::HashSet;
+use std::fmt::Debug;
 
-/// A predicate with a fixed arity N.
-pub trait ArityPredicate {
-    /// Get Predicate arity
+/// A predicate with a fixed arity.
+pub trait ArityPredicate: Eq + Clone {
+    /// Get predicate arity
     fn arity(&self) -> usize;
 }
 
-/// A predicate for pattern matching.
+/// A N-ary predicate evaluated on bindings and subject data.
 ///
-/// Assign predicates must be of arity N >= 1 and bind the variable passed as its
-/// first argument.
-///
-/// It always holds `Assign < Filter`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Predicate<AP, FP> {
-    Assign(AP),
-    Filter(FP),
-}
-
-impl<AP: ArityPredicate, FP: ArityPredicate> ArityPredicate for Predicate<AP, FP> {
-    fn arity(&self) -> usize {
-        match self {
-            Predicate::Assign(ap) => ap.arity(),
-            Predicate::Filter(fp) => fp.arity(),
-        }
-    }
-}
-
-/// A N-ary predicate that can be queried to return valid LHS bindings.
-///
-/// A predicate of the form `<var1> pred <var2> ... <varN>`. Given a binding
-/// for <var2> to <varN>, the predicate returns a set of valid values for
-/// <var1> for the given input data.
-///
-/// The arity N of an assign predicate must be N >= 1.
+/// A predicate of the form `pred <key1> ... <keyN>`. Given bindings for <key1>
+/// to <keyN>, the predicate checks if it's satisfied on the values.
 ///
 /// ## Parameter types
-/// - `U`: The universe of valid symbols in the problem domain.
-/// - `D`: The input data type in the problem domain.
-pub trait AssignPredicate<U, D>: ArityPredicate {
-    /// Find set of variable assignments that satisfy the predicate.
-    ///
-    /// `values` must be of length `arity() - 1` and correspond to the values
-    /// of the last `arity() - 1` arguments in the predicate.
-    fn check_assign(&self, data: &D, args: &[&U]) -> HashSet<U>;
-}
+/// - `Data`: The subject data type on which predicates are evaluated.
+pub trait Predicate<Data>: ArityPredicate {
+    /// The indexed value type
+    type Value: Clone + PartialEq + Debug;
 
-/// A N-ary predicate for a given data and variable bindings.
-///
-/// A predicate of the form `<var1> pred <var2> ... <varN>`. Given bindings for
-/// <var1> to <varN>, the predicate checks if it's satisfied on those values.
-///
-/// ## Parameter types
-/// - `U`: The universe of valid symbols in the problem domain.
-/// - `D`: The input data type in the problem domain.
-pub trait FilterPredicate<U, D>: ArityPredicate {
     /// Check if the predicate is satisfied by the given data and values.
     ///
-    /// `values` must be of length `arity()`.
-    fn check(&self, data: &D, args: &[&U]) -> bool;
+    /// `values` must be of length [Predicate::arity].
+    fn check(&self, data: &Data, args: &[&Self::Value]) -> bool;
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use itertools::Itertools;
+    use rstest::rstest;
+
+    use crate::predicate::Predicate;
+
+    use super::ArityPredicate;
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub(crate) struct TestPredicate {
+        pub(crate) arity: usize,
+    }
+
+    impl ArityPredicate for TestPredicate {
+        fn arity(&self) -> usize {
+            self.arity
+        }
+    }
+
+    impl Predicate<()> for TestPredicate {
+        type Value = usize;
+
+        fn check(&self, _: &(), args: &[&usize]) -> bool {
+            if args.len() != self.arity {
+                panic!("Invalid constraint: arity mismatch");
+            }
+            args.iter().tuple_windows().all(|(a, b)| a == b)
+        }
+    }
+
+    #[rstest]
+    #[case(2)]
+    #[case(3)]
+    fn test_arity_match(#[case] arity: usize) {
+        let p = TestPredicate { arity };
+        let args = vec![&3; p.arity()];
+        assert!(p.check(&(), &args));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_arity_mismatch() {
+        let p = TestPredicate { arity: 2 };
+        let args = vec![&3];
+        p.check(&(), &args);
+    }
 }

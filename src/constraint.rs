@@ -4,33 +4,48 @@
 //!
 //! The predicate is either an AssignPredicate or a FilterPredicate.
 
+use crate::predicate::ArityPredicate;
+
 use super::{
-    predicate::{ArityPredicate, AssignPredicate, FilterPredicate, Predicate},
-    variable::{BindVariableError, VariableScope},
+    indexing::{BindVariableError, IndexMap},
+    predicate::Predicate,
 };
 use itertools::Itertools;
-use std::{cmp, fmt::Debug};
+use std::fmt::Debug;
 use thiserror::Error;
 
-/// A variable `V` or value `U` argument in a constraint.
+/// A constraint for pattern matching.
 ///
-/// Literals are either a value from the predicate universe, or a variable
-/// that will be bound at runtime to a value in the universe.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ConstraintLiteral<V, U> {
-    Variable(V),
-    Value(U),
+/// Given by a predicate of arity N and a vector of N arguments. Checking
+/// that a constraint is satisfied is done in two steps:
+/// 1. The keys in the arguments are resolved to values using index key-value
+///    bindings.
+/// 2. The predicate is then evaluated on the values.
+///
+/// ## Generic Parameters
+/// - `K`: The index key type
+/// - `P`: The predicate type
+#[derive(Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Constraint<K, P> {
+    predicate: P,
+    args: Vec<K>,
 }
 
-/// Errors that occur when evaluating literals.
-#[derive(Clone, Debug, Error)]
-pub enum LiteralEvalError {
-    #[error("Unbound variable: {0}")]
-    UnboundVariable(String),
+/// A heuristic whether a set of constraints should be turned into a deterministic
+/// transition.
+///
+/// More deterministic states will result in faster automaton runtimes, but at
+/// the cost of larger automata. A good heuristic is therefore important to
+/// find the best tradeoff.
+pub trait DetHeuristic {
+    /// Return true if the set of constraints should be turned into a deterministic
+    /// transition.
+    fn make_det(constraints: &[&Self]) -> bool;
 }
 
 /// Errors that occur when constructing constraints.
-#[derive(Clone, Debug, Error)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum InvalidConstraint {
     /// Cannot assign a value if the RHS is not a variable
     #[error("Cannot assign a value to {0}, it is not a variable")]
@@ -65,424 +80,188 @@ pub enum InvalidConstraint {
     },
 }
 
-impl From<LiteralEvalError> for InvalidConstraint {
-    fn from(e: LiteralEvalError) -> Self {
-        match e {
-            LiteralEvalError::UnboundVariable(var) => InvalidConstraint::UnboundVariable(var),
-        }
-    }
-}
-
 impl From<BindVariableError> for InvalidConstraint {
     fn from(e: BindVariableError) -> Self {
         match e {
-            BindVariableError::VariableExists(var) => InvalidConstraint::BindVariableExists(var),
-            BindVariableError::ValueExists { value, variable } => {
-                InvalidConstraint::BindValueExists { value, variable }
+            BindVariableError::VariableExists { key: var, .. } => {
+                InvalidConstraint::BindVariableExists(var)
             }
         }
     }
 }
 
-impl<V: Debug, U> ConstraintLiteral<V, U> {
-    /// Evaluate a literal to a value in U.
-    ///
-    /// If the literal is a value, unwrap it. Otherwise, use the variable scope
-    /// to resolve the binding.
-    ///
-    /// If the variable is not defined, this will panic.
-    pub fn evaluate<'a>(
-        &'a self,
-        scope: &'a impl VariableScope<V, U>,
-    ) -> Result<&'a U, LiteralEvalError> {
-        match &self {
-            ConstraintLiteral::Variable(var) => scope
-                .get(var)
-                .ok_or(LiteralEvalError::UnboundVariable(format!("{:?}", var))),
-            ConstraintLiteral::Value(val) => Ok(val),
-        }
-    }
-}
-
-/// A constraint for pattern matching.
-///
-/// Given by a predicate of arity N and a vector of N arguments. For assign
-/// predicates, N >= 1 and the first argument is always a variable: the variable
-/// to be bound by the assignment.
-///
-///
-/// ## Total ordering of constraints
-/// Constraints implement Ord, determining the order in which constraints
-/// will be satisfied during pattern matching. An assignment of variable `v`
-/// will be smaller than any filter predicate containing `v` or any variable
-/// larger than `v`.
-///
-/// For any totally ordered vector of constraints, the following must hold:
-///  - For AssignPredicates, all but the first argument must be constants or be
-///    variables bound by previous constraints.
-///  - For FilterPredicates, all arguments must be bound by previous constraints
-///    if they are variables.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Constraint<V, U, AP, FP> {
-    predicate: Predicate<AP, FP>,
-    args: Vec<ConstraintLiteral<V, U>>,
-}
-
-impl<V, U, AP, FP> Constraint<V, U, AP, FP>
-where
-    U: Debug,
-    V: Debug,
-    AP: ArityPredicate,
-    FP: ArityPredicate,
-{
+impl<K, P> Constraint<K, P> {
     /// Construct a binary constraint.
     ///
-    /// Returns an error if the constraint is malformed, i.e. if the predicate is
-    /// a Predicate::Assign and the object is not a variable, or if the predicate
-    /// is not binary.
-    pub fn try_binary_from_triple(
-        lhs: ConstraintLiteral<V, U>,
-        predicate: Predicate<AP, FP>,
-        rhs: ConstraintLiteral<V, U>,
-    ) -> Result<Self, InvalidConstraint> {
+    /// Return an error if the number of arguments does not match the predicate
+    /// arity.
+    pub fn try_binary_from_triple(lhs: K, predicate: P, rhs: K) -> Result<Self, InvalidConstraint>
+    where
+        P: ArityPredicate,
+    {
         Self::try_new(predicate, vec![lhs, rhs])
     }
 
     /// Construct a constraint.
     ///
-    /// Returns an error if the number of arguments does not match the predicate
+    /// Return an error if the number of arguments does not match the predicate
     /// arity.
-    pub fn try_new(
-        predicate: Predicate<AP, FP>,
-        args: Vec<ConstraintLiteral<V, U>>,
-    ) -> Result<Self, InvalidConstraint> {
+    pub fn try_new(predicate: P, args: Vec<K>) -> Result<Self, InvalidConstraint>
+    where
+        P: ArityPredicate,
+    {
         if args.len() != predicate.arity() {
             Err(InvalidConstraint::InvalidArity {
                 predicate_arity: predicate.arity(),
                 arguments_arity: args.len(),
             })
-        } else if matches!(predicate, Predicate::Assign(_))
-            && matches!(args.first(), Some(ConstraintLiteral::Value(_)))
-        {
-            Err(InvalidConstraint::AssignToValue(format!(
-                "{:?}",
-                args.first().unwrap()
-            )))
         } else {
             Ok(Self { args, predicate })
         }
     }
 
-    /// The constraint predicate
-    pub fn predicate(&self) -> &Predicate<AP, FP> {
-        &self.predicate
-    }
-
-    /// Return the arity of the constraint.
-    pub fn arity(&self) -> usize {
-        let arity = self.args.len();
-        debug_assert_eq!(
-            arity,
+    /// The arity of the constraint.
+    pub fn arity(&self) -> usize
+    where
+        P: ArityPredicate,
+    {
+        assert_eq!(
+            self.args.len(),
             self.predicate.arity(),
             "invalid constraint: arity mismatch"
         );
-        arity
+        self.args.len()
     }
 
-    /// Return all variable assignments that would satisfy the constraint.
+    /// The bindings required to evaluate the constraint.
+    pub fn required_bindings(&self) -> &[K] {
+        &self.args
+    }
+
+    /// The constraint predicate
+    pub fn predicate(&self) -> &P {
+        &self.predicate
+    }
+
+    /// Evaluate the constraint given the subject data and index map.
     ///
-    /// This will panic if an `AssignPredicate` results in an invalid variable
-    /// binding, or if the constraint is malformed.
-    pub fn satisfy<S, D>(&self, data: &D, scope: S) -> Result<Vec<S>, InvalidConstraint>
+    /// # Arguments
+    ///
+    /// * `data` - The data against which the constraint is evaluated
+    /// * `known_bindings` - The current index map containing key-value bindings
+    ///
+    /// # Returns
+    ///
+    /// `Result<bool, InvalidConstraint>` - Ok(true) if the constraint is satisfied,
+    /// Ok(false) if it's not, or an Err if there's an invalid constraint.
+    pub fn is_satisfied<V, D>(
+        &self,
+        data: &D,
+        known_bindings: &impl IndexMap<K, V>,
+    ) -> Result<bool, InvalidConstraint>
     where
-        S: Clone + VariableScope<V, U>,
-        AP: AssignPredicate<U, D>,
-        FP: FilterPredicate<U, D>,
-        V: Clone,
+        P: Predicate<D, Value = V>,
+        K: Debug,
     {
-        let args = |n_args| {
-            let start_ind = self.args.len() - n_args;
-            self.args[start_ind..]
-                .iter()
-                .map(|arg| arg.evaluate(&scope))
-                .collect::<Result<Vec<_>, _>>()
-        };
-        match &self.predicate {
-            Predicate::Assign(ap) => {
-                let rhs = ap.check_assign(data, &args(self.arity() - 1)?);
-                let lhs = self
-                    .assigned_variable()
-                    .expect("Invalid constraint: No assigned variable in AssignPredicate");
-                rhs.into_iter()
-                    .map(|obj| {
-                        let mut scope = scope.clone();
-                        scope.bind(lhs.clone(), obj)?;
-                        Ok(scope)
-                    })
-                    .collect()
-            }
-            Predicate::Filter(fp) => {
-                let args = args(self.arity())?;
-                if fp.check(data, &args) {
-                    Ok([scope].to_vec())
-                } else {
-                    Ok(Vec::new())
-                }
-            }
-        }
-    }
-
-    /// Return the variable that is assigned by this constraint, if any.
-    ///
-    /// Returns None if the constraint is not an AssignPredicate.
-    pub fn assigned_variable(&self) -> Option<&V> {
-        match &self {
-            &Constraint {
-                predicate: Predicate::Assign(_),
-                args,
-            } => {
-                let Some(ConstraintLiteral::Variable(var)) = args.first() else {
-                    panic!("Invalid constraint: rhs of AssignPredicate is not a variable");
-                };
-                Some(var)
-            }
-            _ => None,
-        }
+        let args = self
+            .args
+            .iter()
+            .map(|key| {
+                known_bindings
+                    .get(key)
+                    .ok_or(InvalidConstraint::UnboundVariable(format!("{key:?}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(self.predicate.check(data, &args))
     }
 }
 
-impl<V, U, AP, FP> PartialOrd for Constraint<V, U, AP, FP>
-where
-    V: Ord,
-    U: Ord,
-    AP: PartialOrd,
-    FP: PartialOrd,
-{
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        self.cmp_key().partial_cmp(&other.cmp_key())
-    }
-}
-
-type CmpKey<'a, V, U, AP, FP> = (
-    Option<&'a ConstraintLiteral<V, U>>,
-    &'a Predicate<AP, FP>,
-    &'a [ConstraintLiteral<V, U>],
-);
-impl<V: Ord, U: Ord, AP, FP> Constraint<V, U, AP, FP> {
-    fn cmp_key(&self) -> CmpKey<V, U, AP, FP> {
-        match &self.predicate {
-            Predicate::Assign(_) => self.assign_key(),
-            Predicate::Filter(_) => self.filter_key(),
-        }
-    }
-    fn assign_key(&self) -> CmpKey<V, U, AP, FP> {
-        (self.args.first(), &self.predicate, &self.args)
-    }
-
-    fn filter_key(&self) -> CmpKey<V, U, AP, FP> {
-        (self.args.iter().max(), &self.predicate, &self.args)
-    }
-}
-
-impl<V, U, AP, FP> Ord for Constraint<V, U, AP, FP>
-where
-    V: Ord,
-    U: Ord,
-    AP: Ord,
-    FP: Ord,
-{
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.partial_cmp(other).unwrap()
-    }
-}
-
-impl<V, U, AP, FP> Debug for Constraint<V, U, AP, FP>
-where
-    Predicate<AP, FP>: Debug,
-    ConstraintLiteral<V, U>: Debug,
-{
+impl<K: Debug, P: Debug> Debug for Constraint<K, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:?}]", self.predicate)?;
+        write!(f, "{:?}", self.predicate)?;
         let args_str = self
             .args
             .iter()
             .map(|arg| format!("{:?}", arg))
             .collect_vec();
-        write!(f, "({:?})", args_str.join(", "))?;
+        write!(f, "({})", args_str.join(", "))?;
         Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::{new_api_v04::predicate::ArityPredicate, HashMap, HashSet};
+pub(crate) mod tests {
+    use std::cmp;
+
+    use crate::{predicate::tests::TestPredicate, HashMap};
 
     use super::*;
+    pub(crate) type TestConstraint = Constraint<usize, TestPredicate>;
 
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-    struct AssignEq;
-    impl ArityPredicate for AssignEq {
-        fn arity(&self) -> usize {
-            2
-        }
-    }
-    impl AssignPredicate<usize, ()> for AssignEq {
-        fn check_assign(&self, _: &(), args: &[&usize]) -> HashSet<usize> {
-            assert_eq!(args.len(), 1);
-            HashSet::from_iter(args.iter().cloned().cloned())
+    impl TestConstraint {
+        pub(crate) fn new(args: Vec<usize>) -> TestConstraint {
+            TestConstraint::try_new(TestPredicate { arity: args.len() }, args).unwrap()
         }
     }
 
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-    struct FilterEq;
-    impl ArityPredicate for FilterEq {
-        fn arity(&self) -> usize {
-            2
+    impl PartialOrd for TestConstraint {
+        fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+            Some(self.cmp(other))
         }
     }
-    impl FilterPredicate<usize, ()> for FilterEq {
-        fn check(&self, _: &(), args: &[&usize]) -> bool {
-            let [arg0, arg1] = args else {
-                panic!("Invalid constraint: arity mismatch");
-            };
-            arg0 == arg1
+
+    impl Ord for TestConstraint {
+        fn cmp(&self, other: &Self) -> cmp::Ordering {
+            let key = |c: &TestConstraint| (c.predicate.clone(), c.args.clone());
+            key(self).cmp(&key(other))
         }
     }
-    type TestConstraint = Constraint<String, usize, AssignEq, FilterEq>;
 
     #[test]
-    fn test_construct_constraint() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("x".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Value(1),
-        )
-        .unwrap();
+    fn test_construct_constraint_arity() {
+        let c = TestConstraint::new(vec![0, 1]);
         assert_eq!(c.arity(), 2);
 
-        TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Value(1),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Value(1),
-        )
-        .expect_err("Invalid constraint: rhs of AssignPredicate is not a variable");
-
-        TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Value(1),
-            Predicate::Filter(FilterEq),
-            ConstraintLiteral::Value(1),
-        )
-        .expect("A value RHS is valid for filters");
-
-        TestConstraint::try_new(
-            Predicate::Filter(FilterEq),
-            vec![ConstraintLiteral::Value(1)],
-        )
-        .expect_err("Invalid constraint: arity mismatch");
+        assert_eq!(
+            TestConstraint::try_binary_from_triple(0, TestPredicate { arity: 4 }, 1,).unwrap_err(),
+            InvalidConstraint::InvalidArity {
+                predicate_arity: 4,
+                arguments_arity: 2,
+            }
+        );
     }
 
     #[test]
-    fn test_assign_satisfy() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("x".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Value(1),
-        )
-        .unwrap();
-        let result = c.satisfy(&(), HashMap::default()).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].get("x"), Some(&1));
+    #[should_panic]
+    fn test_invalid_constraint() {
+        let c = Constraint {
+            predicate: TestPredicate { arity: 2 },
+            args: vec!["x".to_string()],
+        };
+        c.arity();
     }
 
     #[test]
-    fn test_filter_satisfy_value_to_value() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Value(1),
-            Predicate::Filter(FilterEq),
-            ConstraintLiteral::Value(1),
-        )
-        .unwrap();
-        let result = c.satisfy(&(), HashMap::default()).unwrap();
-        assert_eq!(result.len(), 1);
+    fn test_is_satisfied() {
+        let c = TestConstraint::new(vec![0, 1]);
+        let assmap = HashMap::from_iter([(0, 1), (1, 1)]);
+        let result = c.is_satisfied(&(), &assmap).unwrap();
+        assert!(result);
     }
 
     #[test]
-    fn test_filter_satisfy_value_to_different_value() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Value(1),
-            Predicate::Filter(FilterEq),
-            ConstraintLiteral::Value(2),
-        )
-        .unwrap();
-        let result = c.satisfy(&(), HashMap::default()).unwrap();
-        assert_eq!(result.len(), 0);
+    fn test_not_is_satisfied() {
+        let c = TestConstraint::new(vec![0, 1]);
+        let assmap = HashMap::from_iter([(0, 1), (1, 2)]);
+        let result = c.is_satisfied(&(), &assmap).unwrap();
+        assert!(!result);
     }
 
     #[test]
-    fn test_assign_satisfy_value_to_variable() {
-        let c = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("y".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Value(1),
-        )
-        .unwrap();
-        let scope = HashMap::from_iter([("x".to_string(), 1)]);
-        let result = c.satisfy(&(), scope).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].get("y"), Some(&1));
-    }
-
-    #[test]
-    fn test_constraint_ordering_same_literal() {
-        let a = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("b".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Variable("b".to_string()),
-        )
-        .unwrap();
-        let b = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("b".to_string()),
-            Predicate::Filter(FilterEq),
-            ConstraintLiteral::Variable("a".to_string()),
-        )
-        .unwrap();
-        // For same literal, an AssignPredicate should be smaller
-        assert!(a < b);
-    }
-
-    #[test]
-    fn test_constraint_ordering_smaller_literal() {
-        let a = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("d".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Variable("d".to_string()),
-        )
-        .unwrap();
-        let b = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("e".to_string()),
-            Predicate::Filter(FilterEq),
-            ConstraintLiteral::Variable("a".to_string()),
-        )
-        .unwrap();
-        // For smaller literal in assignment, AssignPredicate should still be smaller
-        assert!(a < b);
-    }
-
-    #[test]
-    fn test_constraint_ordering_larger_literal() {
-        let a = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("d".to_string()),
-            Predicate::Assign(AssignEq),
-            ConstraintLiteral::Variable("d".to_string()),
-        )
-        .unwrap();
-        let b = TestConstraint::try_binary_from_triple(
-            ConstraintLiteral::Variable("b".to_string()),
-            Predicate::Filter(FilterEq),
-            ConstraintLiteral::Variable("a".to_string()),
-        )
-        .unwrap();
-        // For larger literal in assignment, AssignPredicate should be larger
-        assert!(a > b);
+    fn test_not_bound() {
+        let c = TestConstraint::new(vec![0, 2]);
+        let assmap = HashMap::from_iter([(0, 1), (1, 2)]);
+        let err_msg = c.is_satisfied(&(), &assmap).unwrap_err();
+        assert_eq!(err_msg, InvalidConstraint::UnboundVariable("2".to_string()));
     }
 }
