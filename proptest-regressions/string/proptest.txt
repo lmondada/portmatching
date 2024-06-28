@@ -1,0 +1,13 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0cd1a3d27d8c94f67acaf0901d72595dbee96e6964de94dca688c226c043b409 # shrinks to subject = "h", patterns = ["h$aa", "$a$b"]
+cc 297725abcef934570ef537f1782e8e52d869e76fbe3fad60c44c8fe643905332 # shrinks to subject = "aa", patterns = ["a", "$c$c"]
+cc 714918f8ca5c45605340bf62eea338548188505d0868f9c4910a773cd7ceb70d # shrinks to subject = "xag", patterns = ["x$ag", "$aa"]
+cc d8f8e6bd70d9e777a709f82b31111c63cfb55ddb5e5964536f4deaaf0887afb7 # shrinks to subject = "aaaayaazz", patterns = ["$a$baya", "$a$b$c$d$ez"]
+cc 6c6214c7b92c86668c510835f04dd81f48fc8684d8e35e6481a2574d52209da7 # shrinks to subject = "aea", patterns = ["$d$aa", "$aea"]
+cc a41a65accca41dfbc1ceb911995a0a0a52ad7d3cdfd0ea6e18c2f4fa008531ce # shrinks to subject = "eaaa", patterns = ["daabaaaaaaaaaaaaaaaaaaaa", "ddaa", "$ad", "$aa$b$a", "$b$a$ca", "$b$c$e$eaaaaaaaaaaaaaa"]
+cc 5994aa20b54d9fa4f785295c026b76c7421b08b337579d8ed2a28aeb4bead2c4 # shrinks to subject = "eaa", patterns = ["a$b$a", "$a$e$e", "b$c$a", "$c$aa"]

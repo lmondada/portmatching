@@ -10,7 +10,7 @@ pub mod pattern;
 // #[cfg(feature = "portgraph")]
 // pub mod portgraph;
 pub mod predicate;
-// pub mod string;
+pub mod string;
 pub mod utils;
 
 pub use constraint::Constraint;
