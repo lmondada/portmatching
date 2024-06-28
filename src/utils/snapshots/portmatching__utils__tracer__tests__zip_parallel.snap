@@ -1,6 +1,6 @@
 ---
 source: src/utils/tracer.rs
-assertion_line: 367
+assertion_line: 361
 expression: tracer_parallel.dot_string()
 ---
 digraph {
