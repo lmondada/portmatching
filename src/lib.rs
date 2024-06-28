@@ -3,16 +3,16 @@
 #![doc = include_str!("../README.md")]
 
 pub mod automaton;
+pub mod constraint;
 pub mod matcher;
-pub mod new_api_v04;
-pub mod patterns;
+pub mod mutex_tree;
 pub(crate) mod predicate;
+pub mod variable;
 pub mod weighted_graph;
 
 pub mod utils;
 
 pub use matcher::{ManyMatcher, NaiveManyMatcher, PatternID, PortMatcher, SinglePatternMatcher};
-pub use patterns::{Pattern, UnweightedPattern, WeightedPattern};
 pub use weighted_graph::WeightedGraphRef;
 
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
