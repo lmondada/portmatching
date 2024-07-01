@@ -1,6 +1,6 @@
 ---
 source: src/utils/tracer.rs
-assertion_line: 354
+assertion_line: 359
 expression: tracer.dot_string()
 ---
 digraph {
@@ -13,10 +13,10 @@ digraph {
     7 [ label = "State(3)" ]
     0 -> 2 [ label = "ExistingEdge(())" ]
     2 -> 4 [ label = "ExistingEdge(())" ]
-    4 -> 1 [ label = "NewEdge { to: 66, weight: () }" ]
+    4 -> 1 [ label = "TerminalEdge { action: TestAddEdge(66) }" ]
     0 -> 5 [ label = "ExistingEdge(())" ]
     5 -> 6 [ label = "ExistingEdge(())" ]
     6 -> 7 [ label = "ExistingEdge(())" ]
-    7 -> 1 [ label = "NewEdge { to: 6, weight: () }" ]
+    7 -> 1 [ label = "TerminalEdge { action: TestAddEdge(6) }" ]
     2 -> 7 [ label = "ExistingEdge(())" ]
 }
