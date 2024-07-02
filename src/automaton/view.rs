@@ -1,67 +1,105 @@
-use petgraph::{graph::NodeIndex, visit::IntoNodeIdentifiers, Graph};
+use petgraph::{visit::EdgeRef, Direction};
 
-use crate::{EdgeProperty, HashSet, PatternID};
+use crate::{HashSet, PatternID};
 
-use super::{EdgePredicate, OutPort, ScopeAutomaton, StateID, Symbol};
+use super::{ConstraintAutomaton, State, StateID, TransitionID};
 
-impl<PNode: Clone, PEdge: EdgeProperty> ScopeAutomaton<PNode, PEdge> {
-    pub(super) fn out_ports(&self, StateID(state): StateID) -> impl Iterator<Item = OutPort> + '_ {
-        let n_out = graph_node_weight(&self.graph, state).predicates.len();
-        (0..n_out).map(move |position| OutPort { state, position })
-    }
-
-    pub(super) fn any_out_ports(&self, state: StateID) -> bool {
-        self.out_ports(state).any(|_| true)
-    }
-
-    #[allow(unused)]
-    pub(crate) fn n_states(&self) -> usize {
-        self.graph.node_count()
-    }
-
-    pub(super) fn predicate(
+/// Methods for viewing the automaton
+///
+/// Exposed as a trait so that the automaton builder can reuse the default
+/// implementation but trace calls where useful.
+impl<C: Eq, I> ConstraintAutomaton<C, I> {
+    /// Find the transition ID at `parent` with the given `constraint`
+    pub(super) fn find_constraint(
         &self,
-        out_port: OutPort,
-    ) -> &EdgePredicate<PNode, PEdge, PEdge::OffsetID> {
-        let predicates = &graph_node_weight(&self.graph, out_port.state).predicates;
-        &predicates[out_port.position].0
+        state: StateID,
+        constraint: Option<&C>,
+    ) -> Option<TransitionID> {
+        self.transitions(state)
+            .find(|&transition| self.constraint(transition) == constraint)
     }
 
-    pub(super) fn scope(&self, StateID(state): StateID) -> &HashSet<Symbol> {
-        &graph_node_weight(&self.graph, state).scope
+    pub(super) fn find_fail_transition(&self, state: StateID) -> Option<TransitionID> {
+        self.transitions(state)
+            .find(|&transition| self.constraint(transition).is_none())
     }
 
-    pub(super) fn matches(&self, StateID(state): StateID) -> impl Iterator<Item = PatternID> + '_ {
-        graph_node_weight(&self.graph, state)
-            .matches
-            .iter()
-            .copied()
-    }
-
-    pub(super) fn is_deterministic(&self, StateID(state): StateID) -> bool {
-        graph_node_weight(&self.graph, state).deterministic
-    }
-
-    #[allow(unused)]
-    pub(crate) fn states(&self) -> impl Iterator<Item = StateID> + '_ {
-        self.graph.node_identifiers().map(StateID)
-    }
-
-    /// Follow edge from an OutPort to the next state
-    pub(super) fn next_state(&self, out_port: OutPort) -> StateID {
-        let edge = graph_node_weight(&self.graph, out_port.state).predicates[out_port.position].1;
+    /// Get the next state obtained from following a transition
+    pub(super) fn next_state(&self, transition: TransitionID) -> StateID {
         self.graph
-            .edge_endpoints(edge)
-            .expect("invalid edge")
+            .edge_endpoints(transition.0)
+            .expect("invalid transition")
             .1
+            .into()
+    }
+
+    /// Iterate over all transitions of a state, in order.
+    pub(super) fn transitions(&self, state: StateID) -> impl Iterator<Item = TransitionID> + '_ {
+        self.node_weight(state).order.iter().copied()
+    }
+
+    /// Get the constraint corresponding to a transition
+    pub(super) fn constraint(&self, transition: TransitionID) -> Option<&C> {
+        self.graph[transition.0].constraint.as_ref()
+    }
+
+    /// The states reached by a single transition from `state`
+    #[allow(dead_code)]
+    pub(super) fn children(&self, state: StateID) -> impl Iterator<Item = StateID> + '_ {
+        self.transitions(state)
+            .map(|transition| self.next_state(transition))
+    }
+
+    pub(super) fn incoming_transitions(
+        &self,
+        StateID(state): StateID,
+    ) -> impl Iterator<Item = TransitionID> + '_ {
+        self.graph
+            .edges_directed(state, Direction::Incoming)
+            .map(|e| e.id().into())
+    }
+
+    /// All non-None constraints at `state`.
+    pub(super) fn constraints(&self, state: StateID) -> impl Iterator<Item = &C> + '_ {
+        self.transitions(state)
+            .filter_map(|transition| self.constraint(transition))
+    }
+
+    pub(super) fn matches(&self, state: StateID) -> &[PatternID] {
+        &self.node_weight(state).matches
+    }
+
+    pub(super) fn is_deterministic(&self, state: StateID) -> bool {
+        self.node_weight(state).deterministic
+    }
+
+    /// The start state of a transition
+    pub(super) fn parent(&self, transition: TransitionID) -> StateID {
+        self.graph
+            .edge_endpoints(transition.0)
+            .expect("invalid transition")
+            .0
             .into()
     }
 }
 
-pub(super) fn graph_node_weight<N, E>(graph: &Graph<Option<N>, E>, state: NodeIndex) -> &N {
-    graph
-        .node_weight(state)
-        .expect("unknown state")
-        .as_ref()
-        .expect("invalid state")
+// Small, private utils functions
+impl<C, I> ConstraintAutomaton<C, I> {
+    pub(super) fn node_weight(&self, state: StateID) -> &State {
+        self.graph.node_weight(state.0).expect("unknown state")
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn check_edge_order_invariant(&self, state: StateID) -> bool {
+        self.node_weight(state)
+            .order
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            == self
+                .graph
+                .edges(state.0)
+                .map(|e| TransitionID(e.id()))
+                .collect::<HashSet<_>>()
+    }
 }

@@ -4,3 +4,6 @@
 /examples/**/*.bin
 /flamegraph.svg
 .vscode
+
+# Debug outputs produced by tests/from_testcases.rs
+/tests/testcases/**/*.gv

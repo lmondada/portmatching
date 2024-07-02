@@ -2,363 +2,148 @@
 //!
 //! This matcher is used as a baseline in benchmarking by repeating
 //! the matching process for each pattern separately.
-use std::{collections::VecDeque, hash::Hash};
-
-use bimap::BiMap;
-use portgraph::{LinkView, NodeIndex, PortOffset, SecondaryMap};
+use std::collections::VecDeque;
 
 use crate::{
-    patterns::{Edge, UnweightedEdge},
-    utils::{always_true, validate_unweighted_edge, validate_weighted_node},
-    EdgeProperty, NodeProperty, Pattern, PatternID, Universe, WeightedGraphRef,
+    constraint::Constraint,
+    indexing::{IndexKey, IndexValue},
+    pattern::Pattern,
+    HashMap, IndexMap, IndexingScheme, PatternID, Predicate,
 };
 
-use super::{Match, PatternMatch, PortMatcher};
+use super::{PatternMatch, PortMatcher};
 
 /// A simple matcher for a single pattern.
-pub struct SinglePatternMatcher<U: Universe, PNode, PEdge: Eq + Hash, P = Pattern<U, PNode, PEdge>>
-{
-    pattern: P,
-    edges: Vec<Edge<U, PNode, PEdge>>,
-    root: U,
-    root_prop: Option<PNode>,
+pub struct SinglePatternMatcher<C, I> {
+    /// The constraints forming the pattern
+    constraints: Vec<C>,
+    /// The indexing scheme for the host that we match on
+    host_indexing: I,
 }
 
-impl<U, G> PortMatcher<G, NodeIndex, U> for SinglePatternMatcher<U, (), UnweightedEdge>
+impl<K, P, D, I> PortMatcher<D> for SinglePatternMatcher<Constraint<K, P>, I>
 where
-    G: LinkView + Copy,
-    U: Universe,
+    K: IndexKey,
+    P: Predicate<D>,
+    P::Value: IndexValue,
+    I: IndexingScheme<D, P::Value, Key = K>,
 {
-    type PNode = ();
-    type PEdge = UnweightedEdge;
+    type Match = HashMap<K, P::Value>;
 
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
-        self.find_rooted_match(root, always_true, validate_unweighted_edge(graph))
-    }
-
-    fn get_pattern(&self, _id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
-        Some(&self.pattern)
+    fn find_matches<'a>(
+        &'a self,
+        host: &'a D,
+    ) -> impl Iterator<Item = PatternMatch<Self::Match>> + 'a {
+        self.get_all_bindings(host)
+            .into_iter()
+            .map(|bindings| PatternMatch::new(PatternID::default(), bindings))
     }
 }
 
-impl<'m, U, G, W, M> PortMatcher<WeightedGraphRef<G, &'m M>, NodeIndex, U>
-    for SinglePatternMatcher<U, W, UnweightedEdge>
-where
-    M: SecondaryMap<NodeIndex, W>,
-    G: LinkView + Copy,
-    U: Universe,
-    W: NodeProperty,
-{
-    type PNode = W;
-    type PEdge = UnweightedEdge;
-
-    fn find_rooted_matches(
-        &self,
-        weighted_graph: WeightedGraphRef<G, &'m M>,
-        root: NodeIndex,
-    ) -> Vec<Match> {
-        let (graph, _) = weighted_graph.into();
-        self.find_rooted_match(
-            root,
-            // Node weights (none)
-            validate_weighted_node(weighted_graph),
-            // Check edges exist
-            validate_unweighted_edge(graph),
-        )
-    }
-
-    fn get_pattern(&self, _id: PatternID) -> Option<&Pattern<U, Self::PNode, Self::PEdge>> {
-        Some(&self.pattern)
-    }
-}
-
-// TODO: add impls of PortMatcher for weighted graphs etc
-
-impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> SinglePatternMatcher<U, PNode, PEdge> {
-    /// Create a new matcher for a single pattern.
-    pub fn from_pattern(pattern: Pattern<U, PNode, PEdge>) -> Self {
-        // This is our "matching recipe" -- we precompute it once and store it
-        let edges = pattern.edges().expect("Cannot match disconnected pattern");
-        let root = pattern.root().expect("Cannot match unrooted pattern");
-        let root_prop = pattern.node_property(root).cloned();
+impl<C, I> SinglePatternMatcher<C, I> {
+    /// Create a matcher from a vector of constraints.
+    ///
+    /// The host indexing scheme is the type's default.
+    pub fn from_pattern(pattern: &impl Pattern<Constraint = C>) -> Self
+    where
+        I: Default,
+    {
+        let constraints = pattern.to_constraint_vec();
         Self {
-            pattern,
-            edges,
-            root,
-            root_prop,
+            constraints,
+            host_indexing: I::default(),
+        }
+    }
+
+    /// Create a matcher from a vector of constraints with specified host indexing scheme.
+    pub fn from_pattern_with_indexing(pattern: &impl Pattern<Constraint = C>, indexing: I) -> Self {
+        Self {
+            constraints: pattern.to_constraint_vec(),
+            host_indexing: indexing,
         }
     }
 }
 
-impl<U: Universe, PNode, PEdge: Eq + Hash, P> SinglePatternMatcher<U, PNode, PEdge, P> {
-    /// Create a new matcher for a single pattern.
-    pub fn new(
-        pattern: P,
-        edges: Vec<Edge<U, PNode, PEdge>>,
-        root: U,
-        root_prop: Option<PNode>,
-    ) -> Self {
-        Self {
-            pattern,
-            edges,
-            root,
-            root_prop,
-        }
-    }
-}
-
-impl<U, PNode, PEdge, P> SinglePatternMatcher<U, PNode, PEdge, P>
+impl<K, P, I> SinglePatternMatcher<Constraint<K, P>, I>
 where
-    U: Universe,
-    PNode: NodeProperty,
-    PEdge: EdgeProperty,
+    K: IndexKey,
 {
     /// Whether `self` matches `host` anchored at `root`.
     ///
     /// Check whether each edge of the pattern is valid in the host
-    fn match_exists<N: Universe>(
-        &self,
-        host_root: N,
-        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
-    ) -> bool {
-        !self
-            .get_match_map(host_root, validate_node, validate_edge)
-            .is_empty()
+    pub fn match_exists<D>(&self, host: &D) -> bool
+    where
+        P: Predicate<D>,
+        P::Value: IndexValue,
+        I: IndexingScheme<D, P::Value, Key = K>,
+    {
+        !self.get_all_bindings(host).is_empty()
     }
 
-    /// Match the pattern and return a map from pattern nodes to host nodes
-    ///
-    /// Returns `None` if the pattern does not match.
-    pub fn get_match_map<N: Universe>(
-        &self,
-        host_root: N,
-        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
-    ) -> Vec<BiMap<U, N>> {
+    /// Get the valid scope assignments as a map from variable names to host nodes.
+    fn get_all_bindings<D>(&self, host: &D) -> Vec<HashMap<K, P::Value>>
+    where
+        P: Predicate<D>,
+        P::Value: IndexValue,
+        I: IndexingScheme<D, P::Value, Key = K>,
+    {
         let mut candidates = VecDeque::new();
-        if self.root_prop.is_none() || validate_node(host_root, self.root_prop.as_ref().unwrap()) {
-            candidates.push_back((
-                self.edges.as_slice(),
-                BiMap::from_iter([(self.root, host_root)]),
-            ));
-        }
-        let mut final_match_maps = Vec::new();
-        while let Some((edges, match_map)) = candidates.pop_front() {
-            let Some(e) = edges.first() else {
-                final_match_maps.push(match_map);
+        candidates.push_back((self.constraints.as_slice(), HashMap::default()));
+        let mut final_bindings = Vec::new();
+        while let Some((constraints, bindings)) = candidates.pop_front() {
+            let [constraint, remaining @ ..] = constraints else {
+                final_bindings.push(bindings);
                 continue;
             };
-            let edges = &edges[1..];
 
-            let src = e.source.expect("Only connected edges allowed in pattern");
-            let tgt = e.target.expect("Only connected edges allowed in pattern");
-            let Some(&new_src) = match_map.get_by_left(&src) else {
-                continue;
-            };
-            let new_tgts = validate_edge(new_src, &e.edge_prop).into_iter().flatten();
-            for new_tgt in new_tgts {
-                let mut new_match_map = match_map.clone();
-                if let Some(target_prop) = e.target_prop.as_ref() {
-                    if !validate_node(new_tgt, target_prop) {
-                        continue;
-                    }
-                }
-                if match_map.get_by_left(&tgt) != Some(&new_tgt) {
-                    let Ok(_) = new_match_map.insert_no_overwrite(tgt, new_tgt) else {
-                        continue;
-                    };
-                }
-                candidates.push_back((edges, new_match_map));
-            }
+            let mut all_bindings = vec![bindings];
+            let keys = constraint.required_bindings();
+            all_bindings = all_bindings
+                .into_iter()
+                .flat_map(|bindings| {
+                    bindings
+                        .bind_with_scheme(keys.to_vec(), host, &self.host_indexing)
+                        .unwrap()
+                })
+                .collect();
+            candidates.extend(
+                all_bindings
+                    .into_iter()
+                    .filter(|bindings| constraint.is_satisfied(host, bindings).unwrap())
+                    .map(|bindings| (remaining, bindings)),
+            )
         }
-        final_match_maps
-    }
-
-    /// The matches in `host` starting at `host_root`
-    ///
-    /// For single pattern matchers there is always at most one match
-    fn find_rooted_match<N: Universe>(
-        &self,
-        host_root: N,
-        validate_node: impl for<'a> Fn(N, &PNode) -> bool,
-        validate_edge: impl for<'a> Fn(N, &'a PEdge) -> Vec<Option<N>>,
-    ) -> Vec<PatternMatch<PatternID, N>> {
-        if self.match_exists(host_root, validate_node, validate_edge) {
-            vec![PatternMatch {
-                pattern: 0.into(),
-                root: host_root,
-            }]
-        } else {
-            Vec::new()
-        }
-    }
-}
-
-impl<U: Universe> Pattern<U, (), (PortOffset, PortOffset)> {
-    pub fn into_single_pattern_matcher(
-        self,
-    ) -> SinglePatternMatcher<U, (), (PortOffset, PortOffset)> {
-        SinglePatternMatcher::from_pattern(self)
+        final_bindings
     }
 }
 
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use portgraph::{
-        LinkMut, NodeIndex, PortGraph, PortMut, PortOffset, PortView, UnmanagedDenseMap,
+
+    use crate::{
+        constraint::tests::TestConstraint, indexing::tests::TestIndexingScheme,
+        pattern::tests::TestPattern,
     };
 
-    use crate::{matcher::PortMatcher, utils::test::graph, Pattern, WeightedPattern};
+    use super::*;
 
-    use super::SinglePatternMatcher;
-
-    #[test]
-    fn single_pattern_match_simple() {
-        let g = graph();
-        let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p);
-
-        let (n0, n1, n3, n4) = (
-            NodeIndex::new(0),
-            NodeIndex::new(1),
-            NodeIndex::new(3),
-            NodeIndex::new(4),
-        );
-        assert_eq!(
-            matcher
-                .find_matches(&g)
-                .into_iter()
-                .flat_map(|m| m.to_match_map(&g, &matcher))
-                .collect_vec(),
-            vec![[(n0, n0), (n1, n1), (n3, n3), (n4, n4)]
-                .into_iter()
-                .collect()]
-        );
-    }
+    type TestMatcher = SinglePatternMatcher<TestConstraint, TestIndexingScheme>;
 
     #[test]
-    fn single_pattern_single_node() {
-        let mut g = PortGraph::new();
-        g.add_node(0, 1);
-        let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p);
-        let mut g = PortGraph::new();
-        g.add_node(1, 0);
+    fn test_single_pattern_matcher() {
+        let eq_2 = TestConstraint::new(vec![2, 2]);
+        let pattern: TestPattern<TestConstraint> = vec![eq_2].into();
+        let matcher = TestMatcher::from_pattern(&pattern);
 
-        assert_eq!(matcher.find_matches(&g).len(), 1);
-    }
-
-    #[test]
-    fn single_pattern_single_node_weighted() {
-        let mut g = PortGraph::new();
-        let n0 = g.add_node(0, 1);
-        let mut w = UnmanagedDenseMap::new();
-        w[n0] = 1;
-        let p = WeightedPattern::from_weighted_portgraph(&g, w);
-        let m = SinglePatternMatcher::from_pattern(p);
-
-        let mut g = PortGraph::new();
-        let n0 = g.add_node(0, 1);
-        let n1 = g.add_node(1, 0);
-        let mut w = UnmanagedDenseMap::new();
-        w[n0] = 0;
-        w[n1] = 1;
-        assert_eq!(m.find_matches((&g, &w).into()).len(), 1);
-    }
-
-    #[test]
-    fn single_node_loop() {
-        let mut g = PortGraph::new();
-        let n = g.add_node(1, 1);
-        g.link_ports(
-            g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
-            g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
-        )
-        .unwrap();
-        let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p);
-
-        let mut g = PortGraph::new();
-        let n = g.add_node(2, 1);
-        g.link_ports(
-            g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
-            g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(matcher.find_matches(&g).len(), 1);
-    }
-
-    #[test]
-    fn single_node_loop_no_match() {
-        let mut g = PortGraph::new();
-        let n = g.add_node(1, 1);
-        g.link_ports(
-            g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
-            g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
-        )
-        .unwrap();
-        let p = Pattern::from_portgraph(&g);
-        let matcher = SinglePatternMatcher::from_pattern(p);
-
-        let mut g = PortGraph::new();
-        let n0 = g.add_node(0, 1);
-        let n1 = g.add_node(1, 0);
-        g.link_ports(
-            g.port_index(n0, PortOffset::new_outgoing(0)).unwrap(),
-            g.port_index(n1, PortOffset::new_incoming(0)).unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(matcher.find_matches(&g), vec![]);
-    }
-
-    fn add_pattern(graph: &mut PortGraph, vertices: &[NodeIndex; 4]) {
-        let [_, _, v2_in, v3_in] = vertices.map(|n| graph.inputs(n).collect_vec());
-        let [v0_out, v1_out, v2_out, _] = vertices.map(|n| graph.outputs(n).collect_vec());
-
-        graph.link_ports(v0_out[0], v2_in[1]).unwrap();
-        graph.link_ports(v1_out[1], v2_in[0]).unwrap();
-        graph.link_ports(v2_out[0], v3_in[1]).unwrap();
-        graph.link_ports(v1_out[2], v3_in[2]).unwrap();
-    }
-
-    #[test]
-    fn single_pattern_match_complex() {
-        let mut pattern = PortGraph::new();
-        for _ in 0..4 {
-            pattern.add_node(3, 3);
-        }
-        let pi = |i| pattern.nodes_iter().nth(i).unwrap();
-        let ps = [pi(0), pi(1), pi(2), pi(3)];
-        add_pattern(&mut pattern, &ps);
-        let p = Pattern::from_portgraph(&pattern);
-        let matcher = SinglePatternMatcher::from_pattern(p);
-
-        let mut g = PortGraph::new();
-        for _ in 0..100 {
-            g.add_node(3, 3);
-        }
-        let vi = |i| g.nodes_iter().nth(i).unwrap();
-        let vs1 = [vi(0), vi(10), vi(30), vi(55)];
-        let vs2 = [vi(3), vi(12), vi(23), vi(44)];
-        let vs3 = [vi(12), vi(55), vi(98), vi(99)];
-        add_pattern(&mut g, &vs1);
-        add_pattern(&mut g, &vs2);
-        add_pattern(&mut g, &vs3);
-
-        let mut matches = matcher
-            .find_matches(&g)
-            .into_iter()
-            .flat_map(|m| m.to_match_map(&g, &matcher))
-            .map(|m| m.values().sorted().copied().collect_vec())
-            .collect_vec();
-        matches.sort_unstable_by_key(|v| *v.first().unwrap());
-        assert_eq!(matches.len(), 3);
-        assert_eq!(matches[0], vs1.to_vec());
-        assert_eq!(matches[1], vs2.to_vec());
-        assert_eq!(matches[2], vs3.to_vec());
+        // Matching against itself works
+        let matches = matcher.find_matches(&()).collect_vec();
+        assert_eq!(matches.len(), 1);
+        let PatternMatch {
+            pattern,
+            match_data,
+        } = matches.first().unwrap();
+        assert_eq!(match_data, &HashMap::from_iter((0..3).map(|i| (i, i))));
+        assert_eq!(*pattern, PatternID::default());
     }
 }
