@@ -22,9 +22,9 @@ enum TracerNodeWeight<NodeId> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum TracerEdgeWeight<NodeId, EdgeId, EdgeWeight> {
+enum TracerEdgeWeight<EdgeId, Action> {
     ExistingEdge(EdgeId),
-    NewEdge { to: NodeId, weight: EdgeWeight },
+    TerminalEdge { action: Action },
 }
 
 /// A handle to a traced node.
@@ -40,40 +40,46 @@ pub struct TracedNode(NodeIndex);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, From, Into)]
 pub struct TracedEdge(EdgeIndex);
 
-/// Trace edge traversals and additions in a graph.
+/// Trace graph traversal and modifications.
 ///
 /// Starting from an `initial_node`, keep track of edges traversed. This creates
 /// traced nodes and traced paths through the graph starting at `initial_node`.
+/// Graph modifications can be added on traced nodes for delayed execution, until
+/// after a larger graph operation is completed.
+///
+/// This is useful in state automata, where graph modifications must take care not
+/// to change states reachable along non-traced paths. By batching graph
+/// modifications, we can reduce the number of state cloning that are required
+/// and thus keep the overall state automaton smaller (see [Tracer::zip]).
 ///
 /// There is always a graph homomorphism from the traced graph into the underlying
-/// graph. However, this map is not injective: multiple traversals of the same
-/// path in the underlying graph will result in multiple traced paths in the
-/// traced graph.
+/// graph. The image of a traced node is the `NodeId` stored as weight. However,
+/// this map is not injective: multiple traversals of the same path in the
+/// underlying graph will result in multiple traced paths in the traced graph.
 ///
-/// New edges can be added at traced nodes, creating traced edge additions. This
-/// can be used to delay edge additions until after a larger graph operation
-/// is completed. This is useful in state automata, as we can ensure that new
-/// transitions can extend traced paths without changing the states reachable
-/// along non-traced paths.
+/// Actions are stored on edges that connect the action the nodes applies on and
+/// a terminal node.
 ///
-/// The target of edge additions is always an untraced node. Internally, we store
-/// them as edges to a terminal node.
-pub struct Tracer<NodeId, EdgeId, EdgeWeight> {
+/// # Generic parameters
+/// - `NodeId`: The type of node identifiers in the underlying graph.
+/// - `EdgeId`: The type of edge identifiers in the underlying graph.
+/// - `Action`: The type of actions that can be traced.
+pub struct Tracer<NodeId, EdgeId, Action> {
     /// The edges that have been traversed and traced
     ///
     /// The only edges with a `NewEdge` weight are the ones with target at the terminal.
-    trace: StableDiGraph<TracerNodeWeight<NodeId>, TracerEdgeWeight<NodeId, EdgeId, EdgeWeight>>,
+    trace: StableDiGraph<TracerNodeWeight<NodeId>, TracerEdgeWeight<EdgeId, Action>>,
     /// The initial node, from which all other nodes must be reachable.
     initial_node: TracedNode,
     /// The terminal node, to which all `NewEdge` connect to.
     terminal_node: TracedNode,
 }
 
-impl<NodeId, EdgeId, EdgeWeight> Tracer<NodeId, EdgeId, EdgeWeight>
+impl<NodeId, EdgeId, Action> Tracer<NodeId, EdgeId, Action>
 where
     NodeId: Copy + Eq + Ord,
     EdgeId: Copy + Eq + Ord,
-    EdgeWeight: Eq + Clone,
+    Action: Eq + Clone,
 {
     /// Create a new tracer for paths starting in `initial_node`.
     pub fn new(initial_node: NodeId) -> Self {
@@ -116,7 +122,7 @@ where
     }
 
     /// Consume the tracer and return all traced edge additions.
-    pub fn into_edge_additions(mut self) -> impl Iterator<Item = (NodeId, NodeId, EdgeWeight)> {
+    pub fn into_actions(mut self) -> impl Iterator<Item = (NodeId, Action)> {
         let edge_adds = self
             .trace
             .edges_directed(self.terminal_node.into(), Direction::Incoming)
@@ -125,11 +131,12 @@ where
         edge_adds.into_iter().map(move |edge_id| {
             let from_node = self.trace.edge_endpoints(edge_id).unwrap().0;
             let from = self.node(from_node.into()).unwrap();
-            let TracerEdgeWeight::NewEdge { to, weight } = self.trace.remove_edge(edge_id).unwrap()
+            let TracerEdgeWeight::TerminalEdge { action } =
+                self.trace.remove_edge(edge_id).unwrap()
             else {
-                panic!("Edge connected to terminal node");
+                panic!("Non-action edge connected to terminal node");
             };
-            (from, to, weight)
+            (from, action)
         })
     }
 
@@ -137,7 +144,7 @@ where
     pub fn edge(&self, edge: TracedEdge) -> Option<EdgeId> {
         match *self.trace.edge_weight(edge.into())? {
             TracerEdgeWeight::ExistingEdge(t) => Some(t),
-            TracerEdgeWeight::NewEdge { .. } => None,
+            TracerEdgeWeight::TerminalEdge { .. } => None,
         }
     }
 
@@ -161,15 +168,12 @@ where
     ///
     /// Use this to delay edge addition in the underlying graph. Recover all
     /// traced additions at the end of tracing using [`into_edge_additions`](Self::into_edge_additions).
-    pub fn add_edge(&mut self, constraint: EdgeWeight, from_node: TracedNode, to_state: NodeId) {
+    pub fn add_action(&mut self, action: Action, node: TracedNode) {
         let to_node = self.terminal_node;
         self.trace.add_edge(
-            from_node.into(),
+            node.into(),
             to_node.into(),
-            TracerEdgeWeight::NewEdge {
-                to: to_state,
-                weight: constraint,
-            },
+            TracerEdgeWeight::TerminalEdge { action },
         );
     }
 
@@ -215,23 +219,23 @@ where
     }
 }
 
-impl<NodeId, EdgeId, EdgeWeight> Tracer<NodeId, EdgeId, EdgeWeight> {
+impl<NodeId, EdgeId, Action> Tracer<NodeId, EdgeId, Action> {
     #[allow(dead_code)]
     pub fn dot_string(&self) -> String
     where
         NodeId: Debug,
         EdgeId: Debug,
-        EdgeWeight: Debug,
+        Action: Debug,
     {
         format!("{:?}", Dot::new(&self.trace))
     }
 }
 
-impl<NodeId: Debug, EdgeId: Debug, EdgeWeight: Debug> Debug for Tracer<NodeId, EdgeId, EdgeWeight>
+impl<NodeId: Debug, EdgeId: Debug, Action: Debug> Debug for Tracer<NodeId, EdgeId, Action>
 where
     NodeId: Debug,
     EdgeId: Debug,
-    EdgeWeight: Debug,
+    Action: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.dot_string())
@@ -306,48 +310,51 @@ mod tests {
 
     use rstest::{fixture, rstest};
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct TestAddEdge(usize);
+
     #[fixture]
-    fn tracer() -> Tracer<usize, (), ()> {
+    fn tracer() -> Tracer<usize, (), TestAddEdge> {
         // Trace paths starting at 0 (of some graph we don't build)
         let mut tracer = Tracer::new(0);
         // Traverse 0 -> 2 -> 3, then add 3 -> 6
         let traced_2 = tracer.traverse_edge((), tracer.initial_node(), 2);
         let traced_3 = tracer.traverse_edge((), traced_2, 3);
-        tracer.add_edge((), traced_3, 6);
+        tracer.add_action(TestAddEdge(6), traced_3);
         // Using the same 0 -> 2, then traverse 2 -> 5, then add 5 -> 66
         let traced_5 = tracer.traverse_edge((), traced_2, 5);
-        tracer.add_edge((), traced_5, 66);
+        tracer.add_action(TestAddEdge(66), traced_5);
         // New traversal 0 -> 1 -> 2 -> 3, then add 3 -> 6
         let traced_1 = tracer.traverse_edge((), tracer.initial_node(), 1);
         let traced_2 = tracer.traverse_edge((), traced_1, 2);
         let traced_3 = tracer.traverse_edge((), traced_2, 3);
-        tracer.add_edge((), traced_3, 6);
+        tracer.add_action(TestAddEdge(6), traced_3);
         // New traversal 0 -> 7, no edge addition
         tracer.traverse_edge((), tracer.initial_node(), 7);
         tracer
     }
 
     #[fixture]
-    fn tracer_parallel() -> Tracer<usize, (), ()> {
+    fn tracer_parallel() -> Tracer<usize, (), TestAddEdge> {
         // Trace paths starting at 0 (of some graph we don't build)
         let mut tracer = Tracer::new(0);
         // Traverse 0 -> 1, then add 1 -> 2
         let traced_1 = tracer.traverse_edge((), tracer.initial_node(), 1);
-        tracer.add_edge((), traced_1, 2);
+        tracer.add_action(TestAddEdge(2), traced_1);
         // Traverse 0 -> 1, then add 1 -> 2 (again)
         let traced_1 = tracer.traverse_edge((), tracer.initial_node(), 1);
-        tracer.add_edge((), traced_1, 2);
+        tracer.add_action(TestAddEdge(2), traced_1);
 
         tracer
     }
 
     #[rstest]
-    fn test_tracer(tracer: Tracer<usize, (), ()>) {
+    fn test_tracer(tracer: Tracer<usize, (), TestAddEdge>) {
         insta::assert_snapshot!(tracer.dot_string());
     }
 
     #[rstest]
-    fn test_tracer_zip(mut tracer: Tracer<usize, (), ()>) {
+    fn test_tracer_zip(mut tracer: Tracer<usize, (), TestAddEdge>) {
         assert_eq!(tracer.trace.node_count(), 9);
         tracer.zip();
         assert_eq!(tracer.trace.node_count(), 7);
@@ -355,7 +362,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_zip_parallel(mut tracer_parallel: Tracer<usize, (), ()>) {
+    fn test_zip_parallel(mut tracer_parallel: Tracer<usize, (), TestAddEdge>) {
         assert_eq!(tracer_parallel.trace.node_count(), 4);
         tracer_parallel.zip();
         assert_eq!(tracer_parallel.trace.node_count(), 3);
