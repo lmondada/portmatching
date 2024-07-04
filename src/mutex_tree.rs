@@ -148,6 +148,11 @@ impl<P> MutuallyExclusiveTree<P> {
         self.nodes[node].constraint_indices.push(index);
         Ok(())
     }
+
+    /// The number of nodes in the tree.
+    pub fn n_nodes(&self) -> usize {
+        self.nodes.len()
+    }
 }
 
 /// Constraint indices may not appear on non-leaf nodes.

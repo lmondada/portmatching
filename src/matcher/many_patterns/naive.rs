@@ -1,33 +1,55 @@
-use std::hash::Hash;
-
-use portgraph::{LinkView, NodeIndex};
-
 use crate::{
-    matcher::{Match, PatternMatch, PortMatcher, SinglePatternMatcher},
-    patterns::UnweightedEdge,
-    EdgeProperty, NodeProperty, Pattern, PatternID, Universe,
+    constraint::Constraint,
+    indexing::{IndexKey, IndexValue},
+    matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
+    pattern::Pattern,
+    HashMap, IndexingScheme, Predicate,
 };
 
 /// A simple matcher for matching multiple patterns.
 ///
 /// This matcher uses [`SinglePatternMatcher`]s to match each pattern separately.
 /// Useful as a baseline in benchmarking.
-pub struct NaiveManyMatcher<U: Universe, PNode, PEdge: Eq + Hash> {
-    matchers: Vec<SinglePatternMatcher<U, PNode, PEdge>>,
+pub struct NaiveManyMatcher<C, I> {
+    matchers: Vec<SinglePatternMatcher<C, I>>,
 }
 
-impl<U: Universe, PNode: NodeProperty, PEdge: EdgeProperty> NaiveManyMatcher<U, PNode, PEdge> {
-    pub fn from_patterns(patterns: Vec<Pattern<U, PNode, PEdge>>) -> Self {
+impl<C, I> NaiveManyMatcher<C, I> {
+    /// Create a new naive matcher from patterns.
+    ///
+    /// Use [`IndexingScheme::default`] as the indexing scheme.
+    pub fn from_patterns<'p, P>(patterns: impl IntoIterator<Item = &'p P>) -> Self
+    where
+        P: Pattern<Constraint = C> + 'p,
+        I: Default,
+    {
         Self {
             matchers: patterns
                 .into_iter()
-                .map(SinglePatternMatcher::from_pattern)
+                .map(|p| SinglePatternMatcher::from_pattern(p))
+                .collect(),
+        }
+    }
+
+    /// Create a new naive matcher from patterns, using a custom indexing scheme.
+    pub fn from_patterns_with_indexing<'p, P>(
+        patterns: impl IntoIterator<Item = &'p P>,
+        host_indexing: I,
+    ) -> Self
+    where
+        I: Clone,
+        P: Pattern<Constraint = C> + 'p,
+    {
+        Self {
+            matchers: patterns
+                .into_iter()
+                .map(|p| SinglePatternMatcher::from_pattern_with_indexing(p, host_indexing.clone()))
                 .collect(),
         }
     }
 }
 
-impl<U: Universe, PNode, PEdge: Eq + Hash> Default for NaiveManyMatcher<U, PNode, PEdge> {
+impl<C, I> Default for NaiveManyMatcher<C, I> {
     fn default() -> Self {
         Self {
             matchers: Default::default(),
@@ -35,44 +57,33 @@ impl<U: Universe, PNode, PEdge: Eq + Hash> Default for NaiveManyMatcher<U, PNode
     }
 }
 
-impl<U, G> PortMatcher<G, NodeIndex, U> for NaiveManyMatcher<U, (), UnweightedEdge>
+impl<K, P, D, I> PortMatcher<D> for NaiveManyMatcher<Constraint<K, P>, I>
 where
-    U: Universe,
-    G: LinkView + Copy,
+    K: IndexKey,
+    P: Predicate<D>,
+    P::Value: IndexValue,
+    I: IndexingScheme<D, P::Value, Key = K>,
 {
-    type PNode = ();
-    type PEdge = UnweightedEdge;
+    type Match = HashMap<K, P::Value>;
 
-    fn find_rooted_matches(&self, graph: G, root: NodeIndex) -> Vec<Match> {
-        self.matchers
-            .iter()
-            .enumerate()
-            .flat_map(|(i, m)| {
-                m.find_rooted_matches(graph, root).into_iter().map(
-                    move |PatternMatch { root, .. }| PatternMatch {
-                        pattern: i.into(),
-                        root,
-                    },
-                )
-            })
-            .collect()
-    }
-
-    fn get_pattern(&self, id: PatternID) -> Option<&Pattern<U, (), UnweightedEdge>> {
-        let m = self.matchers.get(id.0)?;
-        <SinglePatternMatcher<_, _, _> as PortMatcher<G, NodeIndex, U>>::get_pattern(m, 0.into())
+    fn find_matches<'a>(
+        &'a self,
+        host: &'a D,
+    ) -> impl Iterator<Item = PatternMatch<Self::Match>> + 'a {
+        self.matchers.iter().enumerate().flat_map(|(i, m)| {
+            m.find_matches(host)
+                .map(move |PatternMatch { match_data, .. }| PatternMatch {
+                    pattern: i.into(),
+                    match_data,
+                })
+        })
     }
 }
 
-impl<U: Universe, PNode, PEdge: Eq + Hash> FromIterator<SinglePatternMatcher<U, PNode, PEdge>>
-    for NaiveManyMatcher<U, PNode, PEdge>
-{
-    fn from_iter<T: IntoIterator<Item = SinglePatternMatcher<U, PNode, PEdge>>>(iter: T) -> Self {
+impl<C, I> FromIterator<SinglePatternMatcher<C, I>> for NaiveManyMatcher<C, I> {
+    fn from_iter<T: IntoIterator<Item = SinglePatternMatcher<C, I>>>(iter: T) -> Self {
         Self {
             matchers: iter.into_iter().collect(),
         }
     }
 }
-
-#[cfg(test)]
-mod naive_tests {}

@@ -1,6 +1,6 @@
 ---
 source: src/utils/tracer.rs
-assertion_line: 359
+assertion_line: 353
 expression: tracer.dot_string()
 ---
 digraph {
