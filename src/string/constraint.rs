@@ -8,28 +8,28 @@ use crate::{
 use super::{predicate::StringPredicate, StringIndexKey};
 
 /// A constraint for matching a string using [StringPredicate]s.
-pub type StringConstraint = Constraint<StringIndexKey, StringPredicate>;
+pub type StringConstraint<K = StringIndexKey> = Constraint<K, StringPredicate>;
 
-impl StringConstraint {
+impl<K: Copy + Ord> StringConstraint<K> {
     /// The largest variable index in the constraint
-    fn max_var(&self) -> StringIndexKey {
+    fn max_var(&self) -> K {
         *self.required_bindings().iter().max().unwrap()
     }
 }
 
-impl Ord for StringConstraint {
+impl<K: Copy + Ord> Ord for StringConstraint<K> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.max_var().cmp(&other.max_var())
     }
 }
 
-impl PartialOrd for StringConstraint {
+impl<K: Copy + Ord> PartialOrd for StringConstraint<K> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl ToConstraintsTree for StringConstraint {
+impl<K: Copy + Ord> ToConstraintsTree for StringConstraint<K> {
     fn to_constraints_tree(constraints: Vec<Self>) -> MutuallyExclusiveTree<Self> {
         if constraints.is_empty() {
             return MutuallyExclusiveTree::new();
@@ -54,7 +54,7 @@ impl ToConstraintsTree for StringConstraint {
     }
 }
 
-impl DetHeuristic for StringConstraint {
+impl<K: Copy + Ord> DetHeuristic for StringConstraint<K> {
     fn make_det(constraints: &[&Self]) -> bool {
         if constraints.is_empty() {
             return true;

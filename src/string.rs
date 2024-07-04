@@ -88,24 +88,32 @@ pub(super) mod tests {
     use rstest::rstest;
 
     use self::pattern::StringPattern;
-    use crate::{ManyMatcher, PatternMatch, PortMatcher};
+    use crate::{PatternMatch, PortMatcher};
 
     use super::*;
 
-    fn non_det_matcher(patterns: Vec<StringPattern>) -> StringManyMatcher {
-        ManyMatcher::from_patterns_with_det_heuristic(patterns, |_| false)
+    macro_rules! define_matcher_factories {
+        ($StringPattern:ty, $StringManyMatcher:ty) => {{
+            fn non_det_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
+                <$StringManyMatcher>::from_patterns_with_det_heuristic(patterns, |_| false)
+            }
+
+            fn default_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
+                <$StringManyMatcher>::from_patterns(patterns)
+            }
+
+            fn det_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
+                <$StringManyMatcher>::from_patterns_with_det_heuristic(patterns, |_| true)
+            }
+
+            &[non_det_matcher, default_matcher, det_matcher]
+        }};
     }
 
-    fn default_matcher(patterns: Vec<StringPattern>) -> StringManyMatcher {
-        ManyMatcher::from_patterns(patterns)
-    }
-
-    fn det_matcher(patterns: Vec<StringPattern>) -> StringManyMatcher {
-        ManyMatcher::from_patterns_with_det_heuristic(patterns, |_| true)
-    }
+    pub(crate) use define_matcher_factories;
 
     pub(super) const MATCHER_FACTORIES: &[fn(Vec<StringPattern>) -> StringManyMatcher] =
-        &[non_det_matcher, default_matcher, det_matcher];
+        define_matcher_factories!(StringPattern, StringManyMatcher);
 
     /// Comparing two lists of pattern matches.
     ///
