@@ -46,9 +46,14 @@ impl<K: IndexKey, P: Eq + Clone, I> ConstraintAutomaton<Constraint<K, P>, I> {
             .unique()
             .collect_vec();
 
-        let all_bindings = known_bindings
-            .bind_with_scheme(required_keys, host, &self.host_indexing)
+        let mut all_bindings = self
+            .host_indexing
+            .try_bind_all(known_bindings.clone(), required_keys, host)
             .unwrap();
+
+        if all_bindings.is_empty() {
+            all_bindings.push(known_bindings);
+        }
 
         all_bindings.into_iter().flat_map(move |bindings| {
             let bindings_clone = bindings.clone();
@@ -56,7 +61,7 @@ impl<K: IndexKey, P: Eq + Clone, I> ConstraintAutomaton<Constraint<K, P>, I> {
                 .clone()
                 .into_iter()
                 .filter_map(move |(id, constraint)| {
-                    let is_satisfied = constraint.is_satisfied(host, &bindings).unwrap();
+                    let is_satisfied = constraint.is_satisfied(host, &bindings).unwrap_or(false);
                     is_satisfied.then_some((id, bindings.clone()))
                 })
                 .peekable();
