@@ -8,7 +8,7 @@ use crate::{
     constraint::Constraint,
     indexing::{IndexKey, IndexValue},
     pattern::Pattern,
-    HashMap, IndexMap, IndexingScheme, PatternID, Predicate,
+    HashMap, IndexingScheme, PatternID, Predicate,
 };
 
 use super::{PatternMatch, PortMatcher};
@@ -101,15 +101,15 @@ where
             all_bindings = all_bindings
                 .into_iter()
                 .flat_map(|bindings| {
-                    bindings
-                        .bind_with_scheme(keys.to_vec(), host, &self.host_indexing)
+                    self.host_indexing
+                        .try_bind_all(bindings, keys.to_vec(), host)
                         .unwrap()
                 })
                 .collect();
             candidates.extend(
                 all_bindings
                     .into_iter()
-                    .filter(|bindings| constraint.is_satisfied(host, bindings).unwrap())
+                    .filter(|bindings| constraint.is_satisfied(host, bindings).unwrap_or(false))
                     .map(|bindings| (remaining, bindings)),
             )
         }
