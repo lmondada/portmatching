@@ -265,6 +265,10 @@ pub(super) mod tests {
     #[case("aea", vec!["$d$aa", "$aea"])]
     #[case("eaaa", vec!["a", "$aa", "$b$a$ca", "$b$c$e$e"])]
     #[case("eaa", vec!["a$b$a", "$a$e$e", "b$c$a", "$c$aa"])]
+    #[case("aaac", vec!["$d$d", "bac"])]
+    #[case("", vec!["aaaaaa", "baa", "a$b$a$a$c", "$c$b$b"])]
+    #[case("", vec!["caa", "a$e$a$b$fa$cca$aa", "$c$d$eca$c$c$aaaba", "$baaaabaaaaaaaaa$caaa", "ea$a$b$caa", "aaaaa", ""])]
+    #[case("fef", vec!["$b$a", "fe", "$ae"])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         use itertools::Itertools;
 
@@ -275,8 +279,6 @@ pub(super) mod tests {
 
         let [mut non_det, mut default, mut det] = apply_all_matchers(patterns, subject);
 
-        // println!("{}", non_det_matcher(patterns.clone()).dot_string());
-        // println!("{}", det_matcher(patterns.clone()).dot_string());
         // Compare results up to reordering
         non_det.sort();
         default.sort();

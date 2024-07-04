@@ -1,4 +1,5 @@
 use std::fmt::{self, Debug};
+use std::hash::Hash;
 
 use itertools::Itertools;
 
@@ -40,7 +41,7 @@ where
 
 impl<K, P, PT, I> ManyMatcher<PT, K, P, I>
 where
-    Constraint<K, P>: Eq + Clone + ToConstraintsTree,
+    Constraint<K, P>: Eq + Clone + Hash + ToConstraintsTree,
     PT: Pattern<Constraint = Constraint<K, P>>,
     I: Default,
 {
@@ -62,8 +63,8 @@ where
         make_det: impl for<'c> FnMut(&[&'c Constraint<K, P>]) -> bool,
     ) -> Self {
         let constraints = patterns.iter().map(|p| p.to_constraint_vec()).collect_vec();
-        let builder = AutomatonBuilder::from_constraints(constraints);
-        let (automaton, pattern_to_id) = builder.build(make_det);
+        let builder = AutomatonBuilder::from_constraints(constraints).set_det_heuristic(make_det);
+        let (automaton, pattern_to_id) = builder.finish();
         let patterns = pattern_to_id.into_iter().zip(patterns).collect();
         Self {
             automaton,

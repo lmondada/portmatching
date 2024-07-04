@@ -1,0 +1,12 @@
+---
+source: src/automaton/builder.rs
+expression: builder.matcher.dot_string()
+---
+digraph {
+    0 [ label = "ND" ]
+    1 [ label = "ND" ]
+    2 [ label = "ND" ]
+    0 -> 2 [ label = "()" ]
+    0 -> 1 [ label = "()" ]
+    2 -> 1 [ label = "()" ]
+}
