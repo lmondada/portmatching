@@ -135,6 +135,7 @@ pub(super) struct StateTuple<'a, C> {
     transitions: Vec<(Option<&'a C>, StateID)>,
 }
 
+// Small, private utils functions
 impl<C, I> ConstraintAutomaton<C, I> {
     pub(super) fn node_weight(&self, state: StateID) -> &State {
         self.graph.node_weight(state.0).expect("unknown state")

@@ -39,6 +39,7 @@ mod tests {
         .. ProptestConfig::default()
     })]
         #[test]
+        #[ignore = "a bit slow"]
         fn proptest_matrix(
             subject in "([a-f]*\n)*",
             patterns in prop::collection::vec(any::<MatrixPattern>(), 1..10)

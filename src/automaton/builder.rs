@@ -231,7 +231,7 @@ where
             .filter(|i| !added_constraints.contains(i))
             .collect_vec();
 
-        // Add/hide any constraints that were not added under a fail transition
+        // Add any constraints that were not added under a fail transition
         if !not_added.is_empty() {
             let fail_state = self.add_fail(state);
             // Add edges to children
@@ -503,9 +503,9 @@ mod tests {
         let n2 = builder.matcher.add_non_det_node();
         let mutex_tree = {
             let mut tree = MutuallyExclusiveTree::new();
-            let tree_child = tree.add_child(tree.root(), ());
+            let tree_child = tree.add_child(tree.root(), 1);
             tree.add_constraint_index(tree_child, 0).unwrap();
-            let tree_gchild = tree.add_child(tree_child, ());
+            let tree_gchild = tree.add_child(tree_child, 2);
             tree.add_constraint_index(tree_gchild, 1).unwrap();
             tree
         };

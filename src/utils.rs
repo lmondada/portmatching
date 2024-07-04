@@ -1,17 +1,18 @@
 //! Utility functions.
 
-// #[cfg(feature = "portgraph")]
-// pub(crate) mod portgraph;
-// #[cfg(all(feature = "portgraph", feature = "proptest"))]
-// pub mod test;
+#[cfg(feature = "portgraph")]
+pub(crate) mod portgraph;
+#[cfg(all(feature = "portgraph", feature = "proptest"))]
+pub mod test;
 mod toposort;
 pub(crate) mod unique_stack;
 
 use itertools::Itertools;
-// #[cfg(feature = "portgraph")]
-// pub(crate) use portgraph::{connected_components, is_connected};
-// #[cfg(all(feature = "portgraph", feature = "proptest"))]
-// pub use test::gen_portgraph_connected;
+#[cfg(feature = "portgraph")]
+pub(crate) use portgraph::is_connected;
+#[cfg(all(feature = "portgraph", feature = "proptest"))]
+pub use test::gen_portgraph_connected;
+
 pub(crate) use toposort::{online_toposort, OnlineToposort};
 pub(crate) use unique_stack::UniqueStack;
 
