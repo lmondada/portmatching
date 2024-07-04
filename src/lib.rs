@@ -9,6 +9,7 @@ pub mod mutex_tree;
 pub mod pattern;
 // #[cfg(feature = "portgraph")]
 // pub mod portgraph;
+pub mod matrix;
 pub mod predicate;
 pub mod string;
 pub mod utils;

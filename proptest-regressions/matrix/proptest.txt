@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e09999177535699713051530cec159b0b5da6ebd4aae5d390fb730f1eaa6b107 # shrinks to subject = "f\n", patterns = [""" f """ , """ """ , """ f """ ]
+cc 171c5bec0dc111c129db312af3e9250097f5752db130978894737159e4e413da # shrinks to subject = "", patterns = ["""  --a """ , """  ---aa -aa ---- aaaa """ , """ aa --- """ , """   --$f- $f """ , """  a a-- aaaaa a a """ ]
+cc 39885435ce0ac5ed34fb49f90ee780e61247608b4cd8cfc7d9864f9d5db9d723 # shrinks to subject = "feeacecdcfafdcbaddaffebcabdb\nafbbeeae\nfaafecccadaeeeebaedffce\nfebefcbdfcfbcfaadebadecfacdcffdc\ncababecfcfafcfdfcdfdba\neeaceedbfafccaedecbcdfeb\ndeeecfafadbcedbeddeafcebfecbe\ndae\ncaffbecfbbea\nefdfe\nfaeafabffbbcddbecbffaaddab\ncfecfcbcbeebddfdafdabfbdcdaadeb\ncadcddafafcabfdbec\nbefcfceeaecdecfbdafaacafbfab\ne\ncfbccfadac\ndabbcfefffc\ncbbe\nacebebfe\n", patterns = [""" $a--d-b-$f$d- ------d """ , """   -$ab-- -a-$a -c$f """ , """  e-$eb$c--- --b b-f$f--$fea """ , """ $cd-$bd---c a--$bf----a $e $f$b$be- -ea-ba$d$c-- -$f- $cd--d$dd--- $c$d-$c--$bd-  """ , """ $c-da$cfc -$c-b$a---c$d $f --b -ba -$c$ece-- ----a$d$e--d -$c$d-- """ , """ da--$d-c-$f """ , """ dd$a$f - $d--c -c$ce- f---$c-- a-f$e-- -- -e $d-b-  """ ]
