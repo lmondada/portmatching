@@ -1,63 +1,27 @@
-// TODO: reactivate this
-// #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
 
 pub mod automaton;
+pub mod constraint;
+pub mod indexing;
 pub mod matcher;
-pub mod new_api_v04;
-pub mod patterns;
-pub(crate) mod predicate;
-pub mod weighted_graph;
-
+pub mod mutex_tree;
+pub mod pattern;
+// #[cfg(feature = "portgraph")]
+// pub mod portgraph;
+pub mod predicate;
+// pub mod string;
 pub mod utils;
 
-pub use matcher::{ManyMatcher, NaiveManyMatcher, PatternID, PortMatcher, SinglePatternMatcher};
-pub use patterns::{Pattern, UnweightedPattern, WeightedPattern};
-pub use weighted_graph::WeightedGraphRef;
+pub use constraint::Constraint;
+pub use indexing::{IndexMap, IndexingScheme};
+pub use matcher::{
+    ManyMatcher, NaiveManyMatcher, PatternID, PatternMatch, PortMatcher, SinglePatternMatcher,
+};
+pub use pattern::Pattern;
+pub use predicate::{ArityPredicate, Predicate};
 
-use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use rustc_hash::{FxHashMap, FxHashSet};
 
-use std::hash::{BuildHasherDefault, Hash};
-
-pub trait Universe: Copy + Eq + Hash + Ord {}
-
-impl<U: Copy + Eq + Hash + Ord> Universe for U {}
-
-pub trait EdgeProperty: Clone + Ord + Hash {
-    type OffsetID: Eq + Copy;
-
-    fn reverse(&self) -> Option<Self>;
-
-    fn offset_id(&self) -> Self::OffsetID;
-}
-
-pub trait NodeProperty: Clone + Hash + Ord {}
-
-impl<U: Clone + Hash + Ord> NodeProperty for U {}
-
-impl<A: Copy + Ord + Hash> EdgeProperty for (A, A) {
-    type OffsetID = A;
-
-    fn reverse(&self) -> Option<Self> {
-        (self.1, self.0).into()
-    }
-
-    fn offset_id(&self) -> Self::OffsetID {
-        self.0
-    }
-}
-
-impl EdgeProperty for () {
-    type OffsetID = ();
-
-    fn reverse(&self) -> Option<Self> {
-        ().into()
-    }
-
-    fn offset_id(&self) -> Self::OffsetID {}
-}
-
-type BiMap<S, U> =
-    bimap::BiHashMap<S, U, BuildHasherDefault<FxHasher>, BuildHasherDefault<FxHasher>>;
-type HashSet<S> = FxHashSet<S>;
-pub type HashMap<K, V> = FxHashMap<K, V>;
+pub(crate) type HashMap<K, V> = FxHashMap<K, V>;
+pub(crate) type HashSet<T> = FxHashSet<T>;
