@@ -5,7 +5,6 @@ pub(crate) fn mark_last<T>(iter: impl IntoIterator<Item = T>) -> impl Iterator<I
     MarkLast::new(iter)
 }
 
-#[derive(Debug, Clone)]
 pub struct MarkLast<I: Iterator> {
     iter: Peekable<I>,
 }
