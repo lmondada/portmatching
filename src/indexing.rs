@@ -143,7 +143,7 @@ pub trait IndexKey: Eq + Copy + Hash + Debug {}
 /// and [`Debug`].
 pub trait IndexValue: Clone + PartialEq + Debug {}
 
-impl<T: Eq + Hash + Copy + Debug + Hash> IndexKey for T {}
+impl<T: Eq + Copy + Debug + Hash> IndexKey for T {}
 impl<T: Clone + PartialEq + Debug> IndexValue for T {}
 
 impl<K: IndexKey, V: IndexValue> IndexMap<K, V> for HashMap<K, V> {
