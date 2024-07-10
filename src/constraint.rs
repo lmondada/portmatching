@@ -46,6 +46,7 @@ pub trait DetHeuristic {
 
 /// Errors that occur when constructing constraints.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum InvalidConstraint {
     /// Cannot assign a value if the RHS is not a variable
     #[error("Cannot assign a value to {0}, it is not a variable")]
