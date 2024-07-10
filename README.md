@@ -70,6 +70,6 @@ the crate.
 
 Distributed under the MIT License. See [LICENSE][] for more information.
 
-  [build_status]: https://github.com/lmondada/portmatching/workflows/Continuous%20integration/badge.svg?branch=main
+  [build_status]: https://github.com/lmondada/portmatching/actions/workflows/ci.yml/badge.svg
   [LICENSE]: LICENCE
   [msrv]: https://img.shields.io/badge/rust-1.75.0%2B-blue.svg?maxAge=3600
