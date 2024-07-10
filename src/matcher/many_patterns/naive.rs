@@ -9,7 +9,9 @@ use crate::{
 /// A simple matcher for matching multiple patterns.
 ///
 /// This matcher uses [`SinglePatternMatcher`]s to match each pattern separately.
-/// Useful as a baseline in benchmarking.
+///
+/// You probably do not want to use this matcher for anything other than as a
+/// baseline in benchmarking.
 pub struct NaiveManyMatcher<C, I> {
     matchers: Vec<SinglePatternMatcher<C, I>>,
 }

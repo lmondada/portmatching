@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use std::iter::{FusedIterator, Peekable};
 
 /// Mark the last element of an iterator as true and return the rest as false.
 pub(crate) fn mark_last<T>(iter: impl IntoIterator<Item = T>) -> impl Iterator<Item = (T, bool)> {
@@ -26,6 +26,14 @@ impl<I: Iterator> Iterator for MarkLast<I> {
         Some((next, is_last))
     }
 }
+
+impl<I: ExactSizeIterator> ExactSizeIterator for MarkLast<I> {
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+}
+
+impl<I: FusedIterator> FusedIterator for MarkLast<I> {}
 
 #[cfg(test)]
 mod tests {
