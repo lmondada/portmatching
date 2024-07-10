@@ -48,6 +48,7 @@ pub trait IndexingScheme<Data, Value> {
 /// The result of a call to [IndexingScheme::valid_bindings].
 ///
 /// Either a list of valid bindings or a list of missing index keys.
+#[derive(Debug, Clone)]
 pub enum BindingOptions<K, V> {
     /// A list of valid bindings, in the order they should be considered
     ValidBindings(Vec<V>),
