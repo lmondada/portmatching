@@ -115,6 +115,7 @@ pub trait IndexMap<K, V>: Default + Clone {
 
 /// Errors in creating index key-value bindings.
 #[derive(Debug, Clone, Error)]
+#[non_exhaustive]
 pub enum BindVariableError {
     /// A binding already exists for the index key.
     #[error(
