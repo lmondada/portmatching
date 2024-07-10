@@ -134,7 +134,7 @@ pub enum BindVariableError {
 ///
 /// This is implemented for all types that implement [`Eq`], [`Hash`], [`Copy`]
 /// and [`Debug`].
-pub trait IndexKey: Eq + Hash + Copy + Hash + Debug {}
+pub trait IndexKey: Eq + Copy + Hash + Debug {}
 
 /// A shortcut for types that can be used as index values.
 ///
