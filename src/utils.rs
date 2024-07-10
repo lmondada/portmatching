@@ -1,48 +1,30 @@
 //! Utility functions.
 
-#[cfg(test)]
-pub(crate) mod test;
-
-mod connected_components;
+pub(crate) mod mark_last;
+// #[cfg(feature = "portgraph")]
+// pub(crate) mod portgraph;
+// #[cfg(all(feature = "portgraph", feature = "proptest"))]
+// pub mod test;
 mod toposort;
-mod tracer;
+pub(crate) mod tracer;
 
-pub use connected_components::{connected_components, is_connected};
-use portgraph::{LinkView, NodeIndex, SecondaryMap};
-pub(crate) use toposort::online_toposort;
+use itertools::Itertools;
+pub(crate) use mark_last::mark_last;
+// #[cfg(feature = "portgraph")]
+// pub(crate) use portgraph::{connected_components, is_connected};
+// #[cfg(all(feature = "portgraph", feature = "proptest"))]
+// pub use test::gen_portgraph_connected;
+pub(crate) use toposort::{online_toposort, OnlineToposort};
+pub(crate) use tracer::{TracedNode, Tracer};
 
-use crate::{patterns::UnweightedEdge, WeightedGraphRef};
-
-/// Check if an edge `e` is valid in a portgraph `g` without weights.
-pub(crate) fn validate_unweighted_edge<G: LinkView>(
-    graph: G,
-) -> impl for<'a> Fn(NodeIndex, &'a UnweightedEdge) -> Vec<Option<NodeIndex>> {
-    move |src, &(src_port, tgt_port)| {
-        let Some(src_port_index) = graph.port_index(src, src_port) else {
-            return Vec::new();
-        };
-        let tgt_port_indices = graph.port_links(src_port_index);
-        tgt_port_indices
-            .map(|(_, tgt_port_index)| {
-                let tgt = graph.port_node(tgt_port_index)?;
-                (graph.port_offset(tgt_port_index)? == tgt_port).then_some(tgt)
-            })
-            .collect()
-    }
-}
-
-/// Check if an edge `e` is valid in a weighted portgraph `g`.
-pub(crate) fn validate_weighted_node<G, W, PNode>(
-    graph: WeightedGraphRef<G, &W>,
-) -> impl for<'a> Fn(NodeIndex, &PNode) -> bool + '_
-where
-    W: SecondaryMap<NodeIndex, PNode>,
-    PNode: Eq,
-{
-    let (_, weights) = graph.into();
-    move |node, node_prop| weights.get(node) == node_prop
-}
-
-pub(crate) fn always_true<A, B>(_: A, _: &B) -> bool {
-    true
+/// Sort a vector and return a vector of pairs of the original value and its position.
+#[allow(dead_code)]
+pub(crate) fn sort_with_indices<V: Ord>(vec: impl IntoIterator<Item = V>) -> Vec<(V, usize)> {
+    let mut vec_inds = vec
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| (c, i))
+        .collect_vec();
+    vec_inds.sort_by(|(c1, _), (c2, _)| c1.cmp(c2));
+    vec_inds
 }
