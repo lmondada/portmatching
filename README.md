@@ -62,8 +62,7 @@ TODO
 ## Features
 
 -   `serde`: Enable serialization and deserialization via serde.
--   `datagen`: Necessary for the [`data_generation`](src/bin/data_generation.rs) binary, for benchmarking. Currently not useful to the end user of
-the crate.
+-   `datagen`: Necessary for the [`data_generation`](src/bin/data_generation.rs) binary, for benchmarking. Currently not useful to the end user of the crate.
 
 
 ## License
