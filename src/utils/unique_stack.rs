@@ -15,7 +15,7 @@ struct El<T> {
 ///
 /// A first in first out stack. If pushing an element that is already
 /// in the stack, the operation moves that element to the top of the stack.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct UniqueStack<T> {
     elements: Vec<Option<El<T>>>,
     indices: HashMap<T, usize>,
