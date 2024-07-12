@@ -1,13 +1,19 @@
 //! A stack that only allows unique elements.
 
-use std::hash::Hash;
+use std::{fmt::Debug, hash::Hash, iter};
+
+use itertools::Itertools;
 
 use crate::HashMap;
 
-#[derive(Clone)]
+/// An element of the stack
+#[derive(Clone, Debug)]
 struct El<T> {
+    /// The value of the element
     value: T,
+    /// The index of the next element in the stack
     below: Option<usize>,
+    /// The index of the previous element in the stack
     above: Option<usize>,
 }
 
@@ -15,7 +21,10 @@ struct El<T> {
 ///
 /// A first in first out stack. If pushing an element that is already
 /// in the stack, the operation moves that element to the top of the stack.
-#[derive(Clone, Debug)]
+//
+// TODO: instead of `free_indices`, one could use below and above to create
+// a second linked list of free indices.
+#[derive(Clone)]
 pub(crate) struct UniqueStack<T> {
     elements: Vec<Option<El<T>>>,
     indices: HashMap<T, usize>,
@@ -31,6 +40,13 @@ impl<T: Eq + Hash + Clone> UniqueStack<T> {
             indices: HashMap::default(),
             top: None,
             free_indices: Vec::new(),
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        UniqueStack {
+            elements: Vec::with_capacity(capacity),
+            ..Self::new()
         }
     }
 
@@ -63,7 +79,11 @@ impl<T: Eq + Hash + Clone> UniqueStack<T> {
         let top_index = self.top?;
         let el = self.elements[top_index].take().unwrap();
         self.indices.remove(&el.value);
+        self.free_indices.push(top_index);
         self.top = el.below;
+        if let Some(new_top) = self.top {
+            self.elements[new_top].as_mut().unwrap().above = None;
+        }
         Some(el.value)
     }
 
@@ -73,6 +93,17 @@ impl<T: Eq + Hash + Clone> UniqueStack<T> {
     pub fn top(&self) -> Option<&T> {
         self.top
             .map(|index| &self.elements[index].as_ref().unwrap().value)
+    }
+
+    /// Iterate over the elements in the stack
+    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
+        let mut next_index = self.top;
+        iter::from_fn(move || {
+            let index = next_index.take()?;
+            let el = self.elements[index].as_ref().unwrap();
+            next_index = el.below;
+            Some(&el.value)
+        })
     }
 
     /// A free spot in the vector, creating it if necessary
@@ -92,6 +123,7 @@ impl<T: Eq + Hash + Clone> UniqueStack<T> {
         let &El { below, above, .. } = self.elements[index].as_ref().unwrap();
         self.link(below, above);
         self.link(prev_top, Some(index));
+        self.elements[index].as_mut().unwrap().above = None;
     }
 
     /// Link two elements together by setting `above` and `below` indices
@@ -107,7 +139,9 @@ impl<T: Eq + Hash + Clone> UniqueStack<T> {
 
 impl<T: Eq + Hash + Clone> FromIterator<T> for UniqueStack<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut stack = UniqueStack::new();
+        // TODO: rewrite to skip some redundant checks here
+        let iter = iter.into_iter();
+        let mut stack = UniqueStack::with_capacity(iter.size_hint().0);
         for item in iter {
             stack.push(item);
         }
@@ -120,6 +154,14 @@ impl<T: Eq + Hash + Clone> Extend<T> for UniqueStack<T> {
         for item in iter {
             self.push(item);
         }
+    }
+}
+
+impl<T: Eq + Hash + Clone + Debug> Debug for UniqueStack<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut stack = self.iter().collect_vec();
+        stack.reverse();
+        write!(f, "UniqueStack{:?}", stack)
     }
 }
 
@@ -184,6 +226,13 @@ mod tests {
         assert_eq!(stack.pop(), Some(3));
         assert_eq!(stack.pop(), Some(2));
         assert_eq!(stack.pop(), None);
+    }
+
+    #[test]
+    fn test_iter_debug() {
+        let vec = vec![1, 2, 3];
+        let stack: UniqueStack<i32> = vec.iter().copied().collect();
+        assert_eq!(format!("{:?}", stack), format!("UniqueStack{:?}", vec));
     }
 }
 

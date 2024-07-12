@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 
 use crate::{utils::UniqueStack, HashSet, IndexMap};
 
@@ -27,8 +27,14 @@ impl<K: Clone, V, M: Clone> Clone for BindingBuilder<K, V, M> {
     }
 }
 
+impl<K, V, M: fmt::Debug> fmt::Debug for BindingBuilder<K, V, M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "BindingBuilder{:?}", self.bindings)
+    }
+}
+
 impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
-    pub(super) fn new(keys: impl IntoIterator<Item = K>, bindings: M) -> Self {
+    pub fn new(keys: impl IntoIterator<Item = K>, bindings: M) -> Self {
         let missing_keys = keys.into_iter().collect();
         Self {
             missing_keys,
@@ -38,11 +44,11 @@ impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
         }
     }
 
-    pub(super) fn bindings(&self) -> &M {
+    pub fn bindings(&self) -> &M {
         &self.bindings
     }
 
-    pub(super) fn top_missing_key(&mut self) -> Option<K> {
+    pub fn top_missing_key(&mut self) -> Option<K> {
         let mut key = *self.missing_keys.top()?;
         while self.bindings.get(&key).is_some() || self.exclude_keys.contains(&key) {
             // Already bound or excluded
@@ -52,11 +58,11 @@ impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
         Some(key)
     }
 
-    pub(super) fn finish(self) -> M {
+    pub fn finish(self) -> M {
         self.bindings
     }
 
-    pub(super) fn apply_bindings(
+    pub fn apply_bindings(
         mut self,
         key: K,
         values: impl IntoIterator<Item = V>,
@@ -74,7 +80,7 @@ impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
             .collect()
     }
 
-    pub(super) fn exclude_key(&mut self, key: K) {
+    pub fn exclude_key(&mut self, key: K) {
         if self.missing_keys.top() == Some(&key) {
             self.missing_keys.pop();
         }
@@ -84,7 +90,7 @@ impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
     /// Extend the missing key set.
     ///
     /// Return whether any key was added.
-    pub(super) fn extend_missing_keys(&mut self, keys: impl IntoIterator<Item = K>) -> bool {
+    pub fn extend_missing_keys(&mut self, keys: impl IntoIterator<Item = K>) -> bool {
         let mut to_add = keys
             .into_iter()
             .filter(|key| !self.exclude_keys.contains(key))
