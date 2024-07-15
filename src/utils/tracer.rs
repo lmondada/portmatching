@@ -261,7 +261,7 @@ fn partition_children<N: Eq + Ord, E: Eq>(
     graph
         .neighbors_directed(node, Direction::Outgoing)
         // This sorting may miss some of the grouping possibilities, but the tradeoff
-        // would be to require C: Ord
+        // would be to require E: Ord
         .sorted_by_key(|child| key_of(*child).0)
         .group_by(|child| key_of(*child))
         .into_iter()

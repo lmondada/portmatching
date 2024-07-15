@@ -5,14 +5,15 @@ use petgraph::{visit::IntoNeighborsDirected, Direction};
 
 use crate::HashSet;
 
-/// Perform a topological sort of a graph, without reference to it.
+/// Perform a topological sort of a graph, while allowing graph mutations.
 ///
-/// This will only traverse the descendants of `root`.
+/// The graph is expected to be acyclic and all nodes must be reachable from the
+/// root (i.e. the root is the source of the graph).
 ///
 /// The particularity of this implemention is that graph mutations during
 /// traversal are supported, as long as node indices are stable. As a tradeoff,
 /// this traversal is not particularly efficient: each call to `next` may take
-/// up to time O(V + E).
+/// up to O(V + E) time.
 ///
 /// ## Supported graph modifications
 ///
