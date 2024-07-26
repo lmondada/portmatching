@@ -21,9 +21,8 @@ impl Arbitrary for StringPattern {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
 
-    use crate::{string::tests::MATCHER_FACTORIES, PortMatcher};
+    use crate::string::tests::apply_all_matchers;
 
     use super::*;
 
@@ -33,17 +32,13 @@ mod tests {
             subject in "[a-f]*",
             patterns in prop::collection::vec(any::<StringPattern>(), 1..10)
         ) {
-            let all_matches = MATCHER_FACTORIES.iter().map(|matcher_factory| {
-                matcher_factory(patterns.clone()).find_matches(&subject).collect_vec()
-            });
-            let Some((mut exp, mut act1, mut act2)) = all_matches.into_iter().collect_tuple() else {
-                panic!("Expected 3 matchers");
-            };
-            exp.sort();
-            act1.sort();
-            act2.sort();
-            prop_assert_eq!(&exp, &act1);
-            prop_assert_eq!(&exp, &act2);
+            let [mut nondet, mut default, mut det] = apply_all_matchers(patterns, &subject);
+
+            nondet.sort();
+            default.sort();
+            det.sort();
+            prop_assert_eq!(&nondet, &default);
+            prop_assert_eq!(&nondet, &det);
         }
     }
 }

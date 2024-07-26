@@ -1,5 +1,3 @@
-//! Utilities for testing and proptests.
-
 use std::fmt;
 
 use itertools::Itertools;
@@ -49,8 +47,7 @@ fn connected_strat<G: PortView + LinkView + PortMut + fmt::Debug>(
     })
 }
 
-/// Proptest strategy for generating a connected portgraph.
-pub fn gen_portgraph_connected(
+pub(crate) fn gen_portgraph_connected(
     n_nodes: usize,
     n_ports: usize,
     max_edges: usize,
@@ -58,8 +55,7 @@ pub fn gen_portgraph_connected(
     connected_strat(gen_portgraph(n_nodes, n_ports, max_edges))
 }
 
-/// Proptest strategy for generating a connected multiportgraph.
-pub fn gen_multiportgraph_connected(
+pub(crate) fn gen_multiportgraph_connected(
     n_nodes: usize,
     n_ports: usize,
     max_edges: usize,

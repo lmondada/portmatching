@@ -143,6 +143,12 @@ pub enum BindVariableError {
         /// The value that is being bound
         new_value: String,
     },
+    /// Trying to bind an invalid key
+    #[error("Cannot bind to key: {key}")]
+    InvalidKey {
+        /// The index key that is invalid
+        key: String,
+    },
 }
 
 /// A shortcut for types that can be used as index keys.

@@ -4,7 +4,7 @@ use itertools::Itertools;
 
 use crate::{ArityPredicate, Predicate};
 
-use super::StringPosition;
+use super::StringSubjectPosition;
 
 /// Predicate used when matching strings.
 ///
@@ -28,19 +28,19 @@ impl ArityPredicate for CharacterPredicate {
 }
 
 impl Predicate<String> for CharacterPredicate {
-    type Value = StringPosition;
+    type Value = StringSubjectPosition;
 
     fn check(&self, data: &String, args: &[impl Borrow<Self::Value>]) -> bool {
         match self {
             CharacterPredicate::BindingEq => {
-                let (StringPosition(pos1), StringPosition(pos2)) =
+                let (StringSubjectPosition(pos1), StringSubjectPosition(pos2)) =
                     args.iter().map(|a| a.borrow()).collect_tuple().unwrap();
                 let char1 = data.chars().nth(*pos1);
                 let char2 = data.chars().nth(*pos2);
                 char1.is_some() && char1 == char2
             }
             CharacterPredicate::ConstVal(c) => {
-                let StringPosition(pos) =
+                let StringSubjectPosition(pos) =
                     args.iter().map(|a| a.borrow()).exactly_one().ok().unwrap();
                 data.chars().nth(*pos) == Some(*c)
             }

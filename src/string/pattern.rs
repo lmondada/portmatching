@@ -1,9 +1,9 @@
-use std::iter;
+use std::{collections::hash_map::Entry, iter};
 
 use crate::{HashMap, Pattern};
 use derive_more::Display;
 
-use super::{constraint::StringConstraint, predicate::CharacterPredicate, StringIndexKey};
+use super::{constraint::StringConstraint, predicate::CharacterPredicate, StringPatternPosition};
 
 /// A pattern for matching on strings.
 ///
@@ -59,11 +59,11 @@ impl StringPattern {
         Self(parsed_iter.collect())
     }
 
-    fn enumerate(&self) -> impl Iterator<Item = (StringIndexKey, CharVar)> + '_ {
+    fn enumerate(&self) -> impl Iterator<Item = (StringPatternPosition, CharVar)> + '_ {
         self.0
             .iter()
             .enumerate()
-            .map(|(i, &char_var)| (StringIndexKey(i), char_var))
+            .map(|(i, &char_var)| (StringPatternPosition(i), char_var))
     }
 }
 
@@ -83,30 +83,34 @@ impl Pattern for StringPattern {
                             .unwrap(),
                     );
                 }
-                CharVar::Variable(c) => {
-                    if let Some(&first_index) = var_to_pos.get(&c) {
+                CharVar::Variable(c) => match var_to_pos.entry(c) {
+                    Entry::Occupied(first_index) => {
                         constraints.push(
                             Self::Constraint::try_new(
                                 CharacterPredicate::BindingEq,
-                                vec![index, first_index],
+                                vec![index, *first_index.get()],
                             )
                             .unwrap(),
                         );
-                    } else {
-                        var_to_pos.insert(c, index);
                     }
-                }
+                    Entry::Vacant(entry) => {
+                        entry.insert(index);
+                    }
+                },
             }
         }
-        if constraints.is_empty() {
-            // We add one (dummy) constraint for the empty pattern, forcing
-            // the matcher to bind the first character to a position in the
-            // string when matched. An alternative would be to explicitly
-            // disallow empty patterns.
+        // We make sure the largest index key is referenced once in the constraints,
+        // to force it to be bound so that strings that are too short do not match
+        // the pattern.
+        let max_index_key = StringPatternPosition(self.0.len() - 1);
+        if !constraints
+            .iter()
+            .any(|c| c.required_bindings().contains(&max_index_key))
+        {
             constraints.push(
                 Self::Constraint::try_new(
                     CharacterPredicate::BindingEq,
-                    vec![StringIndexKey(0), StringIndexKey(0)],
+                    vec![max_index_key, max_index_key],
                 )
                 .unwrap(),
             );
