@@ -38,7 +38,7 @@ pub use predicate::CharacterPredicate;
 pub type StringManyMatcher =
     ManyMatcher<StringPattern, StringPatternPosition, CharacterPredicate, StringIndexingScheme>;
 
-/// Simple indexing schemes for strings.
+/// Simple indexing scheme for strings.
 ///
 /// As strings form a chain of characters, the indexing scheme is very simple:
 /// just the integer position in the string.
