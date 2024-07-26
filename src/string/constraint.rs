@@ -5,10 +5,10 @@ use crate::{
     Constraint,
 };
 
-use super::{predicate::StringPredicate, StringIndexKey};
+use super::{predicate::CharacterPredicate, StringIndexKey};
 
 /// A constraint for matching a string using [StringPredicate]s.
-pub type StringConstraint = Constraint<StringIndexKey, StringPredicate>;
+pub type StringConstraint = Constraint<StringIndexKey, CharacterPredicate>;
 
 impl StringConstraint {
     /// The largest variable index in the constraint
@@ -37,15 +37,15 @@ impl ToConstraintsTree for StringConstraint {
         let mut constraints = sort_with_indices(constraints);
         let first_constraint = constraints[0].0.clone();
         match first_constraint.predicate() {
-            StringPredicate::BindingEq => {
+            CharacterPredicate::BindingEq => {
                 // Only keep the first constraint
                 constraints.truncate(1);
             }
-            StringPredicate::ConstVal(_) => {
+            CharacterPredicate::ConstVal(_) => {
                 // Checks of a variable against constant values are always mutually
                 // exclusive
                 constraints.retain(|(c, _)| {
-                    matches!(c.predicate(), StringPredicate::ConstVal(_))
+                    matches!(c.predicate(), CharacterPredicate::ConstVal(_))
                         && c.required_bindings() == first_constraint.required_bindings()
                 });
             }
@@ -59,6 +59,6 @@ impl DetHeuristic for StringConstraint {
         if constraints.is_empty() {
             return true;
         }
-        matches!(constraints[0].predicate(), StringPredicate::ConstVal(_))
+        matches!(constraints[0].predicate(), CharacterPredicate::ConstVal(_))
     }
 }

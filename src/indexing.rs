@@ -67,7 +67,7 @@ pub trait IndexingScheme<Data, Value> {
             };
             let binding_options = self.valid_bindings(&key, builder.bindings(), data);
             match binding_options {
-                BindingOptions::ValidBindings(values) => {
+                Ok(ValidBindings(values)) => {
                     if values.is_empty() {
                         // Cannot bind this key, exclude it from further consideration
                         builder.exclude_key(key);
@@ -77,7 +77,7 @@ pub trait IndexingScheme<Data, Value> {
                         curr_bindings.extend(builder.apply_bindings(key, values)?);
                     }
                 }
-                BindingOptions::MissingIndexKeys(new_missing_keys) => {
+                Err(MissingIndexKeys(new_missing_keys)) => {
                     if !builder.extend_missing_keys(new_missing_keys) {
                         // All missing keys are already excluded, so we exclude
                         // `key` and proceed
@@ -193,22 +193,23 @@ pub(crate) mod tests {
 
     impl IndexingScheme<(), usize> for TestIndexingScheme {
         type Key = usize;
+        type Map = HashMap<Self::Key, usize>;
 
         fn valid_bindings(
             &self,
             key: &Self::Key,
             known_bindings: &impl IndexMap<Self::Key, usize>,
             (): &(),
-        ) -> BindingOptions<Self::Key, usize> {
+        ) -> BindingResult<Self::Key, usize> {
             if *key == 0 {
                 // Key 0 maps to 0
-                BindingOptions::ValidBindings(vec![*key])
+                Ok(ValidBindings(vec![*key]))
             } else if known_bindings.get(&(key - 1)).is_some() {
                 // Thanks for providing key - 1, we map key to itself
-                BindingOptions::ValidBindings(vec![*key])
+                Ok(ValidBindings(vec![*key]))
             } else {
                 // Require key - 1 to be bound first
-                BindingOptions::MissingIndexKeys(vec![key - 1])
+                Err(MissingIndexKeys(vec![key - 1]))
             }
         }
     }

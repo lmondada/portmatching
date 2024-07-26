@@ -1,24 +1,35 @@
 use std::iter;
 
 use crate::{HashMap, Pattern};
+use derive_more::Display;
 
-use super::{constraint::StringConstraint, predicate::StringPredicate, StringIndexKey};
+use super::{constraint::StringConstraint, predicate::CharacterPredicate, StringIndexKey};
 
-/// A pattern for matching a string.
+/// A pattern for matching on strings.
 ///
-/// A pattern is a sequence of characters, where each character can be a literal or a variable.
-/// A variable is denoted by a '$' character, followed by a single character.
+/// A pattern is a sequence of elements, each of which is either a literal or a
+/// variable (see [`CharVar`]).
+///
+/// For ease of parsing, both the value of literals and the variable names are
+/// `char`s. At parsing time, variables are recognised by a '$' character,
+/// followed by a single character.
 #[derive(Clone)]
 pub struct StringPattern(Vec<CharVar>);
 
-/// A character in a string pattern.
-#[derive(Clone, Copy)]
+/// A single element in a string pattern.
+///
+/// Always matches a single character in a string.
+#[derive(Clone, Copy, Display)]
 pub enum CharVar {
     /// A `char` character.
+    #[display(fmt = "{}", _0)]
     Literal(char),
-    /// A character expressed by a variable.
+    /// A variable that matches any `char`, subject to constraints.
     ///
-    /// Variable names are themselves `char`s.
+    /// Variable names are themselves `char`s. This is for ease of parsing: every
+    /// character read when parsing is either a literal or a $, in which case the
+    /// next character defines the variable name.
+    #[display(fmt = "${}", _0)]
     Variable(char),
 }
 
@@ -36,6 +47,9 @@ impl StringPattern {
     /// Examples:
     /// - "abc" -> [a, b, c]
     /// - "$a$b$c" -> [$a, $b, $c]
+    ///
+    /// Note that the `$` character cannot be parsed as a literal. It will always
+    /// be interpreted as the start of a variable name.
     pub fn parse_str(s: &str) -> Self {
         let mut char_iter = s.chars();
         let parsed_iter = iter::from_fn(|| match char_iter.next()? {
@@ -65,7 +79,7 @@ impl Pattern for StringPattern {
             match char_var {
                 CharVar::Literal(c) => {
                     constraints.push(
-                        Self::Constraint::try_new(StringPredicate::ConstVal(c), vec![index])
+                        Self::Constraint::try_new(CharacterPredicate::ConstVal(c), vec![index])
                             .unwrap(),
                     );
                 }
@@ -73,7 +87,7 @@ impl Pattern for StringPattern {
                     if let Some(&first_index) = var_to_pos.get(&c) {
                         constraints.push(
                             Self::Constraint::try_new(
-                                StringPredicate::BindingEq,
+                                CharacterPredicate::BindingEq,
                                 vec![index, first_index],
                             )
                             .unwrap(),
@@ -91,7 +105,7 @@ impl Pattern for StringPattern {
             // disallow empty patterns.
             constraints.push(
                 Self::Constraint::try_new(
-                    StringPredicate::BindingEq,
+                    CharacterPredicate::BindingEq,
                     vec![StringIndexKey(0), StringIndexKey(0)],
                 )
                 .unwrap(),
@@ -103,10 +117,7 @@ impl Pattern for StringPattern {
 
 impl std::fmt::Debug for CharVar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CharVar::Literal(c) => write!(f, "{}", c),
-            CharVar::Variable(c) => write!(f, "${}", c),
-        }
+        write!(f, "{}", self)
     }
 }
 

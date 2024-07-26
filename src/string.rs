@@ -1,13 +1,19 @@
 //! Pattern matching on strings, with support for variables.
 //!
-//! The result is something that looks a lot like a prefix tree. What makes
-//! this slightly more powerful (and interesting) is that we can compare
-//! between characters at different positions in the string using variables
-//! in the pattern. This makes some transitions non-deterministic: i.e. the
-//! predicates
-//!   - character at the 4-th position is 'a' and
-//!   - character at the 4-th position equals character at the 5-th position
-//! are not mutually exclusive.
+//! The resulting data structure that is constructed for matching looks a lot
+//! like a prefix tree. What makes this slightly more powerful (and interesting)
+//! is that we can compare between characters at different positions in the
+//! string using variables. This makes some transitions non-deterministic: for
+//! example, the patterns "fooa" and "foo$x$x" match on the characters 0-2, but
+//! the predicates for the 3rd position:
+//!   1. character at the 3rd position is 'a' and
+//!   2. character at the 3rd position equals character at the 4th position
+//! are not mutually exclusive. Indeed the string "fooaa" matches both patterns.
+//!
+//! Patterns are given by fixed-length strings, that are either a concrete string
+//! such as "fooa" or may replace some characters with variables, such as
+//! "foo$x$x". The name $x is a placeholder for any character, and the name can
+//! be chosen arbitrarily.
 //!
 //! This is currently mostly useful for demonstration and testing purposes.
 mod constraint;
@@ -21,42 +27,46 @@ use std::fmt::Debug;
 use derive_more::{From, Into};
 use itertools::Itertools;
 
-use crate::{indexing::BindingOptions, IndexMap, IndexingScheme, ManyMatcher};
+use crate::{
+    indexing::{BindingResult, MissingIndexKeys, ValidBindings},
+    IndexMap, IndexingScheme, ManyMatcher,
+};
 pub use constraint::StringConstraint;
 pub use pattern::{CharVar, StringPattern};
-pub use predicate::StringPredicate;
+pub use predicate::CharacterPredicate;
 
 /// A matcher for strings.
 pub type StringManyMatcher =
-    ManyMatcher<StringPattern, StringIndexKey, StringPredicate, StringIndexingScheme>;
+    ManyMatcher<StringPattern, StringIndexKey, CharacterPredicate, StringIndexingScheme>;
 
 /// Simple indexing schemes for strings.
 ///
 /// As strings form a chain of characters, the indexing scheme is very simple:
-/// just the integer index that is the position in the string.
+/// just the integer position in the string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StringIndexingScheme;
 
 impl IndexingScheme<String, StringPosition> for StringIndexingScheme {
     type Key = StringIndexKey;
+    type Map = todo!();
 
     fn valid_bindings(
         &self,
         key: &Self::Key,
         known_bindings: &impl IndexMap<Self::Key, StringPosition>,
         data: &String,
-    ) -> BindingOptions<Self::Key, StringPosition> {
+    ) -> BindingResult<Self::Key, StringPosition> {
         if key == &Self::Key::root() {
             // For the root binding, any string position is valid
-            BindingOptions::ValidBindings((0..data.len()).map_into().collect())
+            Ok(ValidBindings((0..data.len()).map_into().collect()))
         } else {
             let Some(StringPosition(root_pos)) = known_bindings.get(&Self::Key::root()) else {
-                return BindingOptions::MissingIndexKeys(vec![Self::Key::root()]);
+                return Err(MissingIndexKeys(vec![Self::Key::root()]));
             };
 
             let &StringIndexKey(offset) = key;
 
-            BindingOptions::ValidBindings(vec![(root_pos + offset).into()])
+            Ok(ValidBindings(vec![(root_pos + offset).into()]))
         }
     }
 }
