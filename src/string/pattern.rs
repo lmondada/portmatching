@@ -102,18 +102,20 @@ impl Pattern for StringPattern {
         // We make sure the largest index key is referenced once in the constraints,
         // to force it to be bound so that strings that are too short do not match
         // the pattern.
-        let max_index_key = StringPatternPosition(self.0.len() - 1);
-        if !constraints
-            .iter()
-            .any(|c| c.required_bindings().contains(&max_index_key))
-        {
-            constraints.push(
-                Self::Constraint::try_new(
-                    CharacterPredicate::BindingEq,
-                    vec![max_index_key, max_index_key],
-                )
-                .unwrap(),
-            );
+        if let Some(max_index_key) = self.0.len().checked_sub(1) {
+            let max_index_key = StringPatternPosition(max_index_key);
+            if !constraints
+                .iter()
+                .any(|c| c.required_bindings().contains(&max_index_key))
+            {
+                constraints.push(
+                    Self::Constraint::try_new(
+                        CharacterPredicate::BindingEq,
+                        vec![max_index_key, max_index_key],
+                    )
+                    .unwrap(),
+                );
+            }
         }
         constraints
     }

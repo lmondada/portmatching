@@ -176,7 +176,7 @@ pub(super) mod tests {
     use rstest::rstest;
 
     use self::pattern::StringPattern;
-    use crate::{ManyMatcher, PatternMatch, PortMatcher};
+    use crate::{ManyMatcher, PatternID, PatternMatch, PortMatcher};
 
     use super::*;
 
@@ -216,6 +216,17 @@ pub(super) mod tests {
         let result = matcher.find_matches(&"ab".to_string()).collect_vec();
 
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_empty_pattern() {
+        let p1 = StringPattern::parse_str("");
+
+        let matcher = StringManyMatcher::from_patterns(vec![p1]);
+
+        let result = matcher.find_matches(&"ab".to_string()).collect_vec();
+
+        assert_eq!(result, [(PatternID(0), StringPositionMap::Unbound).into()]);
     }
 
     #[test]
