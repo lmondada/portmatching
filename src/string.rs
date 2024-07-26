@@ -33,7 +33,7 @@ pub type StringManyMatcher =
 /// Simple indexing schemes for strings.
 ///
 /// As strings form a chain of characters, the indexing scheme is very simple:
-/// just the integer index given by the position in the string.
+/// just the integer index that is the position in the string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StringIndexingScheme;
 
