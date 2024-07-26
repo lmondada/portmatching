@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{borrow::Borrow, fmt::Debug};
 
 use itertools::Itertools;
 
@@ -30,17 +30,18 @@ impl ArityPredicate for CharacterPredicate {
 impl Predicate<String> for CharacterPredicate {
     type Value = StringPosition;
 
-    fn check(&self, data: &String, args: &[&StringPosition]) -> bool {
+    fn check(&self, data: &String, args: &[impl Borrow<Self::Value>]) -> bool {
         match self {
             CharacterPredicate::BindingEq => {
                 let (StringPosition(pos1), StringPosition(pos2)) =
-                    args.iter().collect_tuple().unwrap();
+                    args.iter().map(|a| a.borrow()).collect_tuple().unwrap();
                 let char1 = data.chars().nth(*pos1);
                 let char2 = data.chars().nth(*pos2);
                 char1.is_some() && char1 == char2
             }
             CharacterPredicate::ConstVal(c) => {
-                let StringPosition(pos) = args.iter().exactly_one().unwrap();
+                let StringPosition(pos) =
+                    args.iter().map(|a| a.borrow()).exactly_one().ok().unwrap();
                 data.chars().nth(*pos) == Some(*c)
             }
         }

@@ -158,7 +158,7 @@ impl<K, P> Constraint<K, P> {
     pub fn is_satisfied<V, D>(
         &self,
         data: &D,
-        known_bindings: &impl IndexMap<K, V>,
+        known_bindings: &impl IndexMap<Key = K, Value = V>,
     ) -> Result<bool, InvalidConstraint>
     where
         P: Predicate<D, Value = V>,

@@ -1,4 +1,3 @@
-//! Pattern matching on strings, with support for variables.
 //!
 //! The resulting data structure that is constructed for matching looks a lot
 //! like a prefix tree. What makes this slightly more powerful (and interesting)
@@ -28,7 +27,7 @@ use derive_more::{From, Into};
 use itertools::Itertools;
 
 use crate::{
-    indexing::{BindingResult, MissingIndexKeys, ValidBindings},
+    indexing::{BindVariableError, BindingResult, MissingIndexKeys, ValidBindings},
     IndexMap, IndexingScheme, ManyMatcher,
 };
 pub use constraint::StringConstraint;
@@ -46,22 +45,58 @@ pub type StringManyMatcher =
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StringIndexingScheme;
 
-impl IndexingScheme<String, StringPosition> for StringIndexingScheme {
+/// A map for string positions.
+///
+/// Only store the position of the root, compute other positions by adding
+/// offsets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+pub struct StringPositionMap(Option<usize>);
+impl IndexMap for StringPositionMap {
     type Key = StringIndexKey;
-    type Map = todo!();
+    type Value = StringPosition;
+    type ValueRef<'a> = StringPosition;
+
+    fn get(&self, var: &Self::Key) -> Option<Self::ValueRef<'_>> {
+        let StringPositionMap(Some(root)) = self else {
+            return None;
+        };
+        let StringIndexKey(key) = var;
+        Some(StringPosition(root + key))
+    }
+
+    fn bind(&mut self, var: Self::Key, val: Self::Value) -> Result<(), BindVariableError> {
+        let StringIndexKey(key) = var;
+        if key == 0 {
+            if let Some(curr_value) = self.0 {
+                return Err(BindVariableError::VariableExists {
+                    key: key.to_string(),
+                    curr_value: curr_value.to_string(),
+                    new_value: format!("{:?}", val),
+                });
+            } else {
+                self.0 = Some(val.0);
+            }
+        } else {
+        }
+        Ok(())
+    }
+}
+
+impl IndexingScheme<String> for StringIndexingScheme {
+    type Map = StringPositionMap;
 
     fn valid_bindings(
         &self,
-        key: &Self::Key,
-        known_bindings: &impl IndexMap<Self::Key, StringPosition>,
+        key: &StringIndexKey,
+        known_bindings: &Self::Map,
         data: &String,
-    ) -> BindingResult<Self::Key, StringPosition> {
-        if key == &Self::Key::root() {
+    ) -> BindingResult<Self, String> {
+        if key == &StringIndexKey::root() {
             // For the root binding, any string position is valid
             Ok(ValidBindings((0..data.len()).map_into().collect()))
         } else {
-            let Some(StringPosition(root_pos)) = known_bindings.get(&Self::Key::root()) else {
-                return Err(MissingIndexKeys(vec![Self::Key::root()]));
+            let Some(StringPosition(root_pos)) = known_bindings.get(&StringIndexKey::root()) else {
+                return Err(MissingIndexKeys(vec![StringIndexKey::root()]));
             };
 
             let &StringIndexKey(offset) = key;
@@ -93,12 +128,11 @@ impl Debug for StringIndexKey {
 
 #[cfg(test)]
 pub(super) mod tests {
-    use crate::HashMap;
 
     use rstest::rstest;
 
     use self::pattern::StringPattern;
-    use crate::{ManyMatcher, PatternMatch, PortMatcher};
+    use crate::{ManyMatcher, PortMatcher};
 
     use super::*;
 
@@ -116,43 +150,6 @@ pub(super) mod tests {
 
     pub(super) const MATCHER_FACTORIES: &[fn(Vec<StringPattern>) -> StringManyMatcher] =
         &[non_det_matcher, default_matcher, det_matcher];
-
-    /// Comparing two lists of pattern matches.
-    ///
-    /// We cannot use equality for two reasons:
-    ///  - we ignore the ordering of the matches
-    ///  - not all keys may be bound depending on the order things were matched
-    ///
-    /// The simplest way to identify a match is with the pair (PatternID, start_pos).
-    pub(super) fn pattern_match_eq(
-        expected: &[PatternMatch<HashMap<StringIndexKey, StringPosition>>],
-        actual: &[PatternMatch<HashMap<StringIndexKey, StringPosition>>],
-    ) -> bool {
-        let get_match_key =
-            |PatternMatch {
-                 pattern,
-                 match_data,
-             }: &PatternMatch<HashMap<StringIndexKey, StringPosition>>| {
-                let Some((StringIndexKey(offset), StringPosition(pos))) = match_data.iter().next()
-                else {
-                    panic!("Empty match data");
-                };
-                (*pattern, pos - offset)
-            };
-        // Build a map from pattern ID to all positions where it matches
-        let get_slice_key = |matches: &[PatternMatch<_>]| {
-            let mut keys = matches.iter().map(get_match_key).fold(
-                HashMap::<_, Vec<_>>::default(),
-                |mut acc, (pattern, pos)| {
-                    acc.entry(pattern).or_default().push(pos);
-                    acc
-                },
-            );
-            keys.values_mut().for_each(|vec| vec.sort());
-            keys
-        };
-        get_slice_key(expected) == get_slice_key(actual)
-    }
 
     #[test]
     fn test_string_matching() {
@@ -195,10 +192,14 @@ pub(super) mod tests {
         // dbg!(&all_matches);
         // println!("{}", non_det_matcher(patterns.clone()).dot_string());
         // println!("{}", det_matcher(patterns.clone()).dot_string());
-        let Some((exp, act1, act2)) = all_matches.into_iter().collect_tuple() else {
+        let Some((mut exp, mut act1, mut act2)) = all_matches.into_iter().collect_tuple() else {
             panic!("Expected 3 matchers");
         };
-        assert!(pattern_match_eq(&exp, &act1));
-        assert!(pattern_match_eq(&exp, &act2));
+        // Compare results up to reordering
+        exp.sort();
+        act1.sort();
+        act2.sort();
+        assert_eq!(exp, act1);
+        assert_eq!(exp, act2);
     }
 }

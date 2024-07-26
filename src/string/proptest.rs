@@ -23,10 +23,7 @@ impl Arbitrary for StringPattern {
 mod tests {
     use itertools::Itertools;
 
-    use crate::{
-        string::tests::{pattern_match_eq, MATCHER_FACTORIES},
-        PortMatcher,
-    };
+    use crate::{string::tests::MATCHER_FACTORIES, PortMatcher};
 
     use super::*;
 
@@ -39,11 +36,14 @@ mod tests {
             let all_matches = MATCHER_FACTORIES.iter().map(|matcher_factory| {
                 matcher_factory(patterns.clone()).find_matches(&subject).collect_vec()
             });
-            let Some((exp, act1, act2)) = all_matches.into_iter().collect_tuple() else {
+            let Some((mut exp, mut act1, mut act2)) = all_matches.into_iter().collect_tuple() else {
                 panic!("Expected 3 matchers");
             };
-            prop_assert!(pattern_match_eq(&exp, &act1));
-            prop_assert!(pattern_match_eq(&exp, &act2));
+            exp.sort();
+            act1.sort();
+            act2.sort();
+            prop_assert_eq!(&exp, &act1);
+            prop_assert_eq!(&exp, &act2);
         }
     }
 }
