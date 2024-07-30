@@ -1,6 +1,6 @@
 use petgraph::{visit::EdgeRef, Direction};
 
-use crate::{HashSet, PatternID};
+use crate::PatternID;
 
 use super::{ConstraintAutomaton, State, StateID, TransitionID};
 
@@ -9,19 +9,40 @@ use super::{ConstraintAutomaton, State, StateID, TransitionID};
 /// Exposed as a trait so that the automaton builder can reuse the default
 /// implementation but trace calls where useful.
 impl<C: Eq, I> ConstraintAutomaton<C, I> {
-    /// Find the transition ID at `parent` with the given `constraint`
-    pub(super) fn find_constraint(
+    /// All non-None constraints at `state`.
+    pub(super) fn all_constraint_transitions(
         &self,
         state: StateID,
-        constraint: Option<&C>,
-    ) -> Option<TransitionID> {
-        self.transitions(state)
-            .find(|&transition| self.constraint(transition) == constraint)
+    ) -> impl Iterator<Item = TransitionID> + '_ {
+        self.node_weight(state).constraint_order.iter().copied()
     }
 
-    pub(super) fn find_fail_transition(&self, state: StateID) -> Option<TransitionID> {
-        self.transitions(state)
-            .find(|&transition| self.constraint(transition).is_none())
+    /// All None constraints at `state`.
+    pub(super) fn all_epsilon_transitions(
+        &self,
+        state: StateID,
+    ) -> impl ExactSizeIterator<Item = TransitionID> + '_ {
+        self.node_weight(state).epsilon_order.iter().copied()
+    }
+
+    /// The state reached by the fail transition at `state`, if any.
+    ///
+    /// Expects at most one epsilon transition, otherwise panics.
+    pub(super) fn fail_next_state(&self, state: StateID) -> Option<StateID> {
+        assert!(self.all_epsilon_transitions(state).len() <= 1);
+        self.all_epsilon_transitions(state)
+            .next()
+            .map(|transition| self.next_state(transition))
+    }
+
+    /// The state reached by the `constraint` transition at `state`, if any.
+    ///
+    /// Expects at most one transition, otherwise panics.
+    #[cfg(test)]
+    pub(super) fn constraint_next_state(&self, state: StateID, constraint: &C) -> Option<StateID> {
+        self.all_constraint_transitions(state)
+            .find(|&t| self.constraint(t) == Some(constraint))
+            .map(|t| self.next_state(t))
     }
 
     /// Get the next state obtained from following a transition
@@ -34,8 +55,21 @@ impl<C: Eq, I> ConstraintAutomaton<C, I> {
     }
 
     /// Iterate over all transitions of a state, in order.
-    pub(super) fn transitions(&self, state: StateID) -> impl Iterator<Item = TransitionID> + '_ {
-        self.node_weight(state).order.iter().copied()
+    pub(super) fn all_transitions(
+        &self,
+        state: StateID,
+    ) -> impl Iterator<Item = TransitionID> + '_ {
+        self.all_constraint_transitions(state)
+            .chain(self.all_epsilon_transitions(state))
+    }
+
+    pub(super) fn is_unreachable(&self, state: StateID) -> bool {
+        self.incoming_transitions(state).next().is_none()
+    }
+
+    pub(super) fn constraints(&self, state: StateID) -> impl Iterator<Item = &C> + '_ {
+        self.all_constraint_transitions(state)
+            .map(|transition| self.constraint(transition).unwrap())
     }
 
     /// Get the constraint corresponding to a transition
@@ -46,7 +80,7 @@ impl<C: Eq, I> ConstraintAutomaton<C, I> {
     /// The states reached by a single transition from `state`
     #[allow(dead_code)]
     pub(super) fn children(&self, state: StateID) -> impl Iterator<Item = StateID> + '_ {
-        self.transitions(state)
+        self.all_transitions(state)
             .map(|transition| self.next_state(transition))
     }
 
@@ -57,12 +91,6 @@ impl<C: Eq, I> ConstraintAutomaton<C, I> {
         self.graph
             .edges_directed(state, Direction::Incoming)
             .map(|e| e.id().into())
-    }
-
-    /// All non-None constraints at `state`.
-    pub(super) fn constraints(&self, state: StateID) -> impl Iterator<Item = &C> + '_ {
-        self.transitions(state)
-            .filter_map(|transition| self.constraint(transition))
     }
 
     pub(super) fn matches(&self, state: StateID) -> &[PatternID] {
@@ -81,25 +109,38 @@ impl<C: Eq, I> ConstraintAutomaton<C, I> {
             .0
             .into()
     }
+
+    /// Get a tuple of data that fully specifies the action of a `state`.
+    ///
+    /// Two states with the same tuple ID may be merged into one without
+    /// changing the behavior of the matcher.
+    pub(super) fn state_tuple(&self, state: StateID) -> StateTuple<C> {
+        let transitions = self
+            .all_transitions(state)
+            .map(|transition| (self.constraint(transition), self.next_state(transition)))
+            .collect();
+        StateTuple {
+            deterministic: self.is_deterministic(state),
+            matches: self.matches(state),
+            transitions,
+        }
+    }
 }
 
-// Small, private utils functions
+/// Some data that fully specifies the action of a state.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct StateTuple<'a, C> {
+    deterministic: bool,
+    matches: &'a [PatternID],
+    transitions: Vec<(Option<&'a C>, StateID)>,
+}
+
 impl<C, I> ConstraintAutomaton<C, I> {
     pub(super) fn node_weight(&self, state: StateID) -> &State {
         self.graph.node_weight(state.0).expect("unknown state")
     }
 
-    #[allow(dead_code)]
-    pub(super) fn check_edge_order_invariant(&self, state: StateID) -> bool {
-        self.node_weight(state)
-            .order
-            .iter()
-            .copied()
-            .collect::<HashSet<_>>()
-            == self
-                .graph
-                .edges(state.0)
-                .map(|e| TransitionID(e.id()))
-                .collect::<HashSet<_>>()
+    pub(super) fn state_exists(&self, state: StateID) -> bool {
+        self.graph.node_weight(state.0).is_none()
     }
 }

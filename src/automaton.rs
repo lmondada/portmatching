@@ -3,8 +3,6 @@
 //! Use [AutomatonBuilder] to construct an automaton from lists of constraints.
 
 mod builder;
-mod modify;
-mod traced;
 mod traversal;
 mod view;
 
@@ -125,9 +123,12 @@ struct State {
     matches: Vec<PatternID>,
     /// Whether the state is deterministic
     deterministic: bool,
-    /// The order of the outgoing edges. Must map one-to-one to the outgoing
-    /// edges
-    order: Vec<TransitionID>,
+    /// The order of the outgoing contraint transitions. Must map one-to-one to
+    /// the outgoing constraint edges, i.e. the edges with non-None weights.
+    constraint_order: Vec<TransitionID>,
+    /// The order of the outgoing epsilon transitions. Must map one-to-one to
+    /// the outgoing epsilon edges, i.e. the edges with None weights.
+    epsilon_order: Vec<TransitionID>,
 }
 
 impl Debug for State {

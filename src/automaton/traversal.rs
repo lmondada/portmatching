@@ -8,7 +8,7 @@ use crate::{
     utils, Constraint, IndexMap, IndexingScheme, PatternID, Predicate,
 };
 
-use super::{ConstraintAutomaton, StateID, TransitionID};
+use super::{ConstraintAutomaton, StateID};
 
 impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
     /// Run the automaton on the `host` input data.
@@ -25,12 +25,11 @@ impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
     }
 
     /// An iterator of the allowed transitions
-    fn legal_transitions<'a, D, S>(
+    fn next_legal_states<'a, D, S>(
         &'a self,
-        state: StateID,
+        state: TraversalState<S>,
         host: &'a D,
-        known_bindings: S,
-    ) -> impl Iterator<Item = (TransitionID, S)> + 'a
+    ) -> impl Iterator<Item = TraversalState<S>> + 'a
     where
         P: Predicate<D>,
         S: IndexMap<Key = K, Value = P::Value>,
@@ -40,8 +39,8 @@ impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
         P::Value: Clone,
     {
         let non_fails = self
-            .transitions(state)
-            .filter_map(|id| Some((id, self.constraint(id)?)))
+            .all_constraint_transitions(state.state_id)
+            .map(|t| (self.next_state(t), self.constraint(t).unwrap()))
             .collect_vec();
         let required_keys = non_fails
             .iter()
@@ -52,11 +51,11 @@ impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
 
         let mut all_bindings = self
             .host_indexing
-            .try_bind_all(known_bindings.clone(), required_keys, host)
+            .try_bind_all(state.bindings.clone(), required_keys, host)
             .unwrap();
 
         if all_bindings.is_empty() {
-            all_bindings.push(known_bindings);
+            all_bindings.push(state.bindings);
         }
 
         all_bindings.into_iter().flat_map(move |bindings| {
@@ -65,19 +64,43 @@ impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
                 .clone()
                 .into_iter()
                 .filter_map(move |(id, constraint)| {
-                    let is_satisfied = constraint.is_satisfied(host, &bindings).unwrap_or(false);
-                    is_satisfied.then_some((id, bindings.clone()))
+                    let is_satisfied = constraint
+                        .is_satisfied(host, &bindings_clone)
+                        .unwrap_or(false);
+                    if is_satisfied {
+                        Some(TraversalState {
+                            state_id: id,
+                            bindings: bindings_clone.clone(),
+                        })
+                    } else {
+                        None
+                    }
                 })
                 .peekable();
             let is_empty = valid_non_fails.peek().is_none();
-            let needs_fail_transition = !self.is_deterministic(state) || is_empty;
+            let needs_fail_transition = !self.is_deterministic(state.state_id) || is_empty;
             let fail_transition = if needs_fail_transition {
-                self.find_fail_transition(state)
+                self.fail_next_state(state.state_id)
             } else {
                 None
             };
-            valid_non_fails.chain(fail_transition.map(move |id| (id, bindings_clone)))
+            valid_non_fails
+                .chain(fail_transition.map(|state_id| TraversalState { state_id, bindings }))
         })
+    }
+}
+
+struct TraversalState<S> {
+    state_id: StateID,
+    bindings: S,
+}
+
+impl<S: Default> TraversalState<S> {
+    fn new(state_id: StateID) -> Self {
+        Self {
+            state_id,
+            bindings: S::default(),
+        }
     }
 }
 
@@ -89,7 +112,7 @@ impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
 ///  - D: arbitrary input "host" data to evaluate constraints on.
 pub struct AutomatonTraverser<'a, 'd, C, I: IndexingScheme<D>, D> {
     matches_queue: VecDeque<(PatternID, I::Map)>,
-    state_queue: VecDeque<(StateID, I::Map)>,
+    state_queue: VecDeque<TraversalState<I::Map>>,
     automaton: &'a ConstraintAutomaton<C, I>,
     host: &'d D,
 }
@@ -97,7 +120,7 @@ pub struct AutomatonTraverser<'a, 'd, C, I: IndexingScheme<D>, D> {
 impl<'a, 'd, C, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, C, I, D> {
     fn new(automaton: &'a ConstraintAutomaton<C, I>, host: &'d D) -> Self {
         let matches_queue = VecDeque::new();
-        let state_queue = VecDeque::from_iter([(automaton.root, I::Map::default())]);
+        let state_queue = VecDeque::from_iter([TraversalState::new(automaton.root())]);
         Self {
             matches_queue,
             state_queue,
@@ -118,22 +141,17 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.matches_queue.is_empty() {
-            let Some((state, known_bindings)) = self.state_queue.pop_front() else {
+            let Some(state) = self.state_queue.pop_front() else {
                 break;
             };
             self.matches_queue.extend(
                 self.automaton
-                    .matches(state)
+                    .matches(state.state_id)
                     .iter()
-                    .map(|&id| (id, known_bindings.clone())),
+                    .map(|&id| (id, state.bindings.clone())),
             );
-            let transitions = self
-                .automaton
-                .legal_transitions(state, self.host, known_bindings);
-            for (transition, new_ass) in transitions {
-                let next_state = self.automaton.next_state(transition);
-                self.state_queue.push_back((next_state, new_ass))
-            }
+            let legal_next_states = self.automaton.next_legal_states(state, self.host);
+            self.state_queue.extend(legal_next_states);
         }
         self.matches_queue.pop_front()
     }
@@ -181,14 +199,20 @@ mod tests {
     fn legal_transitions() {
         let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::new();
         // Add a True, False and None constraint
-        let true_child = automaton.add_transition(automaton.root(), Some(true_constraint()));
-        automaton.add_transition(automaton.root(), Some(false_constraint()));
-        let fail_child = automaton.add_transition(automaton.root(), None);
+        let true_child = automaton.add_constraint(automaton.root(), true_constraint());
+        automaton.add_constraint(automaton.root(), false_constraint());
+        let fail_child = automaton.add_fail(automaton.root());
         let ass = HashMap::default();
         let transitions = HashSet::from_iter(
             automaton
-                .legal_transitions(automaton.root(), &(), ass.clone())
-                .map(|(transition, _)| automaton.next_state(transition)),
+                .next_legal_states(
+                    TraversalState {
+                        state_id: automaton.root(),
+                        bindings: ass.clone(),
+                    },
+                    &(),
+                )
+                .map(|TraversalState { state_id, .. }| state_id),
         );
         // Non-deterministic, so both true and none children should be returned
         assert_eq!(transitions, HashSet::from_iter([true_child, fail_child]));
@@ -197,8 +221,14 @@ mod tests {
         automaton.graph[root.0].deterministic = true;
         let transitions = HashSet::from_iter(
             automaton
-                .legal_transitions(automaton.root(), &(), ass)
-                .map(|(transition, _)| automaton.next_state(transition)),
+                .next_legal_states(
+                    TraversalState {
+                        state_id: automaton.root(),
+                        bindings: ass.clone(),
+                    },
+                    &(),
+                )
+                .map(|TraversalState { state_id, .. }| state_id),
         );
         // Deterministic, so only true child should be returned
         assert_eq!(transitions, HashSet::from_iter([true_child]));
@@ -207,22 +237,34 @@ mod tests {
     #[test]
     fn legal_transitions_all_false() {
         let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::new();
-        automaton.add_transition(automaton.root(), Some(false_constraint()));
+        automaton.add_constraint(automaton.root(), false_constraint());
         let ass = HashMap::default();
         // Only a False transition, so no legal moves
         assert_eq!(
             automaton
-                .legal_transitions(automaton.root(), &(), ass.clone())
+                .next_legal_states(
+                    TraversalState {
+                        state_id: automaton.root(),
+                        bindings: ass.clone(),
+                    },
+                    &(),
+                )
                 .count(),
             0
         );
 
         // Add an epsilon transition
-        automaton.add_transition(automaton.root(), None);
+        automaton.add_fail(automaton.root());
         // Now there is a valid move
         assert_eq!(
             automaton
-                .legal_transitions(automaton.root(), &(), ass.clone())
+                .next_legal_states(
+                    TraversalState {
+                        state_id: automaton.root(),
+                        bindings: ass.clone(),
+                    },
+                    &(),
+                )
                 .count(),
             1
         );
@@ -231,7 +273,13 @@ mod tests {
         automaton.graph[root.0].deterministic = true;
         assert_eq!(
             automaton
-                .legal_transitions(automaton.root(), &(), ass)
+                .next_legal_states(
+                    TraversalState {
+                        state_id: automaton.root(),
+                        bindings: ass.clone(),
+                    },
+                    &(),
+                )
                 .count(),
             1
         );

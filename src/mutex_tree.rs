@@ -153,6 +153,11 @@ impl<P> MutuallyExclusiveTree<P> {
     pub fn n_nodes(&self) -> usize {
         self.nodes.len()
     }
+
+    /// The number of children of a node.
+    pub fn n_children(&self, node: usize) -> usize {
+        self.nodes[node].children.len()
+    }
 }
 
 /// Constraint indices may not appear on non-leaf nodes.

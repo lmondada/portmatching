@@ -11,3 +11,5 @@ cc d8f8e6bd70d9e777a709f82b31111c63cfb55ddb5e5964536f4deaaf0887afb7 # shrinks to
 cc 6c6214c7b92c86668c510835f04dd81f48fc8684d8e35e6481a2574d52209da7 # shrinks to subject = "aea", patterns = ["$d$aa", "$aea"]
 cc a41a65accca41dfbc1ceb911995a0a0a52ad7d3cdfd0ea6e18c2f4fa008531ce # shrinks to subject = "eaaa", patterns = ["daabaaaaaaaaaaaaaaaaaaaa", "ddaa", "$ad", "$aa$b$a", "$b$a$ca", "$b$c$e$eaaaaaaaaaaaaaa"]
 cc 5994aa20b54d9fa4f785295c026b76c7421b08b337579d8ed2a28aeb4bead2c4 # shrinks to subject = "eaa", patterns = ["a$b$a", "$a$e$e", "b$c$a", "$c$aa"]
+cc f9cb95ba43a77e5fdf38cd95bf0fce68f7225523ca3eff95dfb523ee0312511a # shrinks to subject = "", patterns = ["caa", "a$e$a$b$fa$cca$aa", "$c$d$eca$c$c$aaaba", "$baaaabaaaaaaaaa$caaaaaa$faaa$da$ea", "ea$a$b$caa", "aaaaa", ""]
+cc a5bf3c0adca24a063c00ad624f0a819e831c2d89f8f7b83032444e3ff8d8c470 # shrinks to subject = "fef", patterns = ["$b$a", "fe", "$ae"]
