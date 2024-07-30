@@ -4,6 +4,7 @@ use crate::{utils::UniqueStack, HashSet, IndexMap};
 
 use super::BindVariableError;
 
+#[derive(Clone)]
 pub(super) struct BindingBuilder<M: IndexMap> {
     bindings: M,
     /// A stack of the missing keys.
@@ -13,16 +14,6 @@ pub(super) struct BindingBuilder<M: IndexMap> {
     /// the same key again.
     missing_keys: UniqueStack<M::Key>,
     exclude_keys: HashSet<M::Key>,
-}
-
-impl<M: IndexMap> Clone for BindingBuilder<M> {
-    fn clone(&self) -> Self {
-        Self {
-            bindings: self.bindings.clone(),
-            missing_keys: self.missing_keys.clone(),
-            exclude_keys: self.exclude_keys.clone(),
-        }
-    }
 }
 
 impl<M: IndexMap + fmt::Debug> fmt::Debug for BindingBuilder<M> {

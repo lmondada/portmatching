@@ -207,11 +207,8 @@ pub(crate) mod tests {
             known_bindings: &Self::Map,
             (): &(),
         ) -> BindingResult<Self, ()> {
-            if *key == 0 {
-                // Key 0 maps to 0
-                Ok(ValidBindings(vec![*key]))
-            } else if known_bindings.get(&(key - 1)).is_some() {
-                // Thanks for providing key - 1, we map key to itself
+            if *key == 0 || known_bindings.get(&(key - 1)).is_some() {
+                // All previous keys were assigned, we can (dummy) bind the key
                 Ok(ValidBindings(vec![*key]))
             } else {
                 // Require key - 1 to be bound first
