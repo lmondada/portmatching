@@ -4,19 +4,22 @@ use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 
 use crate::{
-    indexing::IndexKey, utils, Constraint, IndexMap, IndexingScheme, PatternID, Predicate,
+    indexing::{self, IndexKey},
+    utils, Constraint, IndexMap, IndexingScheme, PatternID, Predicate,
 };
 
-use super::{AssignMap, ConstraintAutomaton, StateID, TransitionID};
+use super::{ConstraintAutomaton, StateID, TransitionID};
 
-impl<K: IndexKey, P: Eq + Clone, I> ConstraintAutomaton<Constraint<K, P>, I> {
+impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
     /// Run the automaton on the `host` input data.
     pub fn run<'a, 'd, D>(
         &'a self,
         host: &'d D,
-    ) -> AutomatonTraverser<'a, 'd, AssignMap<K, P::Value>, Constraint<K, P>, I, D>
+    ) -> AutomatonTraverser<'a, 'd, Constraint<K, P>, I, D>
     where
         P: Predicate<D>,
+        I: IndexingScheme<D>,
+        I::Map: IndexMap<Key = K, Value = P::Value>,
     {
         AutomatonTraverser::new(self, host)
     }
@@ -30,9 +33,10 @@ impl<K: IndexKey, P: Eq + Clone, I> ConstraintAutomaton<Constraint<K, P>, I> {
     ) -> impl Iterator<Item = (TransitionID, S)> + 'a
     where
         P: Predicate<D>,
-        S: IndexMap<K, P::Value>,
-        I: IndexingScheme<D, P::Value, Key = K>,
+        S: IndexMap<Key = K, Value = P::Value>,
+        I: IndexingScheme<D, Map = S>,
         S: 'a,
+        K: IndexKey,
         P::Value: Clone,
     {
         let non_fails = self
@@ -83,17 +87,17 @@ impl<K: IndexKey, P: Eq + Clone, I> ConstraintAutomaton<Constraint<K, P>, I> {
 ///  - S: scope assignments mapping variable names to values
 ///  - C: constraint type on transitions
 ///  - D: arbitrary input "host" data to evaluate constraints on.
-pub struct AutomatonTraverser<'a, 'd, S, C, I, D> {
-    matches_queue: VecDeque<(PatternID, S)>,
-    state_queue: VecDeque<(StateID, S)>,
+pub struct AutomatonTraverser<'a, 'd, C, I: IndexingScheme<D>, D> {
+    matches_queue: VecDeque<(PatternID, I::Map)>,
+    state_queue: VecDeque<(StateID, I::Map)>,
     automaton: &'a ConstraintAutomaton<C, I>,
     host: &'d D,
 }
 
-impl<'a, 'd, S: Default, C, I, D> AutomatonTraverser<'a, 'd, S, C, I, D> {
+impl<'a, 'd, C, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, C, I, D> {
     fn new(automaton: &'a ConstraintAutomaton<C, I>, host: &'d D) -> Self {
         let matches_queue = VecDeque::new();
-        let state_queue = VecDeque::from_iter([(automaton.root, S::default())]);
+        let state_queue = VecDeque::from_iter([(automaton.root, I::Map::default())]);
         Self {
             matches_queue,
             state_queue,
@@ -103,15 +107,14 @@ impl<'a, 'd, S: Default, C, I, D> AutomatonTraverser<'a, 'd, S, C, I, D> {
     }
 }
 
-impl<'a, 'd, S, K, P, D, I> Iterator for AutomatonTraverser<'a, 'd, S, Constraint<K, P>, I, D>
+impl<'a, 'd, P, D, I> Iterator
+    for AutomatonTraverser<'a, 'd, Constraint<indexing::Key<I, D>, P>, I, D>
 where
-    I: IndexingScheme<D, P::Value, Key = K>,
-    P: Predicate<D> + Eq + Clone,
-    S: IndexMap<K, P::Value>,
-    K: IndexKey,
-    P::Value: Clone,
+    P: Predicate<D>,
+    I: IndexingScheme<D>,
+    I::Map: IndexMap<Value = P::Value>,
 {
-    type Item = (PatternID, S);
+    type Item = (PatternID, I::Map);
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.matches_queue.is_empty() {
@@ -160,7 +163,9 @@ impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{constraint::tests::TestConstraint, indexing::tests::TestIndexingScheme, HashSet};
+    use crate::{
+        constraint::tests::TestConstraint, indexing::tests::TestIndexingScheme, HashMap, HashSet,
+    };
 
     use super::*;
 
@@ -179,7 +184,7 @@ mod tests {
         let true_child = automaton.add_transition(automaton.root(), Some(true_constraint()));
         automaton.add_transition(automaton.root(), Some(false_constraint()));
         let fail_child = automaton.add_transition(automaton.root(), None);
-        let ass = AssignMap::default();
+        let ass = HashMap::default();
         let transitions = HashSet::from_iter(
             automaton
                 .legal_transitions(automaton.root(), &(), ass.clone())
@@ -203,7 +208,7 @@ mod tests {
     fn legal_transitions_all_false() {
         let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::new();
         automaton.add_transition(automaton.root(), Some(false_constraint()));
-        let ass = AssignMap::default();
+        let ass = HashMap::default();
         // Only a False transition, so no legal moves
         assert_eq!(
             automaton
