@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Temporary until refactor is complete
-
 use std::fmt::Debug;
 
 use derive_more::{From, Into};

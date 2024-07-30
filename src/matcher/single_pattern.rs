@@ -6,9 +6,9 @@ use std::collections::VecDeque;
 
 use crate::{
     constraint::Constraint,
-    indexing::{IndexKey, IndexValue},
+    indexing::{self, IndexKey},
     pattern::Pattern,
-    HashMap, IndexingScheme, PatternID, Predicate,
+    IndexMap, IndexingScheme, PatternID, Predicate,
 };
 
 use super::{PatternMatch, PortMatcher};
@@ -21,14 +21,12 @@ pub struct SinglePatternMatcher<C, I> {
     host_indexing: I,
 }
 
-impl<K, P, D, I> PortMatcher<D> for SinglePatternMatcher<Constraint<K, P>, I>
+impl<P, D, I> PortMatcher<D> for SinglePatternMatcher<Constraint<indexing::Key<I, D>, P>, I>
 where
-    K: IndexKey,
-    P: Predicate<D>,
-    P::Value: IndexValue,
-    I: IndexingScheme<D, P::Value, Key = K>,
+    P: Predicate<D, Value = indexing::Value<I, D>>,
+    I: IndexingScheme<D>,
 {
-    type Match = HashMap<K, P::Value>;
+    type Match = I::Map;
 
     fn find_matches<'a>(
         &'a self,
@@ -73,22 +71,22 @@ where
     /// Check whether each edge of the pattern is valid in the host
     pub fn match_exists<D>(&self, host: &D) -> bool
     where
-        P: Predicate<D>,
-        P::Value: IndexValue,
-        I: IndexingScheme<D, P::Value, Key = K>,
+        P: Predicate<D, Value = indexing::Value<I, D>>,
+        I: IndexingScheme<D>,
+        I::Map: IndexMap<Key = K>,
     {
         !self.get_all_bindings(host).is_empty()
     }
 
     /// Get the valid scope assignments as a map from variable names to host nodes.
-    fn get_all_bindings<D>(&self, host: &D) -> Vec<HashMap<K, P::Value>>
+    fn get_all_bindings<D>(&self, host: &D) -> Vec<I::Map>
     where
-        P: Predicate<D>,
-        P::Value: IndexValue,
-        I: IndexingScheme<D, P::Value, Key = K>,
+        P: Predicate<D, Value = indexing::Value<I, D>>,
+        I: IndexingScheme<D>,
+        I::Map: IndexMap<Key = K>,
     {
         let mut candidates = VecDeque::new();
-        candidates.push_back((self.constraints.as_slice(), HashMap::default()));
+        candidates.push_back((self.constraints.as_slice(), I::Map::default()));
         let mut final_bindings = Vec::new();
         while let Some((constraints, bindings)) = candidates.pop_front() {
             let [constraint, remaining @ ..] = constraints else {
@@ -123,7 +121,7 @@ mod tests {
 
     use crate::{
         constraint::tests::TestConstraint, indexing::tests::TestIndexingScheme,
-        pattern::tests::TestPattern,
+        pattern::tests::TestPattern, HashMap,
     };
 
     use super::*;

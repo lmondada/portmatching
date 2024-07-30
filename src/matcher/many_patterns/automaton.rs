@@ -9,7 +9,7 @@ use crate::{
     matcher::PatternMatch,
     mutex_tree::ToConstraintsTree,
     pattern::Pattern,
-    HashMap, IndexingScheme, PatternID, PortMatcher, Predicate,
+    HashMap, IndexMap, IndexingScheme, PatternID, PortMatcher, Predicate,
 };
 
 /// A graph pattern matcher using scope automata.
@@ -25,9 +25,10 @@ where
     P: Predicate<D>,
     PT: Pattern<Constraint = Constraint<K, P>>,
     K: IndexKey,
-    I: IndexingScheme<D, P::Value, Key = K>,
+    I: IndexingScheme<D>,
+    I::Map: IndexMap<Key = K, Value = P::Value>,
 {
-    type Match = HashMap<K, P::Value>;
+    type Match = I::Map;
 
     fn find_matches<'a>(
         &'a self,

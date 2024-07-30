@@ -16,7 +16,7 @@ use std::fmt::{self, Debug};
 
 use derive_more::{From, Into};
 
-use crate::{HashMap, PatternID};
+use crate::PatternID;
 pub use builder::AutomatonBuilder;
 
 /// An automaton-like datastructure to evaluate sets of constraints efficiently.
@@ -164,5 +164,3 @@ impl<C: Debug> Debug for Transition<C> {
         }
     }
 }
-
-type AssignMap<V, U> = HashMap<V, U>;

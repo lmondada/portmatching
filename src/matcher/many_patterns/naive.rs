@@ -1,9 +1,9 @@
 use crate::{
     constraint::Constraint,
-    indexing::{IndexKey, IndexValue},
+    indexing,
     matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
     pattern::Pattern,
-    HashMap, IndexingScheme, Predicate,
+    IndexingScheme, Predicate,
 };
 
 /// A simple matcher for matching multiple patterns.
@@ -59,14 +59,12 @@ impl<C, I> Default for NaiveManyMatcher<C, I> {
     }
 }
 
-impl<K, P, D, I> PortMatcher<D> for NaiveManyMatcher<Constraint<K, P>, I>
+impl<P, D, I> PortMatcher<D> for NaiveManyMatcher<Constraint<indexing::Key<I, D>, P>, I>
 where
-    K: IndexKey,
-    P: Predicate<D>,
-    P::Value: IndexValue,
-    I: IndexingScheme<D, P::Value, Key = K>,
+    P: Predicate<D, Value = indexing::Value<I, D>>,
+    I: IndexingScheme<D>,
 {
-    type Match = HashMap<K, P::Value>;
+    type Match = I::Map;
 
     fn find_matches<'a>(
         &'a self,

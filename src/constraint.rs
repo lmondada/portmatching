@@ -79,6 +79,10 @@ pub enum InvalidConstraint {
         /// The variable binding the value to
         variable: String,
     },
+
+    /// Bind a value to an unrecognised variable name
+    #[error("Cannot bind to variable name: {0}")]
+    InvalidVariableName(String),
 }
 
 impl From<BindVariableError> for InvalidConstraint {
@@ -86,6 +90,9 @@ impl From<BindVariableError> for InvalidConstraint {
         match e {
             BindVariableError::VariableExists { key: var, .. } => {
                 InvalidConstraint::BindVariableExists(var)
+            }
+            BindVariableError::InvalidKey { key: var, .. } => {
+                InvalidConstraint::UnboundVariable(var)
             }
         }
     }
@@ -158,7 +165,7 @@ impl<K, P> Constraint<K, P> {
     pub fn is_satisfied<V, D>(
         &self,
         data: &D,
-        known_bindings: &impl IndexMap<K, V>,
+        known_bindings: &impl IndexMap<Key = K, Value = V>,
     ) -> Result<bool, InvalidConstraint>
     where
         P: Predicate<D, Value = V>,
