@@ -1,14 +1,11 @@
 //! Utility functions.
 
-// pub(crate) mod mark_last;
-
 // #[cfg(feature = "portgraph")]
 // pub(crate) mod portgraph;
 // #[cfg(all(feature = "portgraph", feature = "proptest"))]
 // pub mod test;
 pub(crate) mod subgraph;
 mod toposort;
-pub(crate) mod tracer;
 pub(crate) mod unique_stack;
 
 use itertools::Itertools;
