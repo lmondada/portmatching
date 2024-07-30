@@ -18,7 +18,7 @@
 //! `FilterPredicate` by calling `assign_check` and then checking that the binding
 //! for <var2> is in the returned set.
 
-use std::fmt::Debug;
+use std::{borrow::Borrow, fmt::Debug};
 
 /// A predicate with a fixed arity.
 pub trait ArityPredicate: Eq + Clone {
@@ -40,11 +40,13 @@ pub trait Predicate<Data>: ArityPredicate {
     /// Check if the predicate is satisfied by the given data and values.
     ///
     /// `values` must be of length [Predicate::arity].
-    fn check(&self, data: &Data, args: &[&Self::Value]) -> bool;
+    fn check(&self, data: &Data, args: &[impl Borrow<Self::Value>]) -> bool;
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::borrow::Borrow;
+
     use itertools::Itertools;
     use rstest::rstest;
 
@@ -66,11 +68,13 @@ pub(crate) mod tests {
     impl Predicate<()> for TestPredicate {
         type Value = usize;
 
-        fn check(&self, _: &(), args: &[&usize]) -> bool {
+        fn check(&self, _: &(), args: &[impl Borrow<Self::Value>]) -> bool {
             if args.len() != self.arity {
                 panic!("Invalid constraint: arity mismatch");
             }
-            args.iter().tuple_windows().all(|(a, b)| a == b)
+            args.iter()
+                .tuple_windows()
+                .all(|(a, b)| a.borrow() == b.borrow())
         }
     }
 

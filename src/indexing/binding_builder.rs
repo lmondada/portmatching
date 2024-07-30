@@ -1,46 +1,34 @@
-use std::{fmt, marker::PhantomData};
+use std::fmt;
 
 use crate::{utils::UniqueStack, HashSet, IndexMap};
 
-use super::{BindVariableError, IndexKey};
+use super::BindVariableError;
 
-pub(super) struct BindingBuilder<K, V, M> {
+#[derive(Clone)]
+pub(super) struct BindingBuilder<M: IndexMap> {
     bindings: M,
     /// A stack of the missing keys.
     ///
     /// It's important that we process the keys first-in last-out, to ensure
     /// that we process the dependencies we added to the stack before processing
     /// the same key again.
-    missing_keys: UniqueStack<K>,
-    exclude_keys: HashSet<K>,
-    _phantom: PhantomData<V>,
+    missing_keys: UniqueStack<M::Key>,
+    exclude_keys: HashSet<M::Key>,
 }
 
-impl<K: Clone, V, M: Clone> Clone for BindingBuilder<K, V, M> {
-    fn clone(&self) -> Self {
-        Self {
-            bindings: self.bindings.clone(),
-            missing_keys: self.missing_keys.clone(),
-            exclude_keys: self.exclude_keys.clone(),
-            _phantom: PhantomData::<V>,
-        }
-    }
-}
-
-impl<K, V, M: fmt::Debug> fmt::Debug for BindingBuilder<K, V, M> {
+impl<M: IndexMap + fmt::Debug> fmt::Debug for BindingBuilder<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "BindingBuilder{:?}", self.bindings)
     }
 }
 
-impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
-    pub fn new(keys: impl IntoIterator<Item = K>, bindings: M) -> Self {
+impl<M: IndexMap> BindingBuilder<M> {
+    pub fn new(keys: impl IntoIterator<Item = M::Key>, bindings: M) -> Self {
         let missing_keys = keys.into_iter().collect();
         Self {
             missing_keys,
             bindings,
             exclude_keys: HashSet::default(),
-            _phantom: PhantomData::<V>,
         }
     }
 
@@ -48,7 +36,7 @@ impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
         &self.bindings
     }
 
-    pub fn top_missing_key(&mut self) -> Option<K> {
+    pub fn top_missing_key(&mut self) -> Option<M::Key> {
         let mut key = *self.missing_keys.top()?;
         while self.bindings.get(&key).is_some() || self.exclude_keys.contains(&key) {
             // Already bound or excluded
@@ -64,8 +52,8 @@ impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
 
     pub fn apply_bindings(
         mut self,
-        key: K,
-        values: impl IntoIterator<Item = V>,
+        key: M::Key,
+        values: impl IntoIterator<Item = M::Value>,
     ) -> Result<Vec<Self>, BindVariableError> {
         if self.missing_keys.top() == Some(&key) {
             self.missing_keys.pop();
@@ -80,7 +68,7 @@ impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
             .collect()
     }
 
-    pub fn exclude_key(&mut self, key: K) {
+    pub fn exclude_key(&mut self, key: M::Key) {
         if self.missing_keys.top() == Some(&key) {
             self.missing_keys.pop();
         }
@@ -90,7 +78,7 @@ impl<K: IndexKey, V, M: IndexMap<K, V>> BindingBuilder<K, V, M> {
     /// Extend the missing key set.
     ///
     /// Return whether any key was added.
-    pub fn extend_missing_keys(&mut self, keys: impl IntoIterator<Item = K>) -> bool {
+    pub fn extend_missing_keys(&mut self, keys: impl IntoIterator<Item = M::Key>) -> bool {
         let mut to_add = keys
             .into_iter()
             .filter(|key| !self.exclude_keys.contains(key))
