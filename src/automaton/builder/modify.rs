@@ -4,9 +4,6 @@ use crate::automaton::{ConstraintAutomaton, State, StateID, Transition, Transiti
 use crate::PatternID;
 
 /// Methods for modifying the automaton
-///
-/// Exposed as a trait so that the automaton builder can reuse the default
-/// implementation but trace calls.
 impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
     /// Add a new disconnected non-deterministic state
     pub(super) fn add_non_det_node(&mut self) -> StateID {

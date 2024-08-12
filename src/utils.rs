@@ -4,7 +4,6 @@
 // pub(crate) mod portgraph;
 // #[cfg(all(feature = "portgraph", feature = "proptest"))]
 // pub mod test;
-pub(crate) mod subgraph;
 mod toposort;
 pub(crate) mod unique_stack;
 

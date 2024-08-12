@@ -1,20 +1,25 @@
 use std::hash::Hash;
 
 use itertools::Itertools;
-use petgraph::{graph::NodeIndex, stable_graph::StableDiGraph, Direction};
+use petgraph::{
+    graph::NodeIndex,
+    prelude::StableGraph,
+    visit::{NodeFiltered, Reversed},
+    Direction,
+};
 
 use crate::{
     automaton::{ConstraintAutomaton, StateID},
     constraint::Constraint,
     mutex_tree::{MutuallyExclusiveTree, ToConstraintsTree},
-    utils::{subgraph::SubgraphRef, OnlineToposort},
+    utils::OnlineToposort,
     HashMap, HashSet, PatternID,
 };
 
-mod acyclic;
 mod modify;
+mod node_depth;
 
-use self::acyclic::AcyclicChecker;
+use self::node_depth::NodeDepthCache;
 
 use super::{State, Transition, TransitionID};
 
@@ -280,8 +285,9 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
 
     fn recently_added_subgraph(
         &self,
-    ) -> SubgraphRef<'_, StableDiGraph<State, Transition<C>>, NodeIndex> {
-        SubgraphRef::new(&self.matcher.graph, &self.recently_added, true)
+    ) -> NodeFiltered<Reversed<&StableGraph<State, Transition<C>>>, &HashSet<NodeIndex>> {
+        let graph = &self.matcher.graph;
+        NodeFiltered(Reversed(graph), &self.recently_added)
     }
 
     /// Attempt to merge all recently added nodes with its siblings.
@@ -302,9 +308,9 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
                 == 0
         });
         let mut traverser = OnlineToposort::from_iter(roots);
-        let mut acyclic_checker = AcyclicChecker::with_graph(&self.matcher.graph).unwrap();
+        let mut acyclic_checker = NodeDepthCache::with_graph(&self.matcher.graph).unwrap();
 
-        while let Some(node) = traverser.next(self.recently_added_subgraph()) {
+        while let Some(node) = traverser.next(&self.recently_added_subgraph()) {
             // Try to merge node with its siblings
             let state = StateID(node);
             let Some(first_child) = self
@@ -315,16 +321,23 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
             else {
                 continue;
             };
-            let siblings = self
+            let mut compatible_siblings = HashSet::default();
+            for StateID(sibling) in self
                 .matcher
                 .incoming_transitions(first_child)
                 .map(|t| self.matcher.parent(t))
                 .unique()
                 .filter(|&n| n != state)
-                // We cannot merge nodes that are reachable from each other
-                .filter(|n| acyclic_checker.path_exists(n.0, state.0, &self.matcher.graph));
+            {
+                if acyclic_checker.path_exists(sibling, &compatible_siblings, &self.matcher.graph) {
+                    compatible_siblings.insert(sibling);
+                }
+            }
+
             let state_tuple = self.matcher.state_tuple(state);
-            let merge_nodes = siblings
+            let merge_nodes = compatible_siblings
+                .into_iter()
+                .map_into()
                 .filter(|&n| self.matcher.state_tuple(n) == state_tuple)
                 .collect_vec();
             // merge all `nodes` into a single one.
