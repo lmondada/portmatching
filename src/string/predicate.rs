@@ -10,7 +10,7 @@ use super::StringSubjectPosition;
 ///
 /// We support two types of predicates: matching a character against a constant
 /// `char`, and comparing to character variables.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CharacterPredicate {
     /// Comparison between two bound values
     BindingEq,

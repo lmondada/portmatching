@@ -46,6 +46,7 @@ pub trait Predicate<Data>: ArityPredicate {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::borrow::Borrow;
+    use std::cmp;
 
     use itertools::Itertools;
     use rstest::rstest;
@@ -54,7 +55,7 @@ pub(crate) mod tests {
 
     use super::ArityPredicate;
 
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub(crate) struct TestPredicate {
         pub(crate) arity: usize,
     }
@@ -75,6 +76,18 @@ pub(crate) mod tests {
             args.iter()
                 .tuple_windows()
                 .all(|(a, b)| a.borrow() == b.borrow())
+        }
+    }
+
+    impl PartialOrd for TestPredicate {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for TestPredicate {
+        fn cmp(&self, other: &Self) -> cmp::Ordering {
+            cmp::Reverse(self.arity).cmp(&cmp::Reverse(other.arity))
         }
     }
 
