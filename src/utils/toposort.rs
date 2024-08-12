@@ -43,6 +43,16 @@ pub struct OnlineToposort<N> {
     to_visit_next: Vec<N>,
 }
 
+impl<N> FromIterator<N> for OnlineToposort<N> {
+    fn from_iter<T: IntoIterator<Item = N>>(iter: T) -> Self {
+        let to_visit_next = iter.into_iter().collect_vec();
+        Self {
+            visited: HashSet::default(),
+            to_visit_next,
+        }
+    }
+}
+
 impl<N: Eq + Hash + Copy> OnlineToposort<N> {
     fn new(root: N) -> Self {
         Self {
