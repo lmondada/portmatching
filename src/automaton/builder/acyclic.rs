@@ -25,15 +25,11 @@ impl<N: Eq + Hash + Copy> AcyclicChecker<N> {
     {
         let mut depths = HashMap::default();
         for node in toposort(graph, None)? {
-            let max_prev_depth = graph
+            let depth = graph
                 .neighbors_directed(node, Direction::Incoming)
                 .map(|n| depths[&n])
-                .max();
-            let depth = if let Some(max_prev_depth) = max_prev_depth {
-                max_prev_depth + 1
-            } else {
-                0
-            };
+                .max()
+                .map_or(0, |d| d+1);
             depths.insert(node, depth);
         }
         Ok(Self { depths })
