@@ -242,7 +242,7 @@ impl Debug for MatrixString {
             for c in row {
                 write!(f, "{}", c)?;
             }
-            write!(f, "\n")?;
+            writeln!(f)?;
         }
         Ok(())
     }
