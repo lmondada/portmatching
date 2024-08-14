@@ -95,6 +95,11 @@ impl<C, I> ConstraintAutomaton<C, I> {
     pub fn host_indexing(&self) -> &I {
         &self.host_indexing
     }
+
+    /// Get the number of states in the automaton
+    pub fn n_states(&self) -> usize {
+        self.graph.node_count()
+    }
 }
 
 impl<C: Debug, I> Debug for ConstraintAutomaton<C, I> {

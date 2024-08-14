@@ -84,6 +84,11 @@ impl<PT, K, P, I> ManyMatcher<PT, K, P, I> {
     pub fn get_pattern(&self, id: PatternID) -> Option<&PT> {
         self.patterns.get(&id)
     }
+
+    /// Get the number of states in the automaton.
+    pub fn n_states(&self) -> usize {
+        self.automaton.n_states()
+    }
 }
 
 impl<PT, K: Debug, P: Debug, I> ManyMatcher<PT, K, P, I> {
