@@ -99,10 +99,12 @@ pub trait IndexingScheme<Data> {
 }
 
 /// A list of valid bindings, in the order they should be considered
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidBindings<V>(pub Vec<V>);
 
 /// Indicates that valid bindings cannot be found unless bindings are provided
 /// for the missing index keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissingIndexKeys<K>(pub Vec<K>);
 
 /// A map-like trait for index key-value bindings.

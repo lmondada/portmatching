@@ -4,7 +4,7 @@ use itertools::Itertools;
 use petgraph::{
     graph::NodeIndex,
     prelude::StableGraph,
-    visit::{NodeFiltered, Reversed},
+    visit::{IntoNeighborsDirected, IntoNodeIdentifiers, NodeFiltered, Reversed},
     Direction,
 };
 
@@ -108,6 +108,44 @@ impl<'c, C: Eq + Clone, I> AutomatonBuilder<'c, C, I> {
         self.matcher.add_pattern(pattern, id);
         self.patterns_ids.push(id);
     }
+
+    fn find_mergeable_nodes(
+        &self,
+        node: NodeIndex,
+        node_depths: &NodeDepthCache<NodeIndex>,
+    ) -> Vec<StateID> {
+        let state = StateID(node);
+
+        let siblings = {
+            let Some(first_child) = self
+                .matcher
+                .all_transitions(state)
+                .next()
+                .map(|t| self.matcher.next_state(t))
+            else {
+                return vec![];
+            };
+            self.matcher.incoming_transitions(first_child)
+        };
+
+        let mut no_path_siblings = HashSet::from_iter([node]);
+        for StateID(sibling) in siblings
+            .map(|t| self.matcher.parent(t))
+            .filter(|&n| n != state)
+            .unique()
+        {
+            if !node_depths.path_exists(sibling, &no_path_siblings, &self.matcher.graph) {
+                no_path_siblings.insert(sibling);
+            }
+        }
+
+        let state_tuple = self.matcher.state_tuple(state);
+        no_path_siblings
+            .into_iter()
+            .map_into()
+            .filter(|&n| self.matcher.state_tuple(n) == state_tuple)
+            .collect_vec()
+    }
 }
 
 type Automaton<K, P, I> = ConstraintAutomaton<Constraint<K, P>, I>;
@@ -134,10 +172,6 @@ where
         // With this `toposort` we are allowed to add vertices and edges as we go
         let mut traverser = self.matcher.toposort();
         while let Some(state) = traverser.next(&self.matcher) {
-            if self.matcher.state_exists(state) {
-                // `state` was deleted, skip
-                continue;
-            }
             // Group all identical constraints and FAIL transitions into one
             self.make_constraints_unique(state);
 
@@ -299,47 +333,18 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
         // We try to merge nodes in a (reverse) toposort order, as merging
         // children first might enable the merge of parent nodes.
         // We thus start at the newly added nodes that have no newly added descendants
-        let roots = self.recently_added.iter().copied().filter(|&n| {
-            self.matcher
-                .graph
-                .neighbors_directed(n, Direction::Outgoing)
-                .filter(|n| self.recently_added.contains(n))
-                .count()
-                == 0
-        });
+        let g = &self.recently_added_subgraph();
+        let roots = g
+            .node_identifiers()
+            .filter(|&n| g.neighbors_directed(n, Direction::Incoming).count() == 0)
+            .collect_vec();
         let mut traverser = OnlineToposort::from_iter(roots);
-        let mut acyclic_checker = NodeDepthCache::with_graph(&self.matcher.graph).unwrap();
+        let mut node_depths = NodeDepthCache::with_graph(&self.matcher.graph).unwrap();
 
         while let Some(node) = traverser.next(&self.recently_added_subgraph()) {
-            // Try to merge node with its siblings
-            let state = StateID(node);
-            let Some(first_child) = self
-                .matcher
-                .all_transitions(state)
-                .next()
-                .map(|t| self.matcher.next_state(t))
-            else {
-                continue;
-            };
-            let mut compatible_siblings = HashSet::default();
-            for StateID(sibling) in self
-                .matcher
-                .incoming_transitions(first_child)
-                .map(|t| self.matcher.parent(t))
-                .unique()
-                .filter(|&n| n != state)
-            {
-                if acyclic_checker.path_exists(sibling, &compatible_siblings, &self.matcher.graph) {
-                    compatible_siblings.insert(sibling);
-                }
-            }
+            // Find all siblings that can be merged with `node`
+            let merge_nodes = self.find_mergeable_nodes(node, &node_depths);
 
-            let state_tuple = self.matcher.state_tuple(state);
-            let merge_nodes = compatible_siblings
-                .into_iter()
-                .map_into()
-                .filter(|&n| self.matcher.state_tuple(n) == state_tuple)
-                .collect_vec();
             // merge all `nodes` into a single one.
             if merge_nodes.len() <= 1 {
                 // nothing to merge
@@ -350,7 +355,7 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
                 self.matcher.move_incoming(first_node, node);
                 self.matcher.remove_state(node);
             }
-            acyclic_checker.merge_nodes(merge_nodes.into_iter().map(|n| n.0));
+            node_depths.merge_nodes(merge_nodes.into_iter().map(|n| n.0));
         }
         self.recently_added.clear();
     }
@@ -442,7 +447,7 @@ impl<'c, C: Clone + Eq, I: Default> FromIterator<Vec<C>> for AutomatonBuilder<'c
 #[cfg(test)]
 mod tests {
     use insta::assert_snapshot;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use tests::modify::tests::{constraints, root_child, root_grandchildren};
 
     use super::modify::tests::{automaton, automaton2};
@@ -630,5 +635,29 @@ mod tests {
             post_post_fail
         );
         assert_eq!(automaton2.incoming_transitions(post_post_fail).count(), 2);
+    }
+
+    #[fixture]
+    fn automaton3() -> ConstraintAutomaton<TestConstraint, TestIndexingScheme> {
+        let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::default();
+        let n1 = automaton.add_constraint(automaton.root(), TestConstraint::new(vec![0]));
+        let n2 = automaton.add_constraint(automaton.root(), TestConstraint::new(vec![1]));
+        let f = automaton.add_fail(n1);
+        automaton.append_edge(n2, f, None);
+        automaton
+    }
+
+    #[rstest]
+    fn test_mergeable_nodes(automaton3: ConstraintAutomaton<TestConstraint, TestIndexingScheme>) {
+        let node_depths = NodeDepthCache::with_graph(&automaton3.graph).unwrap();
+        let builder = AutomatonBuilder {
+            matcher: automaton3,
+            ..Default::default()
+        };
+        let merge_nodes = builder.find_mergeable_nodes(NodeIndex::new(1), &node_depths);
+        assert_eq!(
+            merge_nodes,
+            vec![NodeIndex::new(1).into(), NodeIndex::new(2).into()]
+        );
     }
 }
