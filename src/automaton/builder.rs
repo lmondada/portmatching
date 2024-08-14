@@ -183,6 +183,8 @@ where
             let constraints = self.matcher.constraints(state).collect_vec();
             if self.make_det.as_mut().unwrap()(&constraints) {
                 self.make_det(state);
+                // Add `state` to the set of recently added nodes as it has been changed
+                self.recently_added.insert(state.0);
             }
 
             // For all nodes that were added try to merge them with existing
