@@ -139,8 +139,4 @@ impl<C, I> ConstraintAutomaton<C, I> {
     pub(super) fn node_weight(&self, state: StateID) -> &State {
         self.graph.node_weight(state.0).expect("unknown state")
     }
-
-    pub(super) fn state_exists(&self, state: StateID) -> bool {
-        self.graph.node_weight(state.0).is_none()
-    }
 }

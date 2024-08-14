@@ -1,7 +1,10 @@
 use std::hash::Hash;
 
 use itertools::Itertools;
-use petgraph::{visit::IntoNeighborsDirected, Direction};
+use petgraph::{
+    visit::{IntoNeighborsDirected, IntoNodeIdentifiers},
+    Direction,
+};
 
 use crate::HashSet;
 
@@ -66,38 +69,39 @@ impl<N: Eq + Hash + Copy> OnlineToposort<N> {
         node_is_ready(node, graph, &self.visited)
     }
 
-    /// Remove previously ready nodes that are no longer ready (due to changes to the graph)
-    fn prune_unready<G: IntoNeighborsDirected<NodeId = N>>(&mut self, graph: &G) {
-        let Self {
-            visited,
-            to_visit_next,
-        } = self;
-        to_visit_next.retain(|&n| node_is_ready(n, graph, visited));
-    }
-
     /// A node that is either queued to be visited, or has been visited
     fn is_queued_or_visited(&self, node: N) -> bool {
         self.to_visit_next.contains(&node) || self.visited.contains(&node)
     }
 
     /// Get the next node to visit, or None if no unvisited node can be reached.
-    pub fn next<G: IntoNeighborsDirected<NodeId = N>>(&mut self, graph: G) -> Option<N> {
-        // Make sure our ready nodes are still currently ready
-        self.prune_unready(&graph);
+    pub fn next<G: IntoNeighborsDirected<NodeId = N> + IntoNodeIdentifiers>(
+        &mut self,
+        graph: G,
+    ) -> Option<N> {
+        let next_state = loop {
+            let mut all_visited = self.visited.iter().copied();
 
-        // Refill supply of ready nodes if empty
-        let mut all_visited = self.visited.iter().copied();
-        while self.to_visit_next.is_empty() {
-            let ready_nodes = graph
-                .neighbors_directed(all_visited.next()?, Direction::Outgoing)
-                .filter(|&n| self.is_ready(n, &graph))
-                .filter(|&n| !self.is_queued_or_visited(n))
-                .unique()
-                .collect_vec();
-            self.to_visit_next.extend(ready_nodes);
-        }
+            // Refill supply of ready nodes if empty
+            while self.to_visit_next.is_empty() {
+                let ready_nodes = graph
+                    .neighbors_directed(all_visited.next()?, Direction::Outgoing)
+                    .filter(|&n| self.is_ready(n, &graph))
+                    .filter(|&n| !self.is_queued_or_visited(n))
+                    .unique()
+                    .collect_vec();
+                self.to_visit_next.extend(ready_nodes);
+            }
 
-        let next_state = self.to_visit_next.pop()?;
+            let next_state = self.to_visit_next.pop().unwrap();
+
+            // Make sure next_state is still ready
+            let node_exists = graph.node_identifiers().contains(&next_state);
+            if node_exists && self.is_ready(next_state, &graph) {
+                break next_state;
+            }
+        };
+
         self.visited.insert(next_state);
         Some(next_state)
     }

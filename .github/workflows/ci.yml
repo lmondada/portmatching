@@ -14,7 +14,7 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    
+
     name: Formatting and Linting Check
 
     steps:
@@ -28,7 +28,7 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
-      
+
       - name: Linting (clippy)
         run: cargo clippy --all-targets -- -D warnings
 
@@ -38,7 +38,7 @@ jobs:
         rust: [beta, nightly, 1.75.0]
         os:
           - ubuntu-latest
-    
+
     runs-on: ${{ matrix.os }}
     name: Rust ${{ matrix.rust }} on ${{ matrix.os }}
 
@@ -59,7 +59,7 @@ jobs:
 
       - name: Test all features
         id: test
-        run: cargo test --all-features -- --include-ignored
+        run: cargo test --release --all-features -- --include-ignored
 
       - name: Commit failed proptest
         if: failure() && steps.test.conclusion == 'failure'
