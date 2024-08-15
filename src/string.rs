@@ -159,7 +159,7 @@ pub struct StringSubjectPosition(usize);
 pub struct StringPatternPosition(usize);
 
 impl StringPatternPosition {
-    /// The start position in the pattern.
+    /// The start position of the string.
     pub fn start() -> Self {
         Self(0)
     }
