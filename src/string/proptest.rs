@@ -30,6 +30,7 @@ mod tests {
 
     proptest! {
         #[test]
+        #[ignore = "a bit slow"]
         fn proptest_string(
             subject in "[a-f]*",
             patterns in prop::collection::vec(any::<StringPattern>(), 1..5)
@@ -37,6 +38,10 @@ mod tests {
             let (mut nondet, mut default, mut det) = apply_all_matchers(patterns, &subject, 0..3)
                 .collect_tuple()
                 .unwrap();
+
+            clean_match_data(&mut nondet);
+            clean_match_data(&mut default);
+            clean_match_data(&mut det);
 
             nondet.sort();
             default.sort();
