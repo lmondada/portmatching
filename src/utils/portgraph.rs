@@ -1,9 +1,13 @@
 //! Graph-related utilities
 
-use std::collections::{BTreeMap, VecDeque};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, VecDeque},
+};
 
 use crate::HashSet;
 
+use itertools::Itertools;
 use petgraph::unionfind::UnionFind;
 use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortIndex, PortOffset, PortView};
 
@@ -123,18 +127,19 @@ mod tests {
     #[test]
     fn test_line_partition() {
         let mut g = PortGraph::new();
-        let n = g.add_node(1, 1);
+        let n = g.add_node(0, 1);
+        let m = g.add_node(1, 0);
         g.link_ports(
             g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
-            g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
+            g.port_index(m, PortOffset::new_incoming(0)).unwrap(),
         )
         .unwrap();
         let lines = line_partition(&g, n);
         assert_eq!(
             lines,
             vec![vec![(
-                g.port_index(n, PortOffset::new_incoming(0)).unwrap(),
-                g.port_index(n, PortOffset::new_outgoing(0)).unwrap()
+                g.port_index(n, PortOffset::new_outgoing(0)).unwrap(),
+                g.port_index(m, PortOffset::new_incoming(0)).unwrap(),
             ),]]
         );
     }
