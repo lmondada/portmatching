@@ -1,0 +1,86 @@
+---
+source: src/portgraph/constraint/mutex.rs
+expression: tree
+---
+MutuallyExclusiveTree {
+    nodes: [
+        MutExTreeNode {
+            constraint_indices: [],
+            children: [
+                MutExTreeNodeChild {
+                    predicate: not_equal(2)(Along(0, out0)@0), Along(1, out0)@1), Along(2, out0)@1)),
+                    node_index: 1,
+                },
+                MutExTreeNodeChild {
+                    predicate: not_equal(2)(Along(0, out0)@0), Along(1, out0)@1), Along(1, out0)@2)),
+                    node_index: 2,
+                },
+                MutExTreeNodeChild {
+                    predicate: not_equal(2)(Along(0, out0)@0), Along(1, out0)@1), Along(1, out0)@3)),
+                    node_index: 3,
+                },
+            ],
+        },
+        MutExTreeNode {
+            constraint_indices: [
+                0,
+            ],
+            children: [
+                MutExTreeNodeChild {
+                    predicate: not_equal(1)(Along(0, out0)@0), Along(1, out0)@2)),
+                    node_index: 4,
+                },
+                MutExTreeNodeChild {
+                    predicate: not_equal(1)(Along(0, out0)@0), Along(1, out0)@3)),
+                    node_index: 5,
+                },
+            ],
+        },
+        MutExTreeNode {
+            constraint_indices: [
+                1,
+            ],
+            children: [
+                MutExTreeNodeChild {
+                    predicate: not_equal(1)(Along(0, out0)@0), Along(1, out0)@3)),
+                    node_index: 6,
+                },
+            ],
+        },
+        MutExTreeNode {
+            constraint_indices: [
+                2,
+            ],
+            children: [],
+        },
+        MutExTreeNode {
+            constraint_indices: [
+                1,
+            ],
+            children: [
+                MutExTreeNodeChild {
+                    predicate: not_equal(2)(Along(0, out0)@0), Along(1, out0)@1), Along(1, out0)@3)),
+                    node_index: 7,
+                },
+            ],
+        },
+        MutExTreeNode {
+            constraint_indices: [
+                2,
+            ],
+            children: [],
+        },
+        MutExTreeNode {
+            constraint_indices: [
+                2,
+            ],
+            children: [],
+        },
+        MutExTreeNode {
+            constraint_indices: [
+                2,
+            ],
+            children: [],
+        },
+    ],
+}

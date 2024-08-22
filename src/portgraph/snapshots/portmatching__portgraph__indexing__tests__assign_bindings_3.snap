@@ -1,0 +1,27 @@
+---
+source: src/portgraph/indexing.rs
+expression: all_bindings(&graph)
+---
+[
+    {
+        Root(0): NodeIndex(2),
+        Along(0, out0)@1): NodeIndex(0),
+        Along(0, in0)@1): NodeIndex(1),
+        Along(0, in0)@2): NodeIndex(0),
+        Along(0, out0)@2): NodeIndex(1),
+    },
+    {
+        Root(0): NodeIndex(1),
+        Along(0, out0)@1): NodeIndex(2),
+        Along(0, in0)@1): NodeIndex(0),
+        Along(0, in0)@2): NodeIndex(2),
+        Along(0, out0)@2): NodeIndex(0),
+    },
+    {
+        Root(0): NodeIndex(0),
+        Along(0, out0)@1): NodeIndex(1),
+        Along(0, in0)@1): NodeIndex(2),
+        Along(0, in0)@2): NodeIndex(1),
+        Along(0, out0)@2): NodeIndex(2),
+    },
+]
