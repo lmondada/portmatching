@@ -1,0 +1,23 @@
+---
+source: src/portgraph/root_candidates.rs
+expression: tree
+---
+RootSpanningTree {
+    nodes: [
+        RootSpanningNode {
+            neighbours: {
+                Incoming(0): NewRoot(
+                    NodeIndex(3),
+                ),
+                Outgoing(0): KnownRoot(
+                    1,
+                ),
+            },
+        },
+        RootSpanningNode {
+            neighbours: {
+                Incoming(0): Parent,
+            },
+        },
+    ],
+}

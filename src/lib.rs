@@ -5,11 +5,11 @@ pub mod automaton;
 pub mod constraint;
 pub mod indexing;
 pub mod matcher;
+pub mod matrix;
 pub mod mutex_tree;
 pub mod pattern;
-// #[cfg(feature = "portgraph")]
-// pub mod portgraph;
-pub mod matrix;
+#[cfg(feature = "portgraph")]
+pub mod portgraph;
 pub mod predicate;
 pub mod string;
 pub mod utils;

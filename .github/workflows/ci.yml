@@ -7,6 +7,7 @@ name: CI tests
 env:
   CARGO_TERM_COLOR: always
   PROPTEST_CASES: 1024
+  PROPTEST_TIMEOUT: 1000
 
 permissions:
   contents: write
