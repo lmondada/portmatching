@@ -152,7 +152,8 @@ type Automaton<K, P, I> = ConstraintAutomaton<Constraint<K, P>, I>;
 
 impl<'c, K, P, I> AutomatonBuilder<'c, Constraint<K, P>, I>
 where
-    Constraint<K, P>: Eq + Clone + Hash + ToConstraintsTree,
+    P: ToConstraintsTree<K>,
+    Constraint<K, P>: Eq + Clone + Hash,
 {
     /// Construct the automaton.
     ///
@@ -221,7 +222,7 @@ where
             .unzip();
 
         // Organise constraints into a tree of mutually exclusive constraints
-        let mutex_tree = Constraint::to_constraints_tree(constraints.clone());
+        let mutex_tree = P::to_constraints_tree(constraints.clone());
 
         let added_constraints = self.add_mutex_tree(mutex_tree, state, &children);
 
@@ -370,6 +371,12 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
     ) -> HashSet<usize> {
         let mut added_constraints = HashSet::default();
 
+        // Add FAIL transitions for constraints at the root of the mutex tree
+        for &ind in mutex_tree.constraint_indices(mutex_tree.root()) {
+            added_constraints.insert(ind);
+            self.matcher.append_edge(state, children[ind], None);
+        }
+
         // Traverse the mutex tree, making sure to
         //  - add each state of the tree to the matcher as we go
         //  - keep track of the matcher states corresponding to tree states
@@ -383,10 +390,8 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
                 }
 
                 let indices = mutex_tree.constraint_indices(child_tree_state);
-                for &index in indices {
-                    added_constraints.insert(index);
-                }
                 for &ind in indices {
+                    added_constraints.insert(ind);
                     self.matcher
                         .append_edge(matcher_state, children[ind], Some(c.clone()));
                 }
@@ -455,14 +460,16 @@ mod tests {
     use super::modify::tests::{automaton, automaton2};
     use crate::{
         constraint::tests::TestConstraint, indexing::tests::TestIndexingScheme,
-        mutex_tree::MutuallyExclusiveTree,
+        mutex_tree::MutuallyExclusiveTree, predicate::tests::TestPredicate,
     };
 
     use super::*;
 
     // Dummy ToMutuallyExclusiveTree implementation for TestConstraint
-    impl ToConstraintsTree for TestConstraint {
-        fn to_constraints_tree(preds: Vec<Self>) -> MutuallyExclusiveTree<Self> {
+    impl ToConstraintsTree<usize> for TestPredicate {
+        fn to_constraints_tree(
+            preds: Vec<TestConstraint>,
+        ) -> MutuallyExclusiveTree<TestConstraint> {
             // We take the first `k` constraints to be mutually exclusive,
             // where `k` is given by the arity of the first predicate (this has
             // no meaning).
@@ -478,7 +485,7 @@ mod tests {
             let mut tree = MutuallyExclusiveTree::new();
             let new_children = tree.add_children(tree.root(), first_k).collect_vec();
             for (index, child) in inds.into_iter().zip(new_children) {
-                tree.add_constraint_index(child, index).unwrap();
+                tree.add_constraint_index(child, index);
             }
             tree
         }
@@ -504,9 +511,9 @@ mod tests {
         let mutex_tree = {
             let mut tree = MutuallyExclusiveTree::new();
             let tree_child = tree.add_child(tree.root(), 1);
-            tree.add_constraint_index(tree_child, 0).unwrap();
+            tree.add_constraint_index(tree_child, 0);
             let tree_gchild = tree.add_child(tree_child, 2);
-            tree.add_constraint_index(tree_gchild, 1).unwrap();
+            tree.add_constraint_index(tree_gchild, 1);
             tree
         };
         builder.add_mutex_tree(mutex_tree, builder.matcher.root(), &[n2, n2]);

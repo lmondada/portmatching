@@ -8,14 +8,15 @@
 
 mod mutex;
 
-use std::{cmp, iter};
+use std::{cmp, collections::BTreeSet, iter};
 
 use itertools::Itertools;
+use petgraph::visit::EdgeCount;
 use portgraph::{NodeIndex, PortGraph, PortView};
 
 use crate::{
     constraint::DetHeuristic,
-    mutex_tree::{MutuallyExclusiveTree, ToConstraintsTree},
+    mutex_tree::{ConditionedPredicate, MutuallyExclusiveTree, ToConstraintsTree},
     utils::{portgraph::line_partition, sort_with_indices},
     Constraint, HashMap,
 };
@@ -26,8 +27,8 @@ use mutex::*;
 /// A constraint on a port graph.
 pub type PGConstraint<W = ()> = Constraint<PGIndexKey, PGPredicate<W>>;
 
-impl ToConstraintsTree for PGConstraint {
-    fn to_constraints_tree(constraints: Vec<Self>) -> MutuallyExclusiveTree<Self> {
+impl ToConstraintsTree<PGIndexKey> for PGPredicate {
+    fn to_constraints_tree(constraints: Vec<PGConstraint>) -> MutuallyExclusiveTree<PGConstraint> {
         if constraints.is_empty() {
             return MutuallyExclusiveTree::new();
         }
@@ -35,6 +36,37 @@ impl ToConstraintsTree for PGConstraint {
         // This will always add the first constraint to the tree, plus any other
         // that are mutually exclusive
         mutex_filter(constraints)
+    }
+}
+
+impl ConditionedPredicate<PGIndexKey> for PGPredicate {
+    fn conditioned(
+        constraint: &Constraint<PGIndexKey, Self>,
+        satisfied: &[&Constraint<PGIndexKey, Self>],
+    ) -> Option<Constraint<PGIndexKey, Self>> {
+        if !matches!(constraint.predicate(), PGPredicate::IsNotEqual { .. }) {
+            return Some(constraint.clone());
+        }
+        let first_key = constraint.required_bindings()[0];
+        let mut keys: BTreeSet<_> = constraint.required_bindings()[1..]
+            .iter()
+            .copied()
+            .collect();
+        for s in satisfied
+            .iter()
+            .filter(|s| s.required_bindings()[0] == first_key)
+        {
+            for k in s.required_bindings()[1..].iter().copied() {
+                keys.remove(&k);
+            }
+        }
+        if keys.is_empty() {
+            return None;
+        }
+        let mut args = vec![first_key];
+        let n_other = keys.len();
+        args.extend(keys);
+        Some(PGConstraint::try_new(PGPredicate::IsNotEqual { n_other }, args).unwrap())
     }
 }
 
@@ -72,6 +104,13 @@ impl PGConstraint {
 }
 
 pub(super) fn constraint_vec(graph: &PortGraph, root: NodeIndex) -> Vec<PGConstraint> {
+    if graph.edge_count() == 0 {
+        return vec![PGConstraint::try_new(
+            PGPredicate::HasNodeWeight(()),
+            vec![PGIndexKey::root(0)],
+        )
+        .unwrap()];
+    }
     let mut constraints = Vec::new();
     let mut node_to_key = HashMap::from_iter([(root, PGIndexKey::root(0))]);
     let mut node_to_root_ind = HashMap::from_iter([(root, 0)]);
@@ -212,7 +251,7 @@ mod tests {
 
     #[rstest]
     fn test_to_mut_ex_assign_0(constraints: Vec<PGConstraint>) {
-        let tree = PGConstraint::to_constraints_tree(constraints.clone());
+        let tree = PGPredicate::to_constraints_tree(constraints.clone());
         assert_eq!(
             tree.children(tree.root())
                 .map(|(_, c)| c.clone())
@@ -236,7 +275,7 @@ mod tests {
 
     #[rstest]
     fn test_to_mut_ex_assign_1(constraints: Vec<PGConstraint>) {
-        let tree = PGConstraint::to_constraints_tree(constraints[..2].to_vec());
+        let tree = PGPredicate::to_constraints_tree(constraints[..2].to_vec());
         assert_eq!(
             tree.children(tree.root())
                 .map(|(_, c)| c.clone())

@@ -27,9 +27,9 @@
 //! on children of a node are interpreted as A, B ∧ ¬A, and C ∧ ¬A ∧ ¬B
 //! respectively.
 
-use std::fmt;
+mod build;
 
-use thiserror::Error;
+use crate::Constraint;
 
 /// Define the semantics of constraints using Constraint trees.
 ///
@@ -44,7 +44,7 @@ use thiserror::Error;
 /// processes the "smallest" constraints first, according to some total order
 /// of the constraints. This will ensure a maximum overlap between different
 /// patterns in the final pattern matching data structure.
-pub trait ToConstraintsTree
+pub trait ToConstraintsTree<K>
 where
     Self: Sized,
 {
@@ -53,7 +53,23 @@ where
     /// Node indices must be in [0, constraints.len()). Not all indices must be
     /// present in the tree. If so the tree is interpreted as the constraint tree
     /// of the subset of constraints present in the tree.
-    fn to_constraints_tree(constraints: Vec<Self>) -> MutuallyExclusiveTree<Self>;
+    fn to_constraints_tree(
+        constraints: Vec<Constraint<K, Self>>,
+    ) -> MutuallyExclusiveTree<Constraint<K, Self>>;
+}
+
+/// Condition predicate on a set of satisfied predicates.
+pub trait ConditionedPredicate<K>: ToConstraintsTree<K>
+where
+    Self: Sized,
+{
+    /// A possibly simplified version of the constraint that is equivalent to
+    /// `self` under the assumption that the predicates in `satisfied` are
+    /// satisfied.
+    fn conditioned(
+        constraint: &Constraint<K, Self>,
+        satisfied: &[&Constraint<K, Self>],
+    ) -> Option<Constraint<K, Self>>;
 }
 
 /// The constraint tree datastructure expected by `ToConstraintsTree`.
@@ -67,11 +83,11 @@ where
 /// If a index label appears at least once, then it is assumed that the
 /// constraint is satisfied exactly when a labelled state is reacheable.
 #[derive(Clone, Debug)]
-pub struct MutuallyExclusiveTree<P> {
-    nodes: Vec<MutExTreeNode<P>>,
+pub struct MutuallyExclusiveTree<C> {
+    nodes: Vec<MutExTreeNode<C>>,
 }
 
-impl<P> MutuallyExclusiveTree<P> {
+impl<C> MutuallyExclusiveTree<C> {
     /// Construct a new constraint tree with a root node.
     pub fn new() -> Self {
         let root = MutExTreeNode::new();
@@ -82,12 +98,12 @@ impl<P> MutuallyExclusiveTree<P> {
     ///
     /// Each element in `children` is a child of the root, with constraint
     /// indices given by the second element of the tuple.
-    pub fn with_children(children: impl IntoIterator<Item = (P, Vec<usize>)>) -> Self {
+    pub fn with_children(children: impl IntoIterator<Item = (C, Vec<usize>)>) -> Self {
         let mut tree = Self::new();
         for (child, indices) in children {
             let child_index = tree.add_child(tree.root(), child);
             for index in indices {
-                tree.add_constraint_index(child_index, index).unwrap();
+                tree.add_constraint_index(child_index, index);
             }
         }
         tree
@@ -104,49 +120,43 @@ impl<P> MutuallyExclusiveTree<P> {
     }
 
     /// The set of constraints at node `node`.
-    pub fn children(&self, node: usize) -> impl Iterator<Item = (usize, &P)> {
+    pub fn children(&self, node: usize) -> impl Iterator<Item = (usize, &C)> {
         self.nodes[node]
             .children
             .iter()
-            .map(|child| (child.node_index, &child.predicate))
+            .map(|child| (child.node_index, &child.constraint))
     }
 
     /// Add children to a node in the tree.
     pub fn add_children<'a>(
         &'a mut self,
         node: usize,
-        predicates: impl IntoIterator<Item = P> + 'a,
+        constraints: impl IntoIterator<Item = C> + 'a,
     ) -> impl Iterator<Item = usize> + 'a {
-        predicates.into_iter().map(move |p| self.add_child(node, p))
+        constraints
+            .into_iter()
+            .map(move |c| self.add_child(node, c))
     }
 
     /// Add a child to a node in the tree.
     ///
     /// Returns the index of the inserted node.
-    pub fn add_child(&mut self, node: usize, predicate: P) -> usize {
+    pub fn add_child(&mut self, node: usize, constraint: C) -> usize {
         if self.nodes.len() <= node {
             panic!("Cannot add child to node that does not exist");
         }
         let child_index = self.nodes.len();
         self.nodes.push(MutExTreeNode::new());
         self.nodes[node].children.push(MutExTreeNodeChild {
-            predicate,
+            constraint,
             node_index: child_index,
         });
         child_index
     }
 
     /// Set the constraint index for a node in the tree.
-    pub fn add_constraint_index(
-        &mut self,
-        node: usize,
-        index: usize,
-    ) -> Result<(), IndexOnNonLeaf> {
-        if self.children(node).next().is_some() {
-            return Err(IndexOnNonLeaf);
-        }
+    pub fn add_constraint_index(&mut self, node: usize, index: usize) {
         self.nodes[node].constraint_indices.push(index);
-        Ok(())
     }
 
     /// The number of nodes in the tree.
@@ -160,23 +170,13 @@ impl<P> MutuallyExclusiveTree<P> {
     }
 }
 
-/// Constraint indices may not appear on non-leaf nodes.
-#[derive(Debug, Clone, Error)]
-pub struct IndexOnNonLeaf;
-
-impl fmt::Display for IndexOnNonLeaf {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Cannot add constraint index to non-leaf node")
-    }
-}
-
-impl<P> Default for MutuallyExclusiveTree<P> {
+impl<C> Default for MutuallyExclusiveTree<C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<P> MutExTreeNode<P> {
+impl<C> MutExTreeNode<C> {
     fn new() -> Self {
         Self {
             constraint_indices: vec![],
@@ -199,7 +199,7 @@ struct MutExTreeNode<P> {
 ///
 /// Pointing is done using an index into the list of nodes in the tree.
 #[derive(Clone, Debug)]
-struct MutExTreeNodeChild<P> {
-    predicate: P,
+struct MutExTreeNodeChild<C> {
+    constraint: C,
     node_index: usize,
 }
