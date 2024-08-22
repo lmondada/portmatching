@@ -19,7 +19,7 @@ pub use indexing::{IndexMap, IndexingScheme};
 pub use matcher::{
     ManyMatcher, NaiveManyMatcher, PatternID, PatternMatch, PortMatcher, SinglePatternMatcher,
 };
-pub use mutex_tree::{MutuallyExclusiveTree, ToConstraintsTree};
+pub use mutex_tree::{ConditionedPredicate, MutuallyExclusiveTree, ToConstraintsTree};
 pub use pattern::Pattern;
 pub use predicate::{ArityPredicate, Predicate};
 
