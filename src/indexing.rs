@@ -9,13 +9,16 @@
 mod binding_builder;
 
 use crate::HashMap;
+use derive_more::{From, Into};
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 use thiserror::Error;
 
 use self::binding_builder::BindingBuilder;
 
-pub(crate) type Key<S, D> = <<S as IndexingScheme<D>>::Map as IndexMap>::Key;
-pub(crate) type Value<S, D> = <<S as IndexingScheme<D>>::Map as IndexMap>::Value;
+/// Index key type alias for indexing schemes.
+pub type Key<S, D> = <<S as IndexingScheme<D>>::Map as IndexMap>::Key;
+/// Index value type alias for indexing schemes.
+pub type Value<S, D> = <<S as IndexingScheme<D>>::Map as IndexMap>::Value;
 
 /// The result of a call to [IndexingScheme::valid_bindings].
 ///
@@ -99,12 +102,12 @@ pub trait IndexingScheme<Data> {
 }
 
 /// A list of valid bindings, in the order they should be considered
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, From, Into)]
 pub struct ValidBindings<V>(pub Vec<V>);
 
 /// Indicates that valid bindings cannot be found unless bindings are provided
 /// for the missing index keys.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, From, Into)]
 pub struct MissingIndexKeys<K>(pub Vec<K>);
 
 /// A map-like trait for index key-value bindings.

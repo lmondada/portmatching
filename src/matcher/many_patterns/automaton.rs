@@ -41,7 +41,8 @@ where
 
 impl<K, P, PT, I> ManyMatcher<PT, K, P, I>
 where
-    Constraint<K, P>: Eq + Clone + Hash + ToConstraintsTree,
+    Constraint<K, P>: Eq + Clone + Hash,
+    P: ToConstraintsTree<K>,
     PT: Pattern<Constraint = Constraint<K, P>>,
     I: Default,
 {

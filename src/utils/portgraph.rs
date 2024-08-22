@@ -1,13 +1,9 @@
 //! Graph-related utilities
 
-use std::{
-    cmp::Reverse,
-    collections::{BTreeMap, VecDeque},
-};
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::HashSet;
 
-use itertools::Itertools;
 use petgraph::unionfind::UnionFind;
 use portgraph::{Direction, LinkView, NodeIndex, PortGraph, PortIndex, PortOffset, PortView};
 
