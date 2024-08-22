@@ -182,6 +182,11 @@ impl<K, P> Constraint<K, P> {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(self.predicate.check(data, &args))
     }
+
+    /// The arguments of the constraint.
+    pub fn args(&self) -> &[K] {
+        &self.args
+    }
 }
 
 impl<K: Debug, P: Debug> Debug for Constraint<K, P> {

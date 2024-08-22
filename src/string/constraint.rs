@@ -26,8 +26,10 @@ impl<K: Copy + Ord> PartialOrd for StringConstraint<K> {
     }
 }
 
-impl<K: Copy + Ord> ToConstraintsTree for StringConstraint<K> {
-    fn to_constraints_tree(constraints: Vec<Self>) -> MutuallyExclusiveTree<Self> {
+impl<K: Copy + Ord> ToConstraintsTree<K> for CharacterPredicate {
+    fn to_constraints_tree(
+        constraints: Vec<StringConstraint<K>>,
+    ) -> MutuallyExclusiveTree<StringConstraint<K>> {
         if constraints.is_empty() {
             return MutuallyExclusiveTree::new();
         }
