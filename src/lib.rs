@@ -14,7 +14,7 @@ pub mod predicate;
 pub mod string;
 pub mod utils;
 
-pub use constraint::Constraint;
+pub use constraint::{Constraint, DetHeuristic};
 pub use indexing::{IndexMap, IndexingScheme};
 pub use matcher::{
     ManyMatcher, NaiveManyMatcher, PatternID, PatternMatch, PortMatcher, SinglePatternMatcher,

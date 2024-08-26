@@ -56,8 +56,8 @@ impl<K: Copy + Ord> ToConstraintsTree<K> for CharacterPredicate {
     }
 }
 
-impl<K: Copy + Ord> DetHeuristic for StringConstraint<K> {
-    fn make_det(constraints: &[&Self]) -> bool {
+impl<K: Copy + Ord> DetHeuristic<K> for CharacterPredicate {
+    fn make_det(constraints: &[&StringConstraint<K>]) -> bool {
         constraints.is_empty()
             || matches!(constraints[0].predicate(), CharacterPredicate::ConstVal(_))
     }
