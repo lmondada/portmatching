@@ -38,10 +38,13 @@ pub struct Constraint<K, P> {
 /// More deterministic states will result in faster automaton runtimes, but at
 /// the cost of larger automata. A good heuristic is therefore important to
 /// find the best tradeoff.
-pub trait DetHeuristic {
+pub trait DetHeuristic<K>
+where
+    Self: Sized,
+{
     /// Return true if the set of constraints should be turned into a deterministic
     /// transition.
-    fn make_det(constraints: &[&Self]) -> bool;
+    fn make_det(constraints: &[&Constraint<K, Self>]) -> bool;
 }
 
 /// Errors that occur when constructing constraints.

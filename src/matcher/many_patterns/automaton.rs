@@ -52,9 +52,9 @@ where
     /// heuristic provided by the constraint type.
     pub fn from_patterns(patterns: Vec<PT>) -> Self
     where
-        Constraint<K, P>: DetHeuristic,
+        P: DetHeuristic<K>,
     {
-        Self::from_patterns_with_det_heuristic(patterns, Constraint::make_det)
+        Self::from_patterns_with_det_heuristic(patterns, P::make_det)
     }
 
     /// Create a new matcher from a vector of patterns, using a custom deterministic
@@ -89,6 +89,11 @@ impl<PT, K, P, I> ManyMatcher<PT, K, P, I> {
     /// Get the number of states in the automaton.
     pub fn n_states(&self) -> usize {
         self.automaton.n_states()
+    }
+
+    /// Get the number of patterns in the matcher.
+    pub fn n_patterns(&self) -> usize {
+        self.patterns.len()
     }
 }
 

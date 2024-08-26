@@ -70,8 +70,8 @@ impl ConditionedPredicate<PGIndexKey> for PGPredicate {
     }
 }
 
-impl DetHeuristic for PGConstraint {
-    fn make_det(_: &[&Self]) -> bool {
+impl DetHeuristic<PGIndexKey> for PGPredicate {
+    fn make_det(_: &[&PGConstraint]) -> bool {
         true
     }
 }
