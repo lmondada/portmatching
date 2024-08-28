@@ -13,6 +13,7 @@ use std::{cmp, collections::BTreeSet, iter};
 use itertools::Itertools;
 use petgraph::visit::EdgeCount;
 use portgraph::{NodeIndex, PortGraph, PortView};
+use thiserror::Error;
 
 use crate::{
     constraint::DetHeuristic,
@@ -103,13 +104,24 @@ impl PGConstraint {
     }
 }
 
-pub(super) fn constraint_vec(graph: &PortGraph, root: NodeIndex) -> Vec<PGConstraint> {
+/// Error type for pattern generation.
+#[derive(Debug, Clone, Copy, Error)]
+pub enum PGPatternError {
+    /// No root node was provided.
+    #[error("No root node was provided")]
+    NoRoot,
+}
+
+pub(super) fn constraint_vec(
+    graph: &PortGraph,
+    root: NodeIndex,
+) -> Result<Vec<PGConstraint>, PGPatternError> {
     if graph.edge_count() == 0 {
-        return vec![PGConstraint::try_new(
+        return Ok(vec![PGConstraint::try_new(
             PGPredicate::HasNodeWeight(()),
             vec![PGIndexKey::root(0)],
         )
-        .unwrap()];
+        .unwrap()]);
     }
     let mut constraints = Vec::new();
     let mut node_to_key = HashMap::from_iter([(root, PGIndexKey::root(0))]);
@@ -176,7 +188,7 @@ pub(super) fn constraint_vec(graph: &PortGraph, root: NodeIndex) -> Vec<PGConstr
             .unwrap(),
         );
     }
-    constraints
+    Ok(constraints)
 }
 
 #[cfg(test)]

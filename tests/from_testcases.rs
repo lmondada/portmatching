@@ -99,7 +99,7 @@ fn test(test_path: &Path)
     //     cnt += 1;
     //     cnt <= 6
     // });
-    let matcher = PGManyPatternMatcher::from_patterns(patterns.clone());
+    let matcher = PGManyPatternMatcher::try_from_patterns(patterns.clone()).unwrap();
     if DBG_DUMP_FILES {
         let mut path = test_path.to_owned();
         path.push("trie.gv");

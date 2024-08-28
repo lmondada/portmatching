@@ -42,23 +42,23 @@ impl<C, I> SinglePatternMatcher<C, I> {
     /// Create a matcher from a vector of constraints.
     ///
     /// The host indexing scheme is the type's default.
-    pub fn from_pattern(pattern: &impl Pattern<Constraint = C>) -> Self
+    pub fn try_from_pattern<PT: Pattern<Constraint = C>>(pattern: &PT) -> Result<Self, PT::Error>
     where
         I: Default,
     {
-        let constraints = pattern.to_constraint_vec();
-        Self {
-            constraints,
-            host_indexing: I::default(),
-        }
+        Self::try_from_pattern_with_indexing(pattern, I::default())
     }
 
     /// Create a matcher from a vector of constraints with specified host indexing scheme.
-    pub fn from_pattern_with_indexing(pattern: &impl Pattern<Constraint = C>, indexing: I) -> Self {
-        Self {
-            constraints: pattern.to_constraint_vec(),
+    pub fn try_from_pattern_with_indexing<PT: Pattern<Constraint = C>>(
+        pattern: &PT,
+        indexing: I,
+    ) -> Result<Self, PT::Error> {
+        let constraints = pattern.try_to_constraint_vec()?;
+        Ok(Self {
+            constraints,
             host_indexing: indexing,
-        }
+        })
     }
 }
 
@@ -132,7 +132,7 @@ mod tests {
     fn test_single_pattern_matcher() {
         let eq_2 = TestConstraint::new(vec![2, 2]);
         let pattern: TestPattern<TestConstraint> = vec![eq_2].into();
-        let matcher = TestMatcher::from_pattern(&pattern);
+        let matcher = TestMatcher::try_from_pattern(&pattern).unwrap();
 
         // Matching against itself works
         let matches = matcher.find_matches(&()).collect_vec();

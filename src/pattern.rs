@@ -15,9 +15,11 @@ use thiserror::Error;
 pub trait Pattern {
     /// The constraint type that the pattern is defined over.
     type Constraint;
+    /// The error type returned by the conversion to a vector of constraints.
+    type Error;
 
     /// Convert to a vector of constraints.
-    fn to_constraint_vec(&self) -> Vec<Self::Constraint>;
+    fn try_to_constraint_vec(&self) -> Result<Vec<Self::Constraint>, Self::Error>;
 }
 
 /// A pattern that can be viewed as concrete data that can be matched on.
@@ -46,9 +48,10 @@ pub(crate) mod tests {
     pub(crate) struct TestPattern<C>(Vec<C>);
     impl<C: Clone> Pattern for TestPattern<C> {
         type Constraint = C;
+        type Error = ();
 
-        fn to_constraint_vec(&self) -> Vec<Self::Constraint> {
-            self.0.clone()
+        fn try_to_constraint_vec(&self) -> Result<Vec<Self::Constraint>, Self::Error> {
+            Ok(self.0.clone())
         }
     }
 }

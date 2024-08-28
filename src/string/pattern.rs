@@ -69,8 +69,9 @@ impl StringPattern {
 
 impl Pattern for StringPattern {
     type Constraint = StringConstraint;
+    type Error = ();
 
-    fn to_constraint_vec(&self) -> Vec<Self::Constraint> {
+    fn try_to_constraint_vec(&self) -> Result<Vec<Self::Constraint>, Self::Error> {
         // For a variable name, the first position it appears at
         let mut var_to_pos: HashMap<char, _> = Default::default();
         let mut constraints = Vec::new();
@@ -117,7 +118,7 @@ impl Pattern for StringPattern {
                 );
             }
         }
-        constraints
+        Ok(constraints)
     }
 }
 

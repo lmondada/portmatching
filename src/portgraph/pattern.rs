@@ -3,7 +3,7 @@
 use crate::{pattern::ConcretePattern, utils::is_connected, Pattern};
 use portgraph::{LinkView, NodeIndex, PortGraph};
 
-use super::constraint::{constraint_vec, PGConstraint};
+use super::constraint::{constraint_vec, PGConstraint, PGPatternError};
 
 /// A concrete port graph pattern.
 ///
@@ -17,12 +17,10 @@ pub struct PGPattern<G> {
 
 impl Pattern for PGPattern<PortGraph> {
     type Constraint = PGConstraint;
+    type Error = PGPatternError;
 
-    fn to_constraint_vec(&self) -> Vec<Self::Constraint> {
-        constraint_vec(
-            &self.graph,
-            self.root.expect("Root must be set before matching"),
-        )
+    fn try_to_constraint_vec(&self) -> Result<Vec<Self::Constraint>, Self::Error> {
+        constraint_vec(&self.graph, self.root.ok_or(PGPatternError::NoRoot)?)
     }
 }
 

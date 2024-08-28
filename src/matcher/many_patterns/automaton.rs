@@ -50,27 +50,30 @@ where
     ///
     /// The patterns are converted to constraints. Uses the deterministic
     /// heuristic provided by the constraint type.
-    pub fn from_patterns(patterns: Vec<PT>) -> Self
+    pub fn try_from_patterns(patterns: Vec<PT>) -> Result<Self, PT::Error>
     where
         P: DetHeuristic<K>,
     {
-        Self::from_patterns_with_det_heuristic(patterns, P::make_det)
+        Self::try_from_patterns_with_det_heuristic(patterns, P::make_det)
     }
 
     /// Create a new matcher from a vector of patterns, using a custom deterministic
     /// heuristic.
-    pub fn from_patterns_with_det_heuristic(
+    pub fn try_from_patterns_with_det_heuristic(
         patterns: Vec<PT>,
         make_det: impl for<'c> FnMut(&[&'c Constraint<K, P>]) -> bool,
-    ) -> Self {
-        let constraints = patterns.iter().map(|p| p.to_constraint_vec()).collect_vec();
+    ) -> Result<Self, PT::Error> {
+        let constraints = patterns
+            .iter()
+            .map(|p| p.try_to_constraint_vec())
+            .collect::<Result<Vec<_>, _>>()?;
         let builder = AutomatonBuilder::from_constraints(constraints).set_det_heuristic(make_det);
         let (automaton, pattern_to_id) = builder.finish();
         let patterns = pattern_to_id.into_iter().zip(patterns).collect();
-        Self {
+        Ok(Self {
             automaton,
             patterns,
-        }
+        })
     }
 }
 
