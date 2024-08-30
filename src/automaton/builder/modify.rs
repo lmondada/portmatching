@@ -232,10 +232,10 @@ pub mod tests {
         let mut builder = AutomatonBuilder::new().set_det_heuristic(|_| false);
         let [constraint_root, constraint_a, constraint_b, constraint_c, constraint_d] =
             constraints();
-        builder.add_pattern(vec![constraint_root.clone(), constraint_a]);
-        builder.add_pattern(vec![constraint_root.clone(), constraint_b]);
-        builder.add_pattern(vec![constraint_root.clone(), constraint_c]);
-        builder.add_pattern(vec![constraint_root, constraint_d]);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_a], 0);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_b], 1);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_c], 2);
+        builder.add_pattern(vec![constraint_root, constraint_d], 3);
         builder.finish().0
     }
 

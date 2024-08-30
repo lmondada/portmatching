@@ -41,7 +41,7 @@ proptest! {
         if DBG_DUMP_FILES {
             fs::write("results.json", serde_json::to_vec(&single_matches).unwrap()).unwrap();
         }
-        let matcher = PGManyPatternMatcher::try_from_patterns(patterns).unwrap();
+        let matcher = PGManyPatternMatcher::try_from_patterns(patterns, Default::default()).unwrap();
         let many_matches: HashSet<SerialPatternMatch> = matcher.find_matches(&g).map_into().collect();
         prop_assert_eq!(many_matches, single_matches);
     }
@@ -81,7 +81,7 @@ proptest! {
             println!("==== results.json ====");
             println!("{}", serde_json::to_string(&single_matches).unwrap());
         }
-        let matcher = PGManyPatternMatcher::try_from_patterns(patterns).unwrap();
+        let matcher = PGManyPatternMatcher::try_from_patterns(patterns, Default::default()).unwrap();
         let many_matches: HashSet<SerialPatternMatch> = matcher.find_matches(&g).map_into().collect();
         assert_eq!(many_matches, single_matches);
         prop_assert_eq!(many_matches, single_matches);

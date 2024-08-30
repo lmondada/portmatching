@@ -186,17 +186,25 @@ pub(super) mod tests {
     macro_rules! define_matcher_factories {
         ($StringPattern:ty, $StringManyMatcher:ty) => {{
             fn non_det_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
-                <$StringManyMatcher>::try_from_patterns_with_det_heuristic(patterns, |_| false)
-                    .unwrap()
+                <$StringManyMatcher>::try_from_patterns_with_det_heuristic(
+                    patterns,
+                    |_| false,
+                    Default::default(),
+                )
+                .unwrap()
             }
 
             fn default_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
-                <$StringManyMatcher>::try_from_patterns(patterns).unwrap()
+                <$StringManyMatcher>::try_from_patterns(patterns, Default::default()).unwrap()
             }
 
             fn det_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
-                <$StringManyMatcher>::try_from_patterns_with_det_heuristic(patterns, |_| true)
-                    .unwrap()
+                <$StringManyMatcher>::try_from_patterns_with_det_heuristic(
+                    patterns,
+                    |_| true,
+                    Default::default(),
+                )
+                .unwrap()
             }
 
             &[non_det_matcher, default_matcher, det_matcher]
@@ -210,7 +218,8 @@ pub(super) mod tests {
         let p1 = StringPattern::parse_str("ab$xcd$x");
         let p2 = StringPattern::parse_str("abcc");
 
-        let matcher = StringManyMatcher::try_from_patterns(vec![p1, p2]).unwrap();
+        let matcher =
+            StringManyMatcher::try_from_patterns(vec![p1, p2], Default::default()).unwrap();
 
         let result = matcher.find_matches(&"abccdc".to_string()).collect_vec();
 
@@ -221,7 +230,7 @@ pub(super) mod tests {
     fn test_dummy_len_3_string_matching() {
         let p1 = StringPattern::parse_str("$x$y$z");
 
-        let matcher = StringManyMatcher::try_from_patterns(vec![p1]).unwrap();
+        let matcher = StringManyMatcher::try_from_patterns(vec![p1], Default::default()).unwrap();
 
         let result = matcher.find_matches(&"ab".to_string()).collect_vec();
 
@@ -232,7 +241,7 @@ pub(super) mod tests {
     fn test_empty_pattern() {
         let p1 = StringPattern::parse_str("");
 
-        let matcher = StringManyMatcher::try_from_patterns(vec![p1]).unwrap();
+        let matcher = StringManyMatcher::try_from_patterns(vec![p1], Default::default()).unwrap();
 
         let result = matcher.find_matches(&"ab".to_string()).collect_vec();
 
@@ -243,7 +252,7 @@ pub(super) mod tests {
     fn test_pattern_with_dummy_end() {
         let p1 = StringPattern::parse_str("$x$x$z");
 
-        let matcher = StringManyMatcher::try_from_patterns(vec![p1]).unwrap();
+        let matcher = StringManyMatcher::try_from_patterns(vec![p1], Default::default()).unwrap();
 
         let result = matcher.find_matches(&"aa".to_string()).collect_vec();
 

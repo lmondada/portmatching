@@ -93,18 +93,20 @@ impl<'c, C: Eq + Clone, I> AutomatonBuilder<'c, C, I> {
         patterns: impl IntoIterator<Item = Vec<C>>,
         host_indexing: I,
     ) -> Self {
+        let mut pattern_id = 0;
         patterns.into_iter().fold(
             Self::with_indexing_scheme(host_indexing),
             |mut builder, pattern| {
-                builder.add_pattern(pattern);
+                builder.add_pattern(pattern, PatternID(pattern_id));
+                pattern_id += 1;
                 builder
             },
         )
     }
 
     /// Add a pattern to the automaton builder.
-    pub fn add_pattern(&mut self, pattern: Vec<C>) {
-        let id = PatternID(self.patterns_ids.len());
+    pub fn add_pattern(&mut self, pattern: Vec<C>, id: impl Into<PatternID>) {
+        let id = id.into();
         self.matcher.add_pattern(pattern, id);
         self.patterns_ids.push(id);
     }
@@ -178,6 +180,9 @@ where
 
             // Make the mutually exclusivity invariant hold
             self.make_mutex(state);
+
+            // The invariant might have been broken by the previous step
+            self.make_constraints_unique(state);
 
             // Turn some of the states into deterministic transitions, according to
             // `make_det`
@@ -389,6 +394,7 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
                     curr_states.push((child_tree_state, child_matcher_state));
                 }
 
+                // Add edges to the final children for `indices`
                 let indices = mutex_tree.constraint_indices(child_tree_state);
                 for &ind in indices {
                     added_constraints.insert(ind);
@@ -510,9 +516,9 @@ mod tests {
         let n2 = builder.matcher.add_non_det_node();
         let mutex_tree = {
             let mut tree = MutuallyExclusiveTree::new();
-            let tree_child = tree.add_child(tree.root(), 1);
+            let tree_child = tree.get_or_add_child(tree.root(), 1);
             tree.add_constraint_index(tree_child, 0);
-            let tree_gchild = tree.add_child(tree_child, 2);
+            let tree_gchild = tree.get_or_add_child(tree_child, 2);
             tree.add_constraint_index(tree_gchild, 1);
             tree
         };
@@ -525,9 +531,9 @@ mod tests {
         let mut builder = AutomatonBuilder::<TestConstraint, TestIndexingScheme>::new()
             .set_det_heuristic(|_| false);
         let [constraint_root, _, constraint_b, constraint_c, constraint_d] = constraints();
-        builder.add_pattern(vec![constraint_root.clone(), constraint_b.clone()]);
-        builder.add_pattern(vec![constraint_root.clone(), constraint_c.clone()]);
-        builder.add_pattern(vec![constraint_root, constraint_d.clone()]);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_b.clone()], 0);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_c.clone()], 1);
+        builder.add_pattern(vec![constraint_root, constraint_d.clone()], 2);
         let (matcher, pattern_ids) = builder.finish();
         assert_eq!(matcher.graph.node_count(), 6);
         assert_eq!(pattern_ids, vec![PatternID(0), PatternID(1), PatternID(2)]);

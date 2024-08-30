@@ -54,6 +54,27 @@ fn add_implied_constraints<'c, K, P: ConditionedPredicate<K>>(
 
 impl<C> MutuallyExclusiveTree<C> {
     /// Creates a constraint tree with a filtered subset of mutually exclusive
+    /// `constraints` by checking all pairwise constraints.
+    pub fn with_pairwise_mutex(
+        constraints: impl IntoIterator<Item = (C, usize)>,
+        is_mutex: impl Fn(&C, &C) -> bool,
+    ) -> Self
+    where
+        C: PartialEq,
+    {
+        let mut mutex_constraints = vec![];
+        for (c, c_ind) in constraints {
+            if mutex_constraints
+                .iter()
+                .all(|(other, _)| is_mutex(other, &c))
+            {
+                mutex_constraints.push((c, vec![c_ind]));
+            }
+        }
+        MutuallyExclusiveTree::with_children(mutex_constraints)
+    }
+
+    /// Creates a constraint tree with a filtered subset of mutually exclusive
     /// `constraints`, under the assumption that the mutual exclusion relation
     /// is transitive.
     ///
@@ -62,7 +83,10 @@ impl<C> MutuallyExclusiveTree<C> {
     pub fn with_transitive_mutex(
         constraints: impl IntoIterator<Item = (C, usize)>,
         is_mutex: impl Fn(&C, &C) -> bool,
-    ) -> Self {
+    ) -> Self
+    where
+        C: PartialEq,
+    {
         let mut constraints = constraints.into_iter();
         let Some((first, first_ind)) = constraints.next() else {
             return MutuallyExclusiveTree::new();
@@ -82,7 +106,10 @@ impl<P: ConditionedPredicate<K>, K> MutuallyExclusiveTree<Constraint<K, P>> {
     /// constraints.
     ///
     /// Uses conditioned predicate to simplify constraints.
-    pub fn with_powerset(constraints: Vec<(Constraint<K, P>, usize)>) -> Self {
+    pub fn with_powerset(constraints: Vec<(Constraint<K, P>, usize)>) -> Self
+    where
+        Constraint<K, P>: PartialEq,
+    {
         if constraints.is_empty() {
             return MutuallyExclusiveTree::new();
         }
@@ -129,7 +156,7 @@ impl<P: ConditionedPredicate<K>, K> MutuallyExclusiveTree<Constraint<K, P>> {
             });
 
             // The interesting case: add a child in tree with the new constraint
-            tree_node = tree.add_child(tree_node, next_constraint);
+            tree_node = tree.get_or_add_child(tree_node, next_constraint);
             satisfied_constraints.push(&constraints[next_constraint_index].0);
             tree.add_constraint_index(tree_node, constraints[next_constraint_index].1);
             next_constraint_index += 1;

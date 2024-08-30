@@ -14,7 +14,7 @@ mod single_pattern;
 use derive_more::{From, Into};
 use std::{fmt::Debug, hash::Hash};
 
-pub use self::many_patterns::{ManyMatcher, NaiveManyMatcher};
+pub use self::many_patterns::{ManyMatcher, NaiveManyMatcher, PatternFallback};
 pub use self::single_pattern::SinglePatternMatcher;
 
 #[cfg(feature = "serde")]

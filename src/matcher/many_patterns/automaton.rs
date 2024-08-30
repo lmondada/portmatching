@@ -39,6 +39,16 @@ where
     }
 }
 
+/// What to do if a pattern fails to convert to a constraint.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum PatternFallback {
+    /// Skip the pattern.
+    Skip,
+    /// Fail if the pattern fails to convert to a constraint.
+    #[default]
+    Fail,
+}
+
 impl<K, P, PT, I> ManyMatcher<PT, K, P, I>
 where
     Constraint<K, P>: Eq + Clone + Hash,
@@ -50,11 +60,14 @@ where
     ///
     /// The patterns are converted to constraints. Uses the deterministic
     /// heuristic provided by the constraint type.
-    pub fn try_from_patterns(patterns: Vec<PT>) -> Result<Self, PT::Error>
+    pub fn try_from_patterns(
+        patterns: Vec<PT>,
+        fallback: PatternFallback,
+    ) -> Result<Self, PT::Error>
     where
         P: DetHeuristic<K>,
     {
-        Self::try_from_patterns_with_det_heuristic(patterns, P::make_det)
+        Self::try_from_patterns_with_det_heuristic(patterns, P::make_det, fallback)
     }
 
     /// Create a new matcher from a vector of patterns, using a custom deterministic
@@ -62,14 +75,28 @@ where
     pub fn try_from_patterns_with_det_heuristic(
         patterns: Vec<PT>,
         make_det: impl for<'c> FnMut(&[&'c Constraint<K, P>]) -> bool,
+        fallback: PatternFallback,
     ) -> Result<Self, PT::Error> {
-        let constraints = patterns
-            .iter()
-            .map(|p| p.try_to_constraint_vec())
-            .collect::<Result<Vec<_>, _>>()?;
-        let builder = AutomatonBuilder::from_constraints(constraints).set_det_heuristic(make_det);
-        let (automaton, pattern_to_id) = builder.finish();
-        let patterns = pattern_to_id.into_iter().zip(patterns).collect();
+        let mut builder = AutomatonBuilder::new().set_det_heuristic(make_det);
+        for (id, pattern) in patterns.iter().enumerate() {
+            let constraints = match fallback {
+                PatternFallback::Skip => {
+                    let Ok(constraints) = pattern.try_to_constraint_vec() else {
+                        continue;
+                    };
+                    constraints
+                }
+                PatternFallback::Fail => pattern.try_to_constraint_vec()?,
+            };
+            builder.add_pattern(constraints, id);
+        }
+        let (automaton, pattern_ids) = builder.finish();
+        let patterns = patterns
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| (PatternID(i), p))
+            .filter(|(i, _)| pattern_ids.contains(&i))
+            .collect();
         Ok(Self {
             automaton,
             patterns,

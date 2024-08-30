@@ -38,7 +38,6 @@ impl<C: Eq, I> ConstraintAutomaton<C, I> {
     /// The state reached by the `constraint` transition at `state`, if any.
     ///
     /// Expects at most one transition, otherwise panics.
-    #[cfg(test)]
     pub(super) fn constraint_next_state(&self, state: StateID, constraint: &C) -> Option<StateID> {
         self.all_constraint_transitions(state)
             .find(|&t| self.constraint(t) == Some(constraint))

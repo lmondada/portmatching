@@ -11,7 +11,7 @@ mod naive;
 use std::fmt;
 
 #[doc(inline)]
-pub use automaton::ManyMatcher;
+pub use automaton::{ManyMatcher, PatternFallback};
 #[doc(inline)]
 pub use naive::NaiveManyMatcher;
 
