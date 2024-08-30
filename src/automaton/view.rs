@@ -1,6 +1,6 @@
 use petgraph::{visit::EdgeRef, Direction};
 
-use crate::PatternID;
+use crate::{Constraint, PatternID};
 
 use super::{ConstraintAutomaton, State, StateID, TransitionID};
 
@@ -8,7 +8,10 @@ use super::{ConstraintAutomaton, State, StateID, TransitionID};
 ///
 /// Exposed as a trait so that the automaton builder can reuse the default
 /// implementation but trace calls where useful.
-impl<C: Eq, I> ConstraintAutomaton<C, I> {
+impl<K, P, I> ConstraintAutomaton<K, P, I>
+where
+    Constraint<K, P>: Eq,
+{
     /// All non-None constraints at `state`.
     pub(super) fn all_constraint_transitions(
         &self,
@@ -38,7 +41,11 @@ impl<C: Eq, I> ConstraintAutomaton<C, I> {
     /// The state reached by the `constraint` transition at `state`, if any.
     ///
     /// Expects at most one transition, otherwise panics.
-    pub(super) fn constraint_next_state(&self, state: StateID, constraint: &C) -> Option<StateID> {
+    pub(super) fn constraint_next_state(
+        &self,
+        state: StateID,
+        constraint: &Constraint<K, P>,
+    ) -> Option<StateID> {
         self.all_constraint_transitions(state)
             .find(|&t| self.constraint(t) == Some(constraint))
             .map(|t| self.next_state(t))
@@ -66,13 +73,16 @@ impl<C: Eq, I> ConstraintAutomaton<C, I> {
         self.incoming_transitions(state).next().is_none()
     }
 
-    pub(super) fn constraints(&self, state: StateID) -> impl Iterator<Item = &C> + '_ {
+    pub(super) fn constraints(
+        &self,
+        state: StateID,
+    ) -> impl Iterator<Item = &Constraint<K, P>> + '_ {
         self.all_constraint_transitions(state)
             .map(|transition| self.constraint(transition).unwrap())
     }
 
     /// Get the constraint corresponding to a transition
-    pub(super) fn constraint(&self, transition: TransitionID) -> Option<&C> {
+    pub(super) fn constraint(&self, transition: TransitionID) -> Option<&Constraint<K, P>> {
         self.graph[transition.0].constraint.as_ref()
     }
 
@@ -113,7 +123,7 @@ impl<C: Eq, I> ConstraintAutomaton<C, I> {
     ///
     /// Two states with the same tuple ID may be merged into one without
     /// changing the behavior of the matcher.
-    pub(super) fn state_tuple(&self, state: StateID) -> StateTuple<C> {
+    pub(super) fn state_tuple(&self, state: StateID) -> StateTuple<Constraint<K, P>> {
         let transitions = self
             .all_transitions(state)
             .map(|transition| (self.constraint(transition), self.next_state(transition)))
@@ -135,8 +145,8 @@ pub(super) struct StateTuple<'a, C> {
 }
 
 // Small, private utils functions
-impl<C, I> ConstraintAutomaton<C, I> {
-    pub(super) fn node_weight(&self, state: StateID) -> &State {
+impl<K, P, I> ConstraintAutomaton<K, P, I> {
+    pub(super) fn node_weight(&self, state: StateID) -> &State<K> {
         self.graph.node_weight(state.0).expect("unknown state")
     }
 }

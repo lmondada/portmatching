@@ -6,6 +6,7 @@ mod builder;
 mod traversal;
 mod view;
 
+use derive_where::derive_where;
 use petgraph::dot::Dot;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::stable_graph::{StableDiGraph, StableGraph};
@@ -14,7 +15,7 @@ use std::fmt::{self, Debug};
 
 use derive_more::{From, Into};
 
-use crate::PatternID;
+use crate::{Constraint, PatternID};
 pub use builder::AutomatonBuilder;
 
 /// An automaton-like datastructure to evaluate sets of constraints efficiently.
@@ -40,22 +41,22 @@ pub use builder::AutomatonBuilder;
 /// - I: Indexing scheme of the host data
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ConstraintAutomaton<C, I> {
+pub struct ConstraintAutomaton<K, P, I> {
     /// The transition graph
-    graph: StableDiGraph<State, Transition<C>>,
+    graph: StableDiGraph<State<K>, Transition<Constraint<K, P>>>,
     /// The root of the transition graph
     root: StateID,
     /// The indexing scheme used
     host_indexing: I,
 }
 
-impl<C, I: Default> Default for ConstraintAutomaton<C, I> {
+impl<K, P, I: Default> Default for ConstraintAutomaton<K, P, I> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C, I> ConstraintAutomaton<C, I> {
+impl<K, P, I> ConstraintAutomaton<K, P, I> {
     /// An empty constraint automaton with default indexing scheme.
     ///
     /// Use the [AutomatonBuilder] to construct an automaton from a list of
@@ -70,7 +71,7 @@ impl<C, I> ConstraintAutomaton<C, I> {
     /// An empty constraint automaton, with the given indexing scheme
     pub fn with_indexing_scheme(host_indexing: I) -> Self {
         let mut graph = StableGraph::new();
-        let root = graph.add_node(State::default());
+        let root = graph.add_node(State::<K>::default());
         Self {
             graph,
             root: root.into(),
@@ -81,7 +82,8 @@ impl<C, I> ConstraintAutomaton<C, I> {
     /// Get its dot string representation
     pub fn dot_string(&self) -> String
     where
-        C: Debug,
+        K: Debug,
+        P: Debug,
     {
         format!("{:?}", Dot::new(&self.graph))
     }
@@ -102,7 +104,7 @@ impl<C, I> ConstraintAutomaton<C, I> {
     }
 }
 
-impl<C: Debug, I> Debug for ConstraintAutomaton<C, I> {
+impl<K: Debug, P: Debug, I> Debug for ConstraintAutomaton<K, P, I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.dot_string())
     }
@@ -121,9 +123,10 @@ struct TransitionID(EdgeIndex);
 /// A node in the automaton
 ///
 /// Nodes have zero, one or many markers that are output when the state is traversed
-#[derive(Clone, Default)]
+#[derive(Clone)]
+#[derive_where(Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct State {
+struct State<K> {
     /// The pattern matches at current state
     matches: Vec<PatternID>,
     /// Whether the state is deterministic
@@ -134,9 +137,11 @@ struct State {
     /// The order of the outgoing epsilon transitions. Must map one-to-one to
     /// the outgoing epsilon edges, i.e. the edges with None weights.
     epsilon_order: Vec<TransitionID>,
+    /// The scope of the state
+    scope: Vec<K>,
 }
 
-impl Debug for State {
+impl<K> Debug for State<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.deterministic {
             write!(f, "D")?;

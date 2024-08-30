@@ -1,18 +1,16 @@
 use itertools::Itertools;
 
 use crate::automaton::{ConstraintAutomaton, State, StateID, Transition, TransitionID};
-use crate::PatternID;
+use crate::{Constraint, PatternID};
 
 /// Methods for modifying the automaton
-impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
+impl<K, P, I> ConstraintAutomaton<K, P, I>
+where
+    Constraint<K, P>: Eq + Clone,
+{
     /// Add a new disconnected non-deterministic state
     pub(super) fn add_non_det_node(&mut self) -> StateID {
-        let node = self.graph.add_node(State {
-            matches: vec![],
-            deterministic: false,
-            constraint_order: vec![],
-            epsilon_order: vec![],
-        });
+        let node = self.graph.add_node(State::default());
         StateID(node)
     }
 
@@ -38,7 +36,7 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
         &mut self,
         StateID(parent): StateID,
         StateID(child): StateID,
-        constraint: Option<C>,
+        constraint: Option<Constraint<K, P>>,
     ) {
         if parent == child {
             // Transitions to itself are useless
@@ -64,12 +62,16 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
     pub(in crate::automaton) fn add_constraint(
         &mut self,
         parent: StateID,
-        constraint: C,
+        constraint: Constraint<K, P>,
     ) -> StateID {
         self.add_transition(parent, Some(constraint))
     }
 
-    pub(super) fn add_transition(&mut self, parent: StateID, constraint: Option<C>) -> StateID {
+    pub(super) fn add_transition(
+        &mut self,
+        parent: StateID,
+        constraint: Option<Constraint<K, P>>,
+    ) -> StateID {
         let child = self.add_non_det_node();
         self.append_edge(parent, child, constraint);
         child
@@ -87,7 +89,11 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
         }
     }
 
-    pub(crate) fn add_pattern(&mut self, constraints: impl IntoIterator<Item = C>, id: PatternID) {
+    pub(crate) fn add_pattern(
+        &mut self,
+        constraints: impl IntoIterator<Item = Constraint<K, P>>,
+        id: PatternID,
+    ) {
         let match_state = constraints
             .into_iter()
             .fold(self.root(), |state, constraint| {
@@ -100,7 +106,10 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
     ///
     /// The new state will have `transition` as its unique incoming edge. All
     /// other incoming transitions will remain in the existing target.
-    pub(super) fn split_target(&mut self, transition: TransitionID) -> StateID {
+    pub(super) fn split_target(&mut self, transition: TransitionID) -> StateID
+    where
+        K: Clone,
+    {
         let state = self.next_state(transition);
         if !self.incoming_transitions(state).any(|t| transition != t) {
             // There is a single incoming transition, nothing to do.
@@ -139,7 +148,7 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
     pub(super) fn drain_constraints(
         &mut self,
         state: StateID,
-    ) -> impl Iterator<Item = (Option<C>, StateID)> + '_ {
+    ) -> impl Iterator<Item = (Option<Constraint<K, P>>, StateID)> + '_ {
         let transitions = self.all_constraint_transitions(state).collect_vec();
         transitions.into_iter().map(|transition| {
             let target = self.next_state(transition);
@@ -148,7 +157,10 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
         })
     }
 
-    pub(super) fn remove_transition(&mut self, transition: TransitionID) -> Transition<C> {
+    pub(super) fn remove_transition(
+        &mut self,
+        transition: TransitionID,
+    ) -> Transition<Constraint<K, P>> {
         self.remove_order(transition);
         self.graph
             .remove_edge(transition.0)
@@ -181,7 +193,10 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
 }
 
 // Small, private utils functions
-impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
+impl<K, P, I> ConstraintAutomaton<K, P, I>
+where
+    Constraint<K, P>: Eq + Clone,
+{
     fn remove_order(&mut self, transition: TransitionID) {
         let source = self.parent(transition);
         let order = if self.constraint(transition).is_none() {
@@ -196,12 +211,12 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
         order.remove(ind);
     }
 
-    fn node_weight_mut(&mut self, StateID(state): StateID) -> &mut State {
+    fn node_weight_mut(&mut self, StateID(state): StateID) -> &mut State<K> {
         self.graph.node_weight_mut(state).expect("invalid state")
     }
 }
 
-impl State {
+impl<K> State<K> {
     fn replace_order(&mut self, old_transition: TransitionID, new_transition: TransitionID) {
         let State {
             constraint_order,

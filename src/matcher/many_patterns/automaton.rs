@@ -17,7 +17,7 @@ use crate::{
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ManyMatcher<PT, K, P, I> {
-    automaton: ConstraintAutomaton<Constraint<K, P>, I>,
+    automaton: ConstraintAutomaton<K, P, I>,
     patterns: HashMap<PatternID, PT>,
 }
 
@@ -49,7 +49,7 @@ pub enum PatternFallback {
     Fail,
 }
 
-impl<K, P, PT, I> ManyMatcher<PT, K, P, I>
+impl<K: Clone, P, PT, I> ManyMatcher<PT, K, P, I>
 where
     Constraint<K, P>: Eq + Clone + Hash,
     P: ToConstraintsTree<K>,

@@ -24,23 +24,26 @@ use self::node_depth::NodeDepthCache;
 use super::{State, Transition, TransitionID};
 
 /// A predicate on a list of constraints
-pub type ConstraintListPredicate<'c, C> = Box<dyn FnMut(&[&C]) -> bool + 'c>;
+pub type ConstraintListPredicate<'c, K, P> = Box<dyn FnMut(&[&Constraint<K, P>]) -> bool + 'c>;
 
 /// Create constraint automata from lists of patterns, given by lists of
 /// constraints.
-pub struct AutomatonBuilder<'c, C, I> {
+pub struct AutomatonBuilder<'c, K, P, I> {
     /// The matcher being built
-    matcher: ConstraintAutomaton<C, I>,
+    matcher: ConstraintAutomaton<K, P, I>,
     /// The list of all patterns IDs, in order of addition
     patterns_ids: Vec<PatternID>,
     /// The heuristic used to determine whether to turn a state into a deterministic
     /// one.
-    make_det: Option<ConstraintListPredicate<'c, C>>,
+    make_det: Option<ConstraintListPredicate<'c, K, P>>,
     /// The list of all nodes that were added in the last iteration
     recently_added: HashSet<NodeIndex>,
 }
 
-impl<'c, C: Eq + Clone, I> AutomatonBuilder<'c, C, I> {
+impl<'c, K, P, I> AutomatonBuilder<'c, K, P, I>
+where
+    Constraint<K, P>: Eq + Clone,
+{
     /// Construct an empty automaton builder.
     pub fn new() -> Self
     where
@@ -67,7 +70,10 @@ impl<'c, C: Eq + Clone, I> AutomatonBuilder<'c, C, I> {
     ///
     /// The heuristic is a function that takes a list of constraints and returns
     /// true if the state should be turned into a deterministic one.
-    pub fn set_det_heuristic(self, make_det: impl FnMut(&[&C]) -> bool + 'c) -> Self {
+    pub fn set_det_heuristic(
+        self,
+        make_det: impl FnMut(&[&Constraint<K, P>]) -> bool + 'c,
+    ) -> Self {
         Self {
             matcher: self.matcher,
             patterns_ids: self.patterns_ids,
@@ -80,7 +86,7 @@ impl<'c, C: Eq + Clone, I> AutomatonBuilder<'c, C, I> {
     /// constraints.
     ///
     /// Use `I::default()` as the indexing scheme.
-    pub fn from_constraints(patterns: impl IntoIterator<Item = Vec<C>>) -> Self
+    pub fn from_constraints(patterns: impl IntoIterator<Item = Vec<Constraint<K, P>>>) -> Self
     where
         I: Default,
     {
@@ -90,7 +96,7 @@ impl<'c, C: Eq + Clone, I> AutomatonBuilder<'c, C, I> {
     /// Construct an automaton builder from a list of patterns with a custom
     /// indexing scheme.
     pub fn from_constraints_with_index_scheme(
-        patterns: impl IntoIterator<Item = Vec<C>>,
+        patterns: impl IntoIterator<Item = Vec<Constraint<K, P>>>,
         host_indexing: I,
     ) -> Self {
         let mut pattern_id = 0;
@@ -105,7 +111,7 @@ impl<'c, C: Eq + Clone, I> AutomatonBuilder<'c, C, I> {
     }
 
     /// Add a pattern to the automaton builder.
-    pub fn add_pattern(&mut self, pattern: Vec<C>, id: impl Into<PatternID>) {
+    pub fn add_pattern(&mut self, pattern: Vec<Constraint<K, P>>, id: impl Into<PatternID>) {
         let id = id.into();
         self.matcher.add_pattern(pattern, id);
         self.patterns_ids.push(id);
@@ -150,12 +156,11 @@ impl<'c, C: Eq + Clone, I> AutomatonBuilder<'c, C, I> {
     }
 }
 
-type Automaton<K, P, I> = ConstraintAutomaton<Constraint<K, P>, I>;
-
-impl<'c, K, P, I> AutomatonBuilder<'c, Constraint<K, P>, I>
+impl<'c, K, P, I> AutomatonBuilder<'c, K, P, I>
 where
     P: ToConstraintsTree<K>,
     Constraint<K, P>: Eq + Clone + Hash,
+    K: Clone,
 {
     /// Construct the automaton.
     ///
@@ -167,7 +172,7 @@ where
     /// The `make_det` predicate specifies the heuristic used to determine whether
     /// to turn a state into a deterministic one. To reduce the automaton size,
     /// states are merged whenever possible.
-    pub fn finish(mut self) -> (Automaton<K, P, I>, Vec<PatternID>) {
+    pub fn finish(mut self) -> (ConstraintAutomaton<K, P, I>, Vec<PatternID>) {
         // Traverse the prefix tree from root to leaves and make the invariants
         // hold. The changes only affect nodes in the future of the root, i.e.
         // nodes on which the invariant does not hold yet.
@@ -197,7 +202,20 @@ where
             // ones.
             self.try_merge_new_nodes();
         }
+
+        // Now traverse from end to front to save the scope of each automaton state.
+        self.populate_scopes();
+
         (self.matcher, self.patterns_ids)
+    }
+
+    /// Populate the scope of each automaton state.
+    ///
+    /// The scope is the set of bindings that are required in any descendant
+    /// of the state. Any two traversals with identical bindings for every
+    /// variable in the scope will yield identical behaviour.
+    fn populate_scopes(&self) {
+        todo!()
     }
 
     /// Turn outgoing constraints at `state` into a mutually exclusive set.
@@ -247,9 +265,7 @@ where
             }
         }
     }
-}
 
-impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
     fn make_constraints_unique(&mut self, state: StateID) {
         let mut grouped_transitions = HashMap::default();
         for t in self.matcher.all_transitions(state) {
@@ -327,7 +343,10 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
 
     fn recently_added_subgraph(
         &self,
-    ) -> NodeFiltered<Reversed<&StableGraph<State, Transition<C>>>, &HashSet<NodeIndex>> {
+    ) -> NodeFiltered<
+        Reversed<&StableGraph<State<K>, Transition<Constraint<K, P>>>>,
+        &HashSet<NodeIndex>,
+    > {
         let graph = &self.matcher.graph;
         NodeFiltered(Reversed(graph), &self.recently_added)
     }
@@ -370,7 +389,7 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
 
     fn add_mutex_tree(
         &mut self,
-        mutex_tree: MutuallyExclusiveTree<C>,
+        mutex_tree: MutuallyExclusiveTree<Constraint<K, P>>,
         state: StateID,
         children: &[StateID],
     ) -> HashSet<usize> {
@@ -410,13 +429,13 @@ impl<'c, C: Clone + Eq + Hash, I> AutomatonBuilder<'c, C, I> {
         self.add_transition(state, None)
     }
 
-    fn add_transition(&mut self, state: StateID, constraint: Option<C>) -> StateID {
+    fn add_transition(&mut self, state: StateID, constraint: Option<Constraint<K, P>>) -> StateID {
         let new_state = self.matcher.add_transition(state, constraint);
         self.recently_added.insert(new_state.0);
         new_state
     }
 
-    fn add_constraint(&mut self, state: StateID, constraint: C) -> StateID {
+    fn add_constraint(&mut self, state: StateID, constraint: Constraint<K, P>) -> StateID {
         self.add_transition(state, Some(constraint))
     }
 }
@@ -445,14 +464,20 @@ impl From<TracedTransitionID> for TransitionID {
     }
 }
 
-impl<'c, C: Eq + Clone, I: Default> Default for AutomatonBuilder<'c, C, I> {
+impl<'c, K, P, I: Default> Default for AutomatonBuilder<'c, K, P, I>
+where
+    Constraint<K, P>: Clone + Eq + Hash,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'c, C: Clone + Eq, I: Default> FromIterator<Vec<C>> for AutomatonBuilder<'c, C, I> {
-    fn from_iter<T: IntoIterator<Item = Vec<C>>>(iter: T) -> Self {
+impl<'c, K, P, I: Default> FromIterator<Vec<Constraint<K, P>>> for AutomatonBuilder<'c, K, P, I>
+where
+    Constraint<K, P>: Clone + Eq,
+{
+    fn from_iter<T: IntoIterator<Item = Vec<Constraint<K, P>>>>(iter: T) -> Self {
         Self::from_constraints(iter)
     }
 }

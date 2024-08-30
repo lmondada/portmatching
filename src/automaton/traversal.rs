@@ -5,17 +5,14 @@ use petgraph::graph::NodeIndex;
 
 use crate::{
     indexing::{self, IndexKey},
-    utils, Constraint, IndexMap, IndexingScheme, PatternID, Predicate,
+    utils, IndexMap, IndexingScheme, PatternID, Predicate,
 };
 
 use super::{ConstraintAutomaton, StateID};
 
-impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
+impl<K, P, I> ConstraintAutomaton<K, P, I> {
     /// Run the automaton on the `host` input data.
-    pub fn run<'a, 'd, D>(
-        &'a self,
-        host: &'d D,
-    ) -> AutomatonTraverser<'a, 'd, Constraint<K, P>, I, D>
+    pub fn run<'a, 'd, D>(&'a self, host: &'d D) -> AutomatonTraverser<'a, 'd, K, P, I, D>
     where
         P: Predicate<D>,
         I: IndexingScheme<D>,
@@ -110,15 +107,15 @@ impl<S: Default> TraversalState<S> {
 ///  - S: scope assignments mapping variable names to values
 ///  - C: constraint type on transitions
 ///  - D: arbitrary input "host" data to evaluate constraints on.
-pub struct AutomatonTraverser<'a, 'd, C, I: IndexingScheme<D>, D> {
+pub struct AutomatonTraverser<'a, 'd, K, P, I: IndexingScheme<D>, D> {
     matches_queue: VecDeque<(PatternID, I::Map)>,
     state_queue: VecDeque<TraversalState<I::Map>>,
-    automaton: &'a ConstraintAutomaton<C, I>,
+    automaton: &'a ConstraintAutomaton<K, P, I>,
     host: &'d D,
 }
 
-impl<'a, 'd, C, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, C, I, D> {
-    fn new(automaton: &'a ConstraintAutomaton<C, I>, host: &'d D) -> Self {
+impl<'a, 'd, K, P, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, K, P, I, D> {
+    fn new(automaton: &'a ConstraintAutomaton<K, P, I>, host: &'d D) -> Self {
         let matches_queue = VecDeque::new();
         let state_queue = VecDeque::from_iter([TraversalState::new(automaton.root())]);
         Self {
@@ -130,8 +127,7 @@ impl<'a, 'd, C, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, C, I, D> {
     }
 }
 
-impl<'a, 'd, P, D, I> Iterator
-    for AutomatonTraverser<'a, 'd, Constraint<indexing::Key<I, D>, P>, I, D>
+impl<'a, 'd, P, D, I> Iterator for AutomatonTraverser<'a, 'd, indexing::Key<I, D>, P, I, D>
 where
     P: Predicate<D>,
     I: IndexingScheme<D>,
@@ -168,12 +164,15 @@ impl OnlineToposort {
         }
     }
 
-    pub(super) fn next<C, I>(&mut self, automaton: &ConstraintAutomaton<C, I>) -> Option<StateID> {
+    pub(super) fn next<K, P, I>(
+        &mut self,
+        automaton: &ConstraintAutomaton<K, P, I>,
+    ) -> Option<StateID> {
         self.traverser.next(&automaton.graph).map(StateID)
     }
 }
 
-impl<K, P, I> ConstraintAutomaton<Constraint<K, P>, I> {
+impl<K, P, I> ConstraintAutomaton<K, P, I> {
     pub(crate) fn toposort(&self) -> OnlineToposort {
         OnlineToposort::new(self.root())
     }
