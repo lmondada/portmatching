@@ -1,18 +1,17 @@
 use itertools::Itertools;
 
 use crate::automaton::{ConstraintAutomaton, State, StateID, Transition, TransitionID};
-use crate::PatternID;
+use crate::indexing::IndexKey;
+use crate::{Constraint, PatternID};
 
 /// Methods for modifying the automaton
-impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
+where
+    Constraint<K, P>: Eq + Clone,
+{
     /// Add a new disconnected non-deterministic state
     pub(super) fn add_non_det_node(&mut self) -> StateID {
-        let node = self.graph.add_node(State {
-            matches: vec![],
-            deterministic: false,
-            constraint_order: vec![],
-            epsilon_order: vec![],
-        });
+        let node = self.graph.add_node(State::default());
         StateID(node)
     }
 
@@ -38,7 +37,7 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
         &mut self,
         StateID(parent): StateID,
         StateID(child): StateID,
-        constraint: Option<C>,
+        constraint: Option<Constraint<K, P>>,
     ) {
         if parent == child {
             // Transitions to itself are useless
@@ -64,12 +63,16 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
     pub(in crate::automaton) fn add_constraint(
         &mut self,
         parent: StateID,
-        constraint: C,
+        constraint: Constraint<K, P>,
     ) -> StateID {
         self.add_transition(parent, Some(constraint))
     }
 
-    pub(super) fn add_transition(&mut self, parent: StateID, constraint: Option<C>) -> StateID {
+    pub(super) fn add_transition(
+        &mut self,
+        parent: StateID,
+        constraint: Option<Constraint<K, P>>,
+    ) -> StateID {
         let child = self.add_non_det_node();
         self.append_edge(parent, child, constraint);
         child
@@ -87,7 +90,11 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
         }
     }
 
-    pub(crate) fn add_pattern(&mut self, constraints: impl IntoIterator<Item = C>, id: PatternID) {
+    pub(crate) fn add_pattern(
+        &mut self,
+        constraints: impl IntoIterator<Item = Constraint<K, P>>,
+        id: PatternID,
+    ) {
         let match_state = constraints
             .into_iter()
             .fold(self.root(), |state, constraint| {
@@ -100,7 +107,10 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
     ///
     /// The new state will have `transition` as its unique incoming edge. All
     /// other incoming transitions will remain in the existing target.
-    pub(super) fn split_target(&mut self, transition: TransitionID) -> StateID {
+    pub(super) fn split_target(&mut self, transition: TransitionID) -> StateID
+    where
+        K: Clone,
+    {
         let state = self.next_state(transition);
         if !self.incoming_transitions(state).any(|t| transition != t) {
             // There is a single incoming transition, nothing to do.
@@ -139,7 +149,7 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
     pub(super) fn drain_constraints(
         &mut self,
         state: StateID,
-    ) -> impl Iterator<Item = (Option<C>, StateID)> + '_ {
+    ) -> impl Iterator<Item = (Option<Constraint<K, P>>, StateID)> + '_ {
         let transitions = self.all_constraint_transitions(state).collect_vec();
         transitions.into_iter().map(|transition| {
             let target = self.next_state(transition);
@@ -148,7 +158,10 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
         })
     }
 
-    pub(super) fn remove_transition(&mut self, transition: TransitionID) -> Transition<C> {
+    pub(super) fn remove_transition(
+        &mut self,
+        transition: TransitionID,
+    ) -> Transition<Constraint<K, P>> {
         self.remove_order(transition);
         self.graph
             .remove_edge(transition.0)
@@ -181,7 +194,10 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
 }
 
 // Small, private utils functions
-impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
+where
+    Constraint<K, P>: Eq + Clone,
+{
     fn remove_order(&mut self, transition: TransitionID) {
         let source = self.parent(transition);
         let order = if self.constraint(transition).is_none() {
@@ -196,12 +212,12 @@ impl<C: Eq + Clone, I> ConstraintAutomaton<C, I> {
         order.remove(ind);
     }
 
-    fn node_weight_mut(&mut self, StateID(state): StateID) -> &mut State {
+    fn node_weight_mut(&mut self, StateID(state): StateID) -> &mut State<K> {
         self.graph.node_weight_mut(state).expect("invalid state")
     }
 }
 
-impl State {
+impl<K: IndexKey> State<K> {
     fn replace_order(&mut self, old_transition: TransitionID, new_transition: TransitionID) {
         let State {
             constraint_order,
@@ -219,8 +235,10 @@ pub mod tests {
     use rstest::{fixture, rstest};
 
     use crate::{
-        automaton::AutomatonBuilder, constraint::tests::TestConstraint,
-        indexing::tests::TestIndexingScheme, HashSet,
+        automaton::{tests::TestAutomaton, AutomatonBuilder},
+        constraint::tests::TestConstraint,
+        indexing::tests::TestIndexingScheme,
+        HashSet,
     };
 
     use super::*;
@@ -228,19 +246,19 @@ pub mod tests {
     /// An automaton with a X transition at the root and transitions
     /// [a,b,c,d] at the only child
     #[fixture]
-    pub fn automaton() -> ConstraintAutomaton<TestConstraint, TestIndexingScheme> {
+    pub fn automaton() -> TestAutomaton {
         let mut builder = AutomatonBuilder::new().set_det_heuristic(|_| false);
         let [constraint_root, constraint_a, constraint_b, constraint_c, constraint_d] =
             constraints();
-        builder.add_pattern(vec![constraint_root.clone(), constraint_a]);
-        builder.add_pattern(vec![constraint_root.clone(), constraint_b]);
-        builder.add_pattern(vec![constraint_root.clone(), constraint_c]);
-        builder.add_pattern(vec![constraint_root, constraint_d]);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_a], 0);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_b], 1);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_c], 2);
+        builder.add_pattern(vec![constraint_root, constraint_d], 3);
         builder.finish().0
     }
 
     #[fixture]
-    pub fn automaton2() -> ConstraintAutomaton<TestConstraint, TestIndexingScheme> {
+    pub fn automaton2() -> TestAutomaton {
         let mut automaton = automaton();
         let x_child = root_child(&automaton);
         let [a_child, _, _, _] = root_grandchildren(&automaton);
@@ -267,17 +285,13 @@ pub mod tests {
         ]
     }
 
-    pub(crate) fn root_child(
-        automaton: &ConstraintAutomaton<TestConstraint, TestIndexingScheme>,
-    ) -> StateID {
+    pub(crate) fn root_child(automaton: &TestAutomaton) -> StateID {
         let cs = automaton.children(automaton.root()).collect_vec();
         assert_eq!(cs.len(), 1);
         cs[0]
     }
 
-    pub(crate) fn root_grandchildren(
-        automaton: &ConstraintAutomaton<TestConstraint, TestIndexingScheme>,
-    ) -> [StateID; 4] {
+    pub(crate) fn root_grandchildren(automaton: &TestAutomaton) -> [StateID; 4] {
         let (child_a, child_b, child_c, child_d) = automaton
             .all_constraint_transitions(root_child(automaton))
             .map(|t| automaton.next_state(t))
@@ -287,16 +301,14 @@ pub mod tests {
     }
 
     #[rstest]
-    fn test_add_constraints(automaton: ConstraintAutomaton<TestConstraint, TestIndexingScheme>) {
+    fn test_add_constraints(automaton: TestAutomaton) {
         assert_eq!(automaton.graph.node_count(), 6);
         assert_eq!(automaton.all_transitions(automaton.root()).count(), 1);
         assert_eq!(automaton.all_transitions(root_child(&automaton)).count(), 4);
     }
 
     #[rstest]
-    fn test_drain_constraints(
-        mut automaton: ConstraintAutomaton<TestConstraint, TestIndexingScheme>,
-    ) {
+    fn test_drain_constraints(mut automaton: TestAutomaton) {
         let [_, constraint_a, constraint_b, constraint_c, constraint_d] = constraints();
         let [child_a, child_b, child_c, child_d] = root_grandchildren(&automaton);
         let drained: HashSet<_> = automaton

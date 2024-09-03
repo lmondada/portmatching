@@ -311,7 +311,7 @@ mod tests {
             .map(MatrixPattern::parse_str)
             .collect_vec();
 
-        let naive = MatrixNaiveManyMatcher::from_patterns(&patterns);
+        let naive = MatrixNaiveManyMatcher::try_from_patterns(&patterns).unwrap();
         let mut naive_matches = naive.find_matches(&subject).collect_vec();
         let [mut non_det, mut default] = apply_all_matchers(patterns, &subject);
 

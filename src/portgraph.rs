@@ -58,7 +58,7 @@ mod tests {
 
     #[rstest]
     fn empty_pattern_loop_link(empty_pattern: PGPattern<PortGraph>, loop_graph: PortGraph) {
-        let matcher = PGSinglePatternMatcher::from_pattern(&empty_pattern);
+        let matcher = PGSinglePatternMatcher::try_from_pattern(&empty_pattern).unwrap();
 
         assert_eq!(
             matcher.find_matches(&loop_graph).collect_vec(),
@@ -74,7 +74,9 @@ mod tests {
         empty_pattern: PGPattern<PortGraph>,
         loop_graph: PortGraph,
     ) {
-        let matcher = PGManyPatternMatcher::from_patterns(vec![empty_pattern]);
+        let matcher =
+            PGManyPatternMatcher::try_from_patterns(vec![empty_pattern], Default::default())
+                .unwrap();
 
         assert_eq!(
             matcher.find_matches(&loop_graph).collect_vec(),
@@ -89,7 +91,7 @@ mod tests {
     fn single_pattern_loop_link2(loop_graph: PortGraph) {
         let mut p = PGPattern::from_host(loop_graph.clone());
         p.pick_root().unwrap();
-        let matcher = PGSinglePatternMatcher::from_pattern(&p);
+        let matcher = PGSinglePatternMatcher::try_from_pattern(&p).unwrap();
 
         assert_eq!(
             matcher.find_matches(&loop_graph).collect_vec(),
@@ -104,7 +106,7 @@ mod tests {
     fn single_pattern_loop_link2_many_matcher(loop_graph: PortGraph) {
         let mut p = PGPattern::from_host(loop_graph.clone());
         p.pick_root().unwrap();
-        let matcher = PGManyPatternMatcher::from_patterns(vec![p]);
+        let matcher = PGManyPatternMatcher::try_from_patterns(vec![p], Default::default()).unwrap();
 
         assert_eq!(
             matcher.find_matches(&loop_graph).collect_vec(),
@@ -120,7 +122,7 @@ mod tests {
         let mut g = PortGraph::new();
         g.add_node(0, 2);
         let p = PGPattern::from_host_pick_root(g.clone());
-        let matcher = PGManyPatternMatcher::from_patterns(vec![p]);
+        let matcher = PGManyPatternMatcher::try_from_patterns(vec![p], Default::default()).unwrap();
 
         let mut g = PortGraph::new();
         let n0 = g.add_node(0, 1);
@@ -146,7 +148,8 @@ mod tests {
         link(&mut g, (n0, 1), (n1, 1));
         link(&mut g, (n2, 0), (n0, 1));
         let p = PGPattern::from_host_pick_root(g.clone());
-        let _matcher = PGManyPatternMatcher::from_patterns(vec![p]);
+        let _matcher =
+            PGManyPatternMatcher::try_from_patterns(vec![p], Default::default()).unwrap();
     }
 
     // TODO: weighted graphs
@@ -206,7 +209,8 @@ mod tests {
 
         let p1 = PGPattern::from_host_with_root(p1, n0);
         let p2 = PGPattern::from_host_with_root(p2, n0);
-        let matcher = PGManyPatternMatcher::from_patterns(vec![p1, p2]);
+        let matcher =
+            PGManyPatternMatcher::try_from_patterns(vec![p1, p2], Default::default()).unwrap();
         assert_eq!(matcher.find_matches(&g).count(), 3);
     }
 
@@ -240,11 +244,15 @@ mod tests {
         let p1 = PGPattern::from_host_with_root(p1, n1);
         let p2 = PGPattern::from_host_with_root(p2, n0);
         let mut rd_cnt = 0;
-        let matcher =
-            PGManyPatternMatcher::from_patterns_with_det_heuristic(vec![p1, p2], move |_| {
+        let matcher = PGManyPatternMatcher::try_from_patterns_with_det_heuristic(
+            vec![p1, p2],
+            move |_| {
                 rd_cnt += 1;
                 rd_cnt <= 3
-            });
+            },
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(matcher.find_matches(&g).count(), 3);
     }
 
@@ -259,7 +267,11 @@ mod tests {
         let n1 = p2.add_node(0, 2);
         link(&mut p2, (n1, 0), (n0, 1));
         link(&mut p2, (n1, 1), (n0, 0));
-        PGManyPatternMatcher::from_patterns([p1, p2].map(PGPattern::from_host_pick_root).to_vec());
+        PGManyPatternMatcher::try_from_patterns(
+            [p1, p2].map(PGPattern::from_host_pick_root).to_vec(),
+            Default::default(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -286,7 +298,8 @@ mod tests {
 
         let p1 = PGPattern::from_host_pick_root(p1);
         let p2 = PGPattern::from_host_pick_root(p2);
-        let matcher = PGManyPatternMatcher::from_patterns(vec![p1, p2]);
+        let matcher =
+            PGManyPatternMatcher::try_from_patterns(vec![p1, p2], Default::default()).unwrap();
         assert_eq!(matcher.find_matches(&g).count(), 1);
     }
 
@@ -314,8 +327,12 @@ mod tests {
 
         let p1 = PGPattern::from_host_pick_root(p1.clone());
         let p2 = PGPattern::from_host_pick_root(p2);
-        let matcher =
-            PGManyPatternMatcher::from_patterns_with_det_heuristic(vec![p1, p2], |_| false);
+        let matcher = PGManyPatternMatcher::try_from_patterns_with_det_heuristic(
+            vec![p1, p2],
+            |_| false,
+            Default::default(),
+        )
+        .unwrap();
 
         assert_eq!(matcher.find_matches(&g).count(), 1);
     }
@@ -336,7 +353,7 @@ mod tests {
 
         let p1 = PGPattern::from_host_pick_root(p1);
         let p2 = PGPattern::from_host_pick_root(p2);
-        PGManyPatternMatcher::from_patterns(vec![p1, p2]);
+        PGManyPatternMatcher::try_from_patterns(vec![p1, p2], Default::default()).unwrap();
     }
 
     #[test]
@@ -344,7 +361,7 @@ mod tests {
         let mut g = PortGraph::new();
         g.add_node(0, 1);
         let p = PGPattern::from_host_pick_root(g);
-        let matcher = PGSinglePatternMatcher::from_pattern(&p);
+        let matcher = PGSinglePatternMatcher::try_from_pattern(&p).unwrap();
         let mut g = PortGraph::new();
         g.add_node(1, 0);
 
@@ -380,7 +397,7 @@ mod tests {
         )
         .unwrap();
         let p = PGPattern::from_host_pick_root(g);
-        let matcher = PGSinglePatternMatcher::from_pattern(&p);
+        let matcher = PGSinglePatternMatcher::try_from_pattern(&p).unwrap();
 
         let mut g = PortGraph::new();
         let n = g.add_node(2, 1);
@@ -403,7 +420,7 @@ mod tests {
         )
         .unwrap();
         let p = PGPattern::from_host_pick_root(g);
-        let matcher = PGSinglePatternMatcher::from_pattern(&p);
+        let matcher = PGSinglePatternMatcher::try_from_pattern(&p).unwrap();
 
         let mut g = PortGraph::new();
         let n0 = g.add_node(0, 1);
@@ -437,7 +454,7 @@ mod tests {
         let ps = [pi(0), pi(1), pi(2), pi(3)];
         add_pattern(&mut pattern, &ps);
         let p = PGPattern::from_host_pick_root(pattern);
-        let matcher = PGSinglePatternMatcher::from_pattern(&p);
+        let matcher = PGSinglePatternMatcher::try_from_pattern(&p).unwrap();
 
         let mut g = PortGraph::new();
         for _ in 0..100 {

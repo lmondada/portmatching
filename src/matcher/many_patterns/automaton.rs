@@ -16,8 +16,8 @@ use crate::{
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ManyMatcher<PT, K, P, I> {
-    automaton: ConstraintAutomaton<Constraint<K, P>, I>,
+pub struct ManyMatcher<PT, K: IndexKey, P, I> {
+    automaton: ConstraintAutomaton<K, P, I>,
     patterns: HashMap<PatternID, PT>,
 }
 
@@ -39,7 +39,17 @@ where
     }
 }
 
-impl<K, P, PT, I> ManyMatcher<PT, K, P, I>
+/// What to do if a pattern fails to convert to a constraint.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum PatternFallback {
+    /// Skip the pattern.
+    Skip,
+    /// Fail if the pattern fails to convert to a constraint.
+    #[default]
+    Fail,
+}
+
+impl<K: IndexKey, P, PT, I> ManyMatcher<PT, K, P, I>
 where
     Constraint<K, P>: Eq + Clone + Hash,
     P: ToConstraintsTree<K>,
@@ -50,37 +60,57 @@ where
     ///
     /// The patterns are converted to constraints. Uses the deterministic
     /// heuristic provided by the constraint type.
-    pub fn from_patterns(patterns: Vec<PT>) -> Self
+    pub fn try_from_patterns(
+        patterns: Vec<PT>,
+        fallback: PatternFallback,
+    ) -> Result<Self, PT::Error>
     where
         P: DetHeuristic<K>,
     {
-        Self::from_patterns_with_det_heuristic(patterns, P::make_det)
+        Self::try_from_patterns_with_det_heuristic(patterns, P::make_det, fallback)
     }
 
     /// Create a new matcher from a vector of patterns, using a custom deterministic
     /// heuristic.
-    pub fn from_patterns_with_det_heuristic(
+    pub fn try_from_patterns_with_det_heuristic(
         patterns: Vec<PT>,
         make_det: impl for<'c> FnMut(&[&'c Constraint<K, P>]) -> bool,
-    ) -> Self {
-        let constraints = patterns.iter().map(|p| p.to_constraint_vec()).collect_vec();
-        let builder = AutomatonBuilder::from_constraints(constraints).set_det_heuristic(make_det);
-        let (automaton, pattern_to_id) = builder.finish();
-        let patterns = pattern_to_id.into_iter().zip(patterns).collect();
-        Self {
+        fallback: PatternFallback,
+    ) -> Result<Self, PT::Error> {
+        let mut builder = AutomatonBuilder::new().set_det_heuristic(make_det);
+        for (id, pattern) in patterns.iter().enumerate() {
+            let constraints = match fallback {
+                PatternFallback::Skip => {
+                    let Ok(constraints) = pattern.try_to_constraint_vec() else {
+                        continue;
+                    };
+                    constraints
+                }
+                PatternFallback::Fail => pattern.try_to_constraint_vec()?,
+            };
+            builder.add_pattern(constraints, id);
+        }
+        let (automaton, pattern_ids) = builder.finish();
+        let patterns = patterns
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| (PatternID(i), p))
+            .filter(|(i, _)| pattern_ids.contains(&i))
+            .collect();
+        Ok(Self {
             automaton,
             patterns,
-        }
+        })
     }
 }
 
-impl<PT, K, P, I> Debug for ManyMatcher<PT, K, P, I> {
+impl<PT, K: IndexKey, P, I> Debug for ManyMatcher<PT, K, P, I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ManyMatcher {{ {} patterns }}", self.patterns.len())
     }
 }
 
-impl<PT, K, P, I> ManyMatcher<PT, K, P, I> {
+impl<PT, K: IndexKey, P, I> ManyMatcher<PT, K, P, I> {
     /// Get a pattern by its ID.
     pub fn get_pattern(&self, id: PatternID) -> Option<&PT> {
         self.patterns.get(&id)
@@ -97,7 +127,7 @@ impl<PT, K, P, I> ManyMatcher<PT, K, P, I> {
     }
 }
 
-impl<PT, K: Debug, P: Debug, I> ManyMatcher<PT, K, P, I> {
+impl<PT, K: IndexKey, P: Debug, I> ManyMatcher<PT, K, P, I> {
     /// A dotstring representation of the trie.
     pub fn dot_string(&self) -> String {
         self.automaton.dot_string()

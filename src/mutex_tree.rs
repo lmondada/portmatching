@@ -98,10 +98,13 @@ impl<C> MutuallyExclusiveTree<C> {
     ///
     /// Each element in `children` is a child of the root, with constraint
     /// indices given by the second element of the tuple.
-    pub fn with_children(children: impl IntoIterator<Item = (C, Vec<usize>)>) -> Self {
+    pub fn with_children(children: impl IntoIterator<Item = (C, Vec<usize>)>) -> Self
+    where
+        C: PartialEq,
+    {
         let mut tree = Self::new();
         for (child, indices) in children {
-            let child_index = tree.add_child(tree.root(), child);
+            let child_index = tree.get_or_add_child(tree.root(), child);
             for index in indices {
                 tree.add_constraint_index(child_index, index);
             }
@@ -132,18 +135,31 @@ impl<C> MutuallyExclusiveTree<C> {
         &'a mut self,
         node: usize,
         constraints: impl IntoIterator<Item = C> + 'a,
-    ) -> impl Iterator<Item = usize> + 'a {
+    ) -> impl Iterator<Item = usize> + 'a
+    where
+        C: PartialEq,
+    {
         constraints
             .into_iter()
-            .map(move |c| self.add_child(node, c))
+            .map(move |c| self.get_or_add_child(node, c))
     }
 
-    /// Add a child to a node in the tree.
+    /// Get or add a child to a node in the tree.
     ///
-    /// Returns the index of the inserted node.
-    pub fn add_child(&mut self, node: usize, constraint: C) -> usize {
+    /// Returns the index of the child node. If the constraint does not exist,
+    /// it is added and the index of the new node is returned. Otherwise the
+    /// index of the existing node is returned.
+    pub fn get_or_add_child(&mut self, node: usize, constraint: C) -> usize
+    where
+        C: PartialEq,
+    {
         if self.nodes.len() <= node {
             panic!("Cannot add child to node that does not exist");
+        }
+        for child in &self.nodes[node].children {
+            if child.constraint == constraint {
+                return child.node_index;
+            }
         }
         let child_index = self.nodes.len();
         self.nodes.push(MutExTreeNode::new());

@@ -1,6 +1,6 @@
 [package]
 name = "portmatching"
-version = "0.4.0-rc.1"
+version = "0.4.0-rc.2"
 license = "MIT"
 
 readme = "README.md"
@@ -42,6 +42,7 @@ thiserror = "1.0.61"
 union-find = "0.4.2"
 delegate = "0.12.0"
 proptest = { version = "1.1.0", optional = true }
+derive-where = "1.2.7"
 
 [features]
 serde = ["dep:serde", "portgraph/serde", "smallvec/serde"]

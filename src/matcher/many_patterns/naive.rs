@@ -20,34 +20,34 @@ impl<C, I> NaiveManyMatcher<C, I> {
     /// Create a new naive matcher from patterns.
     ///
     /// Use [`IndexingScheme::default`] as the indexing scheme.
-    pub fn from_patterns<'p, P>(patterns: impl IntoIterator<Item = &'p P>) -> Self
+    pub fn try_from_patterns<'p, PT>(
+        patterns: impl IntoIterator<Item = &'p PT>,
+    ) -> Result<Self, PT::Error>
     where
-        P: Pattern<Constraint = C> + 'p,
+        PT: Pattern<Constraint = C> + 'p,
         I: Default,
     {
-        Self {
-            matchers: patterns
-                .into_iter()
-                .map(|p| SinglePatternMatcher::from_pattern(p))
-                .collect(),
-        }
+        let matchers = patterns
+            .into_iter()
+            .map(|p| SinglePatternMatcher::try_from_pattern(p))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { matchers })
     }
 
     /// Create a new naive matcher from patterns, using a custom indexing scheme.
-    pub fn from_patterns_with_indexing<'p, P>(
-        patterns: impl IntoIterator<Item = &'p P>,
+    pub fn try_from_patterns_with_indexing<'p, PT>(
+        patterns: impl IntoIterator<Item = &'p PT>,
         host_indexing: I,
-    ) -> Self
+    ) -> Result<Self, PT::Error>
     where
         I: Clone,
-        P: Pattern<Constraint = C> + 'p,
+        PT: Pattern<Constraint = C> + 'p,
     {
-        Self {
-            matchers: patterns
-                .into_iter()
-                .map(|p| SinglePatternMatcher::from_pattern_with_indexing(p, host_indexing.clone()))
-                .collect(),
-        }
+        let matchers = patterns
+            .into_iter()
+            .map(|p| SinglePatternMatcher::try_from_pattern_with_indexing(p, host_indexing.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { matchers })
     }
 }
 

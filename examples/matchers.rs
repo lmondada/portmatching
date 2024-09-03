@@ -4,6 +4,7 @@ use std::{borrow::Borrow, fmt::Debug};
 
 use itertools::Itertools;
 use portgraph::{render::DotFormat, LinkMut, PortGraph, PortMut};
+use portmatching::indexing::IndexKey;
 use portmatching::matrix::MatrixPatternPosition;
 use portmatching::string::StringPatternPosition;
 use portmatching::{
@@ -23,7 +24,12 @@ fn string_matching() {
     let patterns = ["he$a$bo", "hello, world"];
     let patterns = patterns.map(StringPattern::parse_str).to_vec();
 
-    let matcher = StringManyMatcher::from_patterns_with_det_heuristic(patterns, |_| true);
+    let matcher = StringManyMatcher::try_from_patterns_with_det_heuristic(
+        patterns,
+        |_| true,
+        Default::default(),
+    )
+    .unwrap();
 
     let text = "hey Enschede, hello world".to_string();
     let matches = matcher.find_matches(&text).collect_vec();
@@ -38,7 +44,12 @@ fn matrix_matching() {
     let patterns = patterns.map(MatrixPattern::parse_str).to_vec();
     dbg!(&patterns);
 
-    let matcher = MatrixManyMatcher::from_patterns_with_det_heuristic(patterns, |_| true);
+    let matcher = MatrixManyMatcher::try_from_patterns_with_det_heuristic(
+        patterns,
+        |_| true,
+        Default::default(),
+    )
+    .unwrap();
 
     let text = MatrixString::from(
         r#"
@@ -90,7 +101,12 @@ fn portgraph_matching() {
     let patterns = [p1, p2];
     let patterns = patterns.map(PGPattern::from_host_pick_root).to_vec();
 
-    let matcher = PGManyPatternMatcher::from_patterns_with_det_heuristic(patterns, |_| false);
+    let matcher = PGManyPatternMatcher::try_from_patterns_with_det_heuristic(
+        patterns,
+        |_| false,
+        Default::default(),
+    )
+    .unwrap();
 
     let matches = matcher.find_matches(&subject).collect_vec();
 
@@ -100,7 +116,10 @@ fn portgraph_matching() {
     save_dot_string(&matcher, "target/out.dot");
 }
 
-fn save_dot_string<PT, K: Debug, P: Debug, I>(matcher: &ManyMatcher<PT, K, P, I>, filename: &str) {
+fn save_dot_string<PT, K: IndexKey, P: Debug, I>(
+    matcher: &ManyMatcher<PT, K, P, I>,
+    filename: &str,
+) {
     let dot_string = matcher.dot_string();
     let mut file = File::create(filename).expect("Failed to create file");
     file.write_all(dot_string.as_bytes())

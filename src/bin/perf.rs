@@ -37,7 +37,7 @@ fn main() {
     .collect_vec();
 
     let build_start = Instant::now();
-    let matcher = MatrixManyMatcher::from_patterns(patterns);
+    let matcher = MatrixManyMatcher::try_from_patterns(patterns, Default::default()).unwrap();
     let build_time = build_start.elapsed();
 
     let match_start = Instant::now();
