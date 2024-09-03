@@ -2,15 +2,20 @@ use std::hash::Hash;
 
 use itertools::Itertools;
 use petgraph::{
+    data::DataMap,
     graph::NodeIndex,
     prelude::StableGraph,
-    visit::{IntoNeighborsDirected, IntoNodeIdentifiers, NodeFiltered, Reversed},
+    visit::{
+        Data, EdgeRef, GraphBase, IntoEdgesDirected, IntoNeighborsDirected, IntoNodeIdentifiers,
+        NodeFiltered, Reversed, Visitable,
+    },
     Direction,
 };
 
 use crate::{
     automaton::{ConstraintAutomaton, StateID},
     constraint::Constraint,
+    indexing::IndexKey,
     mutex_tree::{MutuallyExclusiveTree, ToConstraintsTree},
     utils::OnlineToposort,
     HashMap, HashSet, PatternID,
@@ -28,7 +33,7 @@ pub type ConstraintListPredicate<'c, K, P> = Box<dyn FnMut(&[&Constraint<K, P>])
 
 /// Create constraint automata from lists of patterns, given by lists of
 /// constraints.
-pub struct AutomatonBuilder<'c, K, P, I> {
+pub struct AutomatonBuilder<'c, K: IndexKey, P, I> {
     /// The matcher being built
     matcher: ConstraintAutomaton<K, P, I>,
     /// The list of all patterns IDs, in order of addition
@@ -40,7 +45,7 @@ pub struct AutomatonBuilder<'c, K, P, I> {
     recently_added: HashSet<NodeIndex>,
 }
 
-impl<'c, K, P, I> AutomatonBuilder<'c, K, P, I>
+impl<'c, K: IndexKey, P, I> AutomatonBuilder<'c, K, P, I>
 where
     Constraint<K, P>: Eq + Clone,
 {
@@ -156,7 +161,7 @@ where
     }
 }
 
-impl<'c, K, P, I> AutomatonBuilder<'c, K, P, I>
+impl<'c, K: IndexKey, P, I> AutomatonBuilder<'c, K, P, I>
 where
     P: ToConstraintsTree<K>,
     Constraint<K, P>: Eq + Clone + Hash,
@@ -211,11 +216,29 @@ where
 
     /// Populate the scope of each automaton state.
     ///
-    /// The scope is the set of bindings that are required in any descendant
-    /// of the state. Any two traversals with identical bindings for every
-    /// variable in the scope will yield identical behaviour.
-    fn populate_scopes(&self) {
-        todo!()
+    /// The scope is the set of bindings that are "relevant" to the current
+    /// traversal. They are the set of bindings that either
+    ///  - are in all paths from root to `state`, or
+    ///  - are in at least one path from `state` to the end.
+    fn populate_scopes(&mut self) {
+        // The child scope is obtained from the parents' by taking the intersection
+        let mut forward_scopes = compute_scopes(&self.matcher.graph, |mut a, b| {
+            a.retain(|x| b.contains(x));
+            a
+        });
+        // The parent scope is obtained from the children's by taking the union
+        let mut backward_scopes = compute_scopes(Reversed(&self.matcher.graph), |mut a, b| {
+            a.extend(b);
+            a
+        });
+
+        // Merge the two scopes
+        let all_nodes = self.matcher.graph.node_indices().collect_vec();
+        for node in all_nodes {
+            let scope = &mut self.matcher.graph[node].scope;
+            *scope = forward_scopes.remove(&node).unwrap();
+            scope.extend(backward_scopes.remove(&node).unwrap());
+        }
     }
 
     /// Turn outgoing constraints at `state` into a mutually exclusive set.
@@ -439,6 +462,50 @@ where
         self.add_transition(state, Some(constraint))
     }
 }
+// StableGraph<State<K>, Transition<Constraint<K, P>>>
+fn compute_scopes<K, P, G>(
+    graph: G,
+    merge_scopes: impl Fn(HashSet<K>, HashSet<K>) -> HashSet<K>,
+) -> HashMap<NodeIndex, HashSet<K>>
+where
+    K: IndexKey,
+    G: Data<EdgeWeight = Transition<Constraint<K, P>>, NodeWeight = State<K>>,
+    G: IntoNeighborsDirected + IntoNodeIdentifiers + Visitable + IntoEdgesDirected,
+    G: GraphBase<NodeId = NodeIndex>,
+    G: DataMap,
+{
+    let topo_order = petgraph::algo::toposort(&graph, None)
+        .ok()
+        .expect("Graph should be acyclic");
+
+    let mut ret = HashMap::default();
+
+    // Iterate over the nodes in topological order
+    for node_index in topo_order {
+        let scope: &mut HashSet<K> = ret.entry(node_index).or_default();
+
+        // Get all parents in the graph
+        let parent_edges = graph.edges_directed(node_index, Direction::Incoming);
+
+        // Iterate over all parent edges
+        *scope = parent_edges
+            .map(|e| {
+                let parent_id = StateID(e.source());
+                let mut parent_scope = graph.node_weight(parent_id.0).unwrap().scope.clone();
+                let new_args = e
+                    .weight()
+                    .constraint
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|c| c.required_bindings());
+                parent_scope.extend(new_args.copied());
+                parent_scope
+            })
+            .reduce(&merge_scopes)
+            .unwrap_or_default();
+    }
+    ret
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TracedStateID {
@@ -464,7 +531,7 @@ impl From<TracedTransitionID> for TransitionID {
     }
 }
 
-impl<'c, K, P, I: Default> Default for AutomatonBuilder<'c, K, P, I>
+impl<'c, K: IndexKey, P, I: Default> Default for AutomatonBuilder<'c, K, P, I>
 where
     Constraint<K, P>: Clone + Eq + Hash,
 {
@@ -473,7 +540,8 @@ where
     }
 }
 
-impl<'c, K, P, I: Default> FromIterator<Vec<Constraint<K, P>>> for AutomatonBuilder<'c, K, P, I>
+impl<'c, K: IndexKey, P, I: Default> FromIterator<Vec<Constraint<K, P>>>
+    for AutomatonBuilder<'c, K, P, I>
 where
     Constraint<K, P>: Clone + Eq,
 {
@@ -490,8 +558,9 @@ mod tests {
 
     use super::modify::tests::{automaton, automaton2};
     use crate::{
-        constraint::tests::TestConstraint, indexing::tests::TestIndexingScheme,
-        mutex_tree::MutuallyExclusiveTree, predicate::tests::TestPredicate,
+        automaton::tests::TestAutomaton, constraint::tests::TestConstraint,
+        indexing::tests::TestIndexingScheme, mutex_tree::MutuallyExclusiveTree,
+        predicate::tests::TestPredicate,
     };
 
     use super::*;
@@ -522,8 +591,11 @@ mod tests {
         }
     }
 
-    impl<C, I> ConstraintAutomaton<C, I> {
-        fn wrap_builder(self, with_builder: impl Fn(&mut AutomatonBuilder<'static, C, I>)) -> Self {
+    impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
+        fn wrap_builder(
+            self,
+            with_builder: impl Fn(&mut AutomatonBuilder<'static, K, P, I>),
+        ) -> Self {
             let mut builder = AutomatonBuilder {
                 matcher: self,
                 patterns_ids: Vec::new(),
@@ -537,13 +609,13 @@ mod tests {
 
     #[test]
     fn test_add_mutex_tree() {
-        let mut builder = AutomatonBuilder::<_, TestIndexingScheme>::default();
+        let mut builder = AutomatonBuilder::<_, _, TestIndexingScheme>::default();
         let n2 = builder.matcher.add_non_det_node();
         let mutex_tree = {
             let mut tree = MutuallyExclusiveTree::new();
-            let tree_child = tree.get_or_add_child(tree.root(), 1);
+            let tree_child = tree.get_or_add_child(tree.root(), TestConstraint::new(vec![1]));
             tree.add_constraint_index(tree_child, 0);
-            let tree_gchild = tree.get_or_add_child(tree_child, 2);
+            let tree_gchild = tree.get_or_add_child(tree_child, TestConstraint::new(vec![2]));
             tree.add_constraint_index(tree_gchild, 1);
             tree
         };
@@ -551,10 +623,12 @@ mod tests {
         assert_snapshot!(builder.matcher.dot_string());
     }
 
+    pub(crate) type TestBuilder<'a> =
+        AutomatonBuilder<'a, usize, TestPredicate, TestIndexingScheme>;
+
     #[test]
     fn test_build() {
-        let mut builder = AutomatonBuilder::<TestConstraint, TestIndexingScheme>::new()
-            .set_det_heuristic(|_| false);
+        let mut builder = TestBuilder::new().set_det_heuristic(|_| false);
         let [constraint_root, _, constraint_b, constraint_c, constraint_d] = constraints();
         builder.add_pattern(vec![constraint_root.clone(), constraint_b.clone()], 0);
         builder.add_pattern(vec![constraint_root.clone(), constraint_c.clone()], 1);
@@ -584,7 +658,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_make_det_noop(automaton: ConstraintAutomaton<TestConstraint, TestIndexingScheme>) {
+    fn test_make_det_noop(automaton: TestAutomaton) {
         let automaton2 = automaton.clone();
         let root_child = root_child(&automaton);
         let automaton = automaton.wrap_builder(|b| b.make_det(root_child));
@@ -594,7 +668,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_make_det(automaton2: ConstraintAutomaton<TestConstraint, TestIndexingScheme>) {
+    fn test_make_det(automaton2: TestAutomaton) {
         let x_child = root_child(&automaton2);
         let [a_child, b_child, c_child, d_child] = root_grandchildren(&automaton2);
 
@@ -626,7 +700,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_make_unique(automaton2: ConstraintAutomaton<TestConstraint, TestIndexingScheme>) {
+    fn test_make_unique(automaton2: TestAutomaton) {
         let x_child = root_child(&automaton2);
         let [a_child, ..] = root_grandchildren(&automaton2);
 
@@ -678,8 +752,8 @@ mod tests {
     }
 
     #[fixture]
-    fn automaton3() -> ConstraintAutomaton<TestConstraint, TestIndexingScheme> {
-        let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::default();
+    fn automaton3() -> TestAutomaton {
+        let mut automaton = TestAutomaton::default();
         let n1 = automaton.add_constraint(automaton.root(), TestConstraint::new(vec![0]));
         let n2 = automaton.add_constraint(automaton.root(), TestConstraint::new(vec![1]));
         let f = automaton.add_fail(n1);
@@ -688,7 +762,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_mergeable_nodes(automaton3: ConstraintAutomaton<TestConstraint, TestIndexingScheme>) {
+    fn test_mergeable_nodes(automaton3: TestAutomaton) {
         let node_depths = NodeDepthCache::with_graph(&automaton3.graph).unwrap();
         let builder = AutomatonBuilder {
             matcher: automaton3,

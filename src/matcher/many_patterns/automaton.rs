@@ -16,7 +16,7 @@ use crate::{
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ManyMatcher<PT, K, P, I> {
+pub struct ManyMatcher<PT, K: IndexKey, P, I> {
     automaton: ConstraintAutomaton<K, P, I>,
     patterns: HashMap<PatternID, PT>,
 }
@@ -49,7 +49,7 @@ pub enum PatternFallback {
     Fail,
 }
 
-impl<K: Clone, P, PT, I> ManyMatcher<PT, K, P, I>
+impl<K: IndexKey, P, PT, I> ManyMatcher<PT, K, P, I>
 where
     Constraint<K, P>: Eq + Clone + Hash,
     P: ToConstraintsTree<K>,
@@ -104,13 +104,13 @@ where
     }
 }
 
-impl<PT, K, P, I> Debug for ManyMatcher<PT, K, P, I> {
+impl<PT, K: IndexKey, P, I> Debug for ManyMatcher<PT, K, P, I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ManyMatcher {{ {} patterns }}", self.patterns.len())
     }
 }
 
-impl<PT, K, P, I> ManyMatcher<PT, K, P, I> {
+impl<PT, K: IndexKey, P, I> ManyMatcher<PT, K, P, I> {
     /// Get a pattern by its ID.
     pub fn get_pattern(&self, id: PatternID) -> Option<&PT> {
         self.patterns.get(&id)
@@ -127,7 +127,7 @@ impl<PT, K, P, I> ManyMatcher<PT, K, P, I> {
     }
 }
 
-impl<PT, K: Debug, P: Debug, I> ManyMatcher<PT, K, P, I> {
+impl<PT, K: IndexKey, P: Debug, I> ManyMatcher<PT, K, P, I> {
     /// A dotstring representation of the trie.
     pub fn dot_string(&self) -> String {
         self.automaton.dot_string()

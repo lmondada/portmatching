@@ -1,6 +1,6 @@
 use petgraph::{visit::EdgeRef, Direction};
 
-use crate::{Constraint, PatternID};
+use crate::{indexing::IndexKey, Constraint, PatternID};
 
 use super::{ConstraintAutomaton, State, StateID, TransitionID};
 
@@ -8,7 +8,7 @@ use super::{ConstraintAutomaton, State, StateID, TransitionID};
 ///
 /// Exposed as a trait so that the automaton builder can reuse the default
 /// implementation but trace calls where useful.
-impl<K, P, I> ConstraintAutomaton<K, P, I>
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
 where
     Constraint<K, P>: Eq,
 {
@@ -41,6 +41,7 @@ where
     /// The state reached by the `constraint` transition at `state`, if any.
     ///
     /// Expects at most one transition, otherwise panics.
+    #[allow(dead_code)]
     pub(super) fn constraint_next_state(
         &self,
         state: StateID,
@@ -145,7 +146,7 @@ pub(super) struct StateTuple<'a, C> {
 }
 
 // Small, private utils functions
-impl<K, P, I> ConstraintAutomaton<K, P, I> {
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
     pub(super) fn node_weight(&self, state: StateID) -> &State<K> {
         self.graph.node_weight(state.0).expect("unknown state")
     }

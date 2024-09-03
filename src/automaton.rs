@@ -11,10 +11,12 @@ use petgraph::dot::Dot;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::stable_graph::{StableDiGraph, StableGraph};
 
+use crate::HashSet;
 use std::fmt::{self, Debug};
 
 use derive_more::{From, Into};
 
+use crate::indexing::IndexKey;
 use crate::{Constraint, PatternID};
 pub use builder::AutomatonBuilder;
 
@@ -41,7 +43,7 @@ pub use builder::AutomatonBuilder;
 /// - I: Indexing scheme of the host data
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ConstraintAutomaton<K, P, I> {
+pub struct ConstraintAutomaton<K: IndexKey, P, I> {
     /// The transition graph
     graph: StableDiGraph<State<K>, Transition<Constraint<K, P>>>,
     /// The root of the transition graph
@@ -50,13 +52,13 @@ pub struct ConstraintAutomaton<K, P, I> {
     host_indexing: I,
 }
 
-impl<K, P, I: Default> Default for ConstraintAutomaton<K, P, I> {
+impl<K: IndexKey, P, I: Default> Default for ConstraintAutomaton<K, P, I> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K, P, I> ConstraintAutomaton<K, P, I> {
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
     /// An empty constraint automaton with default indexing scheme.
     ///
     /// Use the [AutomatonBuilder] to construct an automaton from a list of
@@ -104,7 +106,7 @@ impl<K, P, I> ConstraintAutomaton<K, P, I> {
     }
 }
 
-impl<K: Debug, P: Debug, I> Debug for ConstraintAutomaton<K, P, I> {
+impl<K: IndexKey, P: Debug, I> Debug for ConstraintAutomaton<K, P, I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.dot_string())
     }
@@ -126,7 +128,7 @@ struct TransitionID(EdgeIndex);
 #[derive(Clone)]
 #[derive_where(Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct State<K> {
+struct State<K: IndexKey> {
     /// The pattern matches at current state
     matches: Vec<PatternID>,
     /// Whether the state is deterministic
@@ -138,10 +140,10 @@ struct State<K> {
     /// the outgoing epsilon edges, i.e. the edges with None weights.
     epsilon_order: Vec<TransitionID>,
     /// The scope of the state
-    scope: Vec<K>,
+    scope: HashSet<K>,
 }
 
-impl<K> Debug for State<K> {
+impl<K: IndexKey> Debug for State<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.deterministic {
             write!(f, "D")?;
@@ -174,4 +176,13 @@ impl<C: Debug> Debug for Transition<C> {
             write!(f, "ε")
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{indexing::tests::TestIndexingScheme, predicate::tests::TestPredicate};
+
+    use super::ConstraintAutomaton;
+
+    pub(crate) type TestAutomaton = ConstraintAutomaton<usize, TestPredicate, TestIndexingScheme>;
 }

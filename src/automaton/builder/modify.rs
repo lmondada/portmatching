@@ -1,10 +1,11 @@
 use itertools::Itertools;
 
 use crate::automaton::{ConstraintAutomaton, State, StateID, Transition, TransitionID};
+use crate::indexing::IndexKey;
 use crate::{Constraint, PatternID};
 
 /// Methods for modifying the automaton
-impl<K, P, I> ConstraintAutomaton<K, P, I>
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
 where
     Constraint<K, P>: Eq + Clone,
 {
@@ -193,7 +194,7 @@ where
 }
 
 // Small, private utils functions
-impl<K, P, I> ConstraintAutomaton<K, P, I>
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
 where
     Constraint<K, P>: Eq + Clone,
 {
@@ -216,7 +217,7 @@ where
     }
 }
 
-impl<K> State<K> {
+impl<K: IndexKey> State<K> {
     fn replace_order(&mut self, old_transition: TransitionID, new_transition: TransitionID) {
         let State {
             constraint_order,
@@ -234,8 +235,10 @@ pub mod tests {
     use rstest::{fixture, rstest};
 
     use crate::{
-        automaton::AutomatonBuilder, constraint::tests::TestConstraint,
-        indexing::tests::TestIndexingScheme, HashSet,
+        automaton::{tests::TestAutomaton, AutomatonBuilder},
+        constraint::tests::TestConstraint,
+        indexing::tests::TestIndexingScheme,
+        HashSet,
     };
 
     use super::*;
@@ -243,7 +246,7 @@ pub mod tests {
     /// An automaton with a X transition at the root and transitions
     /// [a,b,c,d] at the only child
     #[fixture]
-    pub fn automaton() -> ConstraintAutomaton<TestConstraint, TestIndexingScheme> {
+    pub fn automaton() -> TestAutomaton {
         let mut builder = AutomatonBuilder::new().set_det_heuristic(|_| false);
         let [constraint_root, constraint_a, constraint_b, constraint_c, constraint_d] =
             constraints();
@@ -255,7 +258,7 @@ pub mod tests {
     }
 
     #[fixture]
-    pub fn automaton2() -> ConstraintAutomaton<TestConstraint, TestIndexingScheme> {
+    pub fn automaton2() -> TestAutomaton {
         let mut automaton = automaton();
         let x_child = root_child(&automaton);
         let [a_child, _, _, _] = root_grandchildren(&automaton);
@@ -282,17 +285,13 @@ pub mod tests {
         ]
     }
 
-    pub(crate) fn root_child(
-        automaton: &ConstraintAutomaton<TestConstraint, TestIndexingScheme>,
-    ) -> StateID {
+    pub(crate) fn root_child(automaton: &TestAutomaton) -> StateID {
         let cs = automaton.children(automaton.root()).collect_vec();
         assert_eq!(cs.len(), 1);
         cs[0]
     }
 
-    pub(crate) fn root_grandchildren(
-        automaton: &ConstraintAutomaton<TestConstraint, TestIndexingScheme>,
-    ) -> [StateID; 4] {
+    pub(crate) fn root_grandchildren(automaton: &TestAutomaton) -> [StateID; 4] {
         let (child_a, child_b, child_c, child_d) = automaton
             .all_constraint_transitions(root_child(automaton))
             .map(|t| automaton.next_state(t))
@@ -302,16 +301,14 @@ pub mod tests {
     }
 
     #[rstest]
-    fn test_add_constraints(automaton: ConstraintAutomaton<TestConstraint, TestIndexingScheme>) {
+    fn test_add_constraints(automaton: TestAutomaton) {
         assert_eq!(automaton.graph.node_count(), 6);
         assert_eq!(automaton.all_transitions(automaton.root()).count(), 1);
         assert_eq!(automaton.all_transitions(root_child(&automaton)).count(), 4);
     }
 
     #[rstest]
-    fn test_drain_constraints(
-        mut automaton: ConstraintAutomaton<TestConstraint, TestIndexingScheme>,
-    ) {
+    fn test_drain_constraints(mut automaton: TestAutomaton) {
         let [_, constraint_a, constraint_b, constraint_c, constraint_d] = constraints();
         let [child_a, child_b, child_c, child_d] = root_grandchildren(&automaton);
         let drained: HashSet<_> = automaton

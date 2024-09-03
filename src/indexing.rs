@@ -166,10 +166,10 @@ pub trait IndexKey: Eq + Copy + Hash + Debug {}
 ///
 /// This is implemented for all types that implement [`Clone`], [`PartialEq`]
 /// and [`Debug`].
-pub trait IndexValue: Clone + PartialEq + Debug + Borrow<Self> {}
+pub trait IndexValue: Clone + PartialEq + Debug + Hash + Borrow<Self> {}
 
 impl<T: Eq + Copy + Debug + Hash> IndexKey for T {}
-impl<T: Clone + PartialEq + Debug + Borrow<Self>> IndexValue for T {}
+impl<T: Clone + PartialEq + Debug + Hash + Borrow<Self>> IndexValue for T {}
 
 impl<K: IndexKey + 'static, V: IndexValue + 'static> IndexMap for HashMap<K, V> {
     type Key = K;

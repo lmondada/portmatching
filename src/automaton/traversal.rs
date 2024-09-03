@@ -1,16 +1,18 @@
-use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
+use std::{borrow::Borrow, collections::VecDeque};
 
 use itertools::Itertools;
 use petgraph::graph::NodeIndex;
+use rustc_hash::FxHasher;
 
 use crate::{
-    indexing::{self, IndexKey},
-    utils, IndexMap, IndexingScheme, PatternID, Predicate,
+    indexing::{IndexKey, Key},
+    utils, HashMap, HashSet, IndexMap, IndexingScheme, PatternID, Predicate,
 };
 
 use super::{ConstraintAutomaton, StateID};
 
-impl<K, P, I> ConstraintAutomaton<K, P, I> {
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
     /// Run the automaton on the `host` input data.
     pub fn run<'a, 'd, D>(&'a self, host: &'d D) -> AutomatonTraverser<'a, 'd, K, P, I, D>
     where
@@ -107,27 +109,57 @@ impl<S: Default> TraversalState<S> {
 ///  - S: scope assignments mapping variable names to values
 ///  - C: constraint type on transitions
 ///  - D: arbitrary input "host" data to evaluate constraints on.
-pub struct AutomatonTraverser<'a, 'd, K, P, I: IndexingScheme<D>, D> {
+pub struct AutomatonTraverser<'a, 'd, K: IndexKey, P, I: IndexingScheme<D>, D> {
     matches_queue: VecDeque<(PatternID, I::Map)>,
     state_queue: VecDeque<TraversalState<I::Map>>,
     automaton: &'a ConstraintAutomaton<K, P, I>,
     host: &'d D,
+    /// For each state, the set of hashes of bindings already visited (prune
+    /// search if the same binding has been visited before)
+    previous_bindings: HashMap<StateID, HashSet<u64>>,
 }
 
-impl<'a, 'd, K, P, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, K, P, I, D> {
+impl<'a, 'd, K: IndexKey, P, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, K, P, I, D> {
     fn new(automaton: &'a ConstraintAutomaton<K, P, I>, host: &'d D) -> Self {
         let matches_queue = VecDeque::new();
         let state_queue = VecDeque::from_iter([TraversalState::new(automaton.root())]);
+        let previous_bindings = HashMap::default();
         Self {
             matches_queue,
             state_queue,
             automaton,
             host,
+            previous_bindings,
         }
     }
 }
 
-impl<'a, 'd, P, D, I> Iterator for AutomatonTraverser<'a, 'd, indexing::Key<I, D>, P, I, D>
+impl<'a, 'd, P, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, Key<I, D>, P, I, D> {
+    /// Mark a state as visited if it wasn't visited already.
+    ///
+    /// Return whether the visit was successful, i.e. the state had not been
+    /// visited before.
+    fn visit(&mut self, state: &TraversalState<I::Map>) -> bool {
+        let state_id = state.state_id;
+        let scope = &self.automaton.graph[state_id.0].scope;
+        let hash = bindings_hash(&state.bindings, scope);
+        self.previous_bindings
+            .entry(state_id)
+            .or_default()
+            .insert(hash)
+    }
+}
+
+fn bindings_hash<S: IndexMap>(bindings: &S, scope: &HashSet<S::Key>) -> u64 {
+    let mut hasher = FxHasher::default();
+    for key in scope {
+        let value = bindings.get(key);
+        value.as_ref().map(|v| v.borrow()).hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+impl<'a, 'd, P, D, I> Iterator for AutomatonTraverser<'a, 'd, Key<I, D>, P, I, D>
 where
     P: Predicate<D>,
     I: IndexingScheme<D>,
@@ -140,6 +172,9 @@ where
             let Some(state) = self.state_queue.pop_front() else {
                 break;
             };
+            if !self.visit(&state) {
+                continue;
+            }
             self.matches_queue.extend(
                 self.automaton
                     .matches(state.state_id)
@@ -164,7 +199,7 @@ impl OnlineToposort {
         }
     }
 
-    pub(super) fn next<K, P, I>(
+    pub(super) fn next<K: IndexKey, P, I>(
         &mut self,
         automaton: &ConstraintAutomaton<K, P, I>,
     ) -> Option<StateID> {
@@ -172,7 +207,7 @@ impl OnlineToposort {
     }
 }
 
-impl<K, P, I> ConstraintAutomaton<K, P, I> {
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
     pub(crate) fn toposort(&self) -> OnlineToposort {
         OnlineToposort::new(self.root())
     }
@@ -181,7 +216,8 @@ impl<K, P, I> ConstraintAutomaton<K, P, I> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        constraint::tests::TestConstraint, indexing::tests::TestIndexingScheme, HashMap, HashSet,
+        automaton::tests::TestAutomaton, constraint::tests::TestConstraint,
+        indexing::tests::TestIndexingScheme, HashMap, HashSet,
     };
 
     use super::*;
@@ -196,7 +232,7 @@ mod tests {
 
     #[test]
     fn legal_transitions() {
-        let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::new();
+        let mut automaton = TestAutomaton::new();
         // Add a True, False and None constraint
         let true_child = automaton.add_constraint(automaton.root(), true_constraint());
         automaton.add_constraint(automaton.root(), false_constraint());
@@ -235,7 +271,7 @@ mod tests {
 
     #[test]
     fn legal_transitions_all_false() {
-        let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::new();
+        let mut automaton = TestAutomaton::new();
         automaton.add_constraint(automaton.root(), false_constraint());
         let ass = HashMap::default();
         // Only a False transition, so no legal moves
@@ -286,7 +322,7 @@ mod tests {
 
     #[test]
     fn run_automaton() {
-        let mut automaton = ConstraintAutomaton::<TestConstraint, TestIndexingScheme>::new();
+        let mut automaton = TestAutomaton::new();
         automaton.add_pattern(vec![true_constraint(), false_constraint()], PatternID(0));
         let match_pattern1 = PatternID(1);
         automaton.add_pattern(vec![true_constraint(), true_constraint()], match_pattern1);

@@ -4,6 +4,7 @@ use std::{borrow::Borrow, fmt::Debug};
 
 use itertools::Itertools;
 use portgraph::{render::DotFormat, LinkMut, PortGraph, PortMut};
+use portmatching::indexing::IndexKey;
 use portmatching::matrix::MatrixPatternPosition;
 use portmatching::string::StringPatternPosition;
 use portmatching::{
@@ -115,7 +116,10 @@ fn portgraph_matching() {
     save_dot_string(&matcher, "target/out.dot");
 }
 
-fn save_dot_string<PT, K: Debug, P: Debug, I>(matcher: &ManyMatcher<PT, K, P, I>, filename: &str) {
+fn save_dot_string<PT, K: IndexKey, P: Debug, I>(
+    matcher: &ManyMatcher<PT, K, P, I>,
+    filename: &str,
+) {
     let dot_string = matcher.dot_string();
     let mut file = File::create(filename).expect("Failed to create file");
     file.write_all(dot_string.as_bytes())
