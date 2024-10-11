@@ -6,27 +6,30 @@ use std::collections::VecDeque;
 
 use crate::{
     constraint::Constraint,
-    indexing::{self, IndexKey},
+    indexing::{DataKVMap, DataKey, IndexKey, IndexedData, Key},
     pattern::Pattern,
-    IndexMap, IndexingScheme, PatternID, Predicate,
+    HashSet, IndexMap, IndexingScheme, PatternID, Predicate,
 };
 
 use super::{PatternMatch, PortMatcher};
 
 /// A simple matcher for a single pattern.
-pub struct SinglePatternMatcher<C, I> {
+pub struct SinglePatternMatcher<K, P, I> {
     /// The constraints forming the pattern
-    constraints: Vec<C>,
+    constraints: Vec<Constraint<K, P>>,
     /// The indexing scheme for the host that we match on
     host_indexing: I,
+    /// The bindings that must be present in the matches
+    requested_bindings: HashSet<K>,
 }
 
-impl<P, D, I> PortMatcher<D> for SinglePatternMatcher<Constraint<indexing::Key<I, D>, P>, I>
+impl<P, D> PortMatcher<D>
+    for SinglePatternMatcher<DataKey<D>, P, <D as IndexedData>::IndexingScheme>
 where
-    P: Predicate<D, Value = indexing::Value<I, D>>,
-    I: IndexingScheme<D>,
+    D: IndexedData,
+    P: Predicate<D>,
 {
-    type Match = I::Map;
+    type Match = DataKVMap<D>;
 
     fn find_matches<'a>(
         &'a self,
@@ -38,11 +41,13 @@ where
     }
 }
 
-impl<C, I> SinglePatternMatcher<C, I> {
+impl<P, I: IndexingScheme> SinglePatternMatcher<Key<I>, P, I> {
     /// Create a matcher from a vector of constraints.
     ///
     /// The host indexing scheme is the type's default.
-    pub fn try_from_pattern<PT: Pattern<Constraint = C>>(pattern: &PT) -> Result<Self, PT::Error>
+    pub fn try_from_pattern<PT: Pattern<Constraint = Constraint<Key<I>, P>>>(
+        pattern: &PT,
+    ) -> Result<Self, PT::Error>
     where
         I: Default,
     {
@@ -50,30 +55,38 @@ impl<C, I> SinglePatternMatcher<C, I> {
     }
 
     /// Create a matcher from a vector of constraints with specified host indexing scheme.
-    pub fn try_from_pattern_with_indexing<PT: Pattern<Constraint = C>>(
+    pub fn try_from_pattern_with_indexing<PT: Pattern<Constraint = Constraint<Key<I>, P>>>(
         pattern: &PT,
         indexing: I,
     ) -> Result<Self, PT::Error> {
         let constraints = pattern.try_to_constraint_vec()?;
+        let requested_bindings = indexing
+            .all_missing_bindings(
+                constraints
+                    .iter()
+                    .flat_map(|c| c.required_bindings().iter())
+                    .copied(),
+                [],
+            )
+            .into_iter()
+            .collect();
         Ok(Self {
             constraints,
             host_indexing: indexing,
+            requested_bindings,
         })
     }
 }
 
-impl<K, P, I> SinglePatternMatcher<Constraint<K, P>, I>
-where
-    K: IndexKey,
-{
+impl<K: IndexKey, P, I: IndexingScheme> SinglePatternMatcher<K, P, I> {
     /// Whether `self` matches `host` anchored at `root`.
     ///
     /// Check whether each edge of the pattern is valid in the host
     pub fn match_exists<D>(&self, host: &D) -> bool
     where
-        P: Predicate<D, Value = indexing::Value<I, D>>,
-        I: IndexingScheme<D>,
-        I::Map: IndexMap<Key = K>,
+        P: Predicate<D>,
+        DataKVMap<D>: IndexMap<Key = K>,
+        D: IndexedData<IndexingScheme = I>,
     {
         !self.get_all_bindings(host).is_empty()
     }
@@ -81,28 +94,34 @@ where
     /// Get the valid scope assignments as a map from variable names to host nodes.
     fn get_all_bindings<D>(&self, host: &D) -> Vec<I::Map>
     where
-        P: Predicate<D, Value = indexing::Value<I, D>>,
-        I: IndexingScheme<D>,
-        I::Map: IndexMap<Key = K>,
+        P: Predicate<D>,
+        DataKVMap<D>: IndexMap<Key = K>,
+        D: IndexedData<IndexingScheme = I>,
     {
         let mut candidates = VecDeque::new();
         candidates.push_back((self.constraints.as_slice(), I::Map::default()));
         let mut final_bindings = Vec::new();
-        while let Some((constraints, bindings)) = candidates.pop_front() {
+        while let Some((constraints, mut bindings)) = candidates.pop_front() {
             let [constraint, remaining @ ..] = constraints else {
-                final_bindings.push(bindings);
+                bindings.retain_keys(&self.requested_bindings);
+                if self
+                    .requested_bindings
+                    .iter()
+                    .all(|k| bindings.get(k).is_some())
+                {
+                    // We have a complete match
+                    final_bindings.push(bindings);
+                }
                 continue;
             };
 
             let mut all_bindings = vec![bindings];
-            let keys = constraint.required_bindings();
+            let keys = self
+                .host_indexing
+                .all_missing_bindings(constraint.required_bindings().iter().copied(), []);
             all_bindings = all_bindings
                 .into_iter()
-                .flat_map(|bindings| {
-                    self.host_indexing
-                        .try_bind_all(bindings, keys.to_vec(), host)
-                        .unwrap()
-                })
+                .flat_map(|bindings| host.bind_all(bindings, keys.iter().copied(), false))
                 .collect();
             candidates.extend(
                 all_bindings
@@ -120,13 +139,16 @@ mod tests {
     use itertools::Itertools;
 
     use crate::{
-        constraint::tests::TestConstraint, indexing::tests::TestIndexingScheme,
-        pattern::tests::TestPattern, HashMap,
+        constraint::tests::TestConstraint,
+        indexing::tests::{TestData, TestIndexingScheme},
+        pattern::tests::TestPattern,
+        predicate::tests::TestPredicate,
+        HashMap,
     };
 
     use super::*;
 
-    type TestMatcher = SinglePatternMatcher<TestConstraint, TestIndexingScheme>;
+    type TestMatcher = SinglePatternMatcher<usize, TestPredicate, TestIndexingScheme>;
 
     #[test]
     fn test_single_pattern_matcher() {
@@ -135,7 +157,7 @@ mod tests {
         let matcher = TestMatcher::try_from_pattern(&pattern).unwrap();
 
         // Matching against itself works
-        let matches = matcher.find_matches(&()).collect_vec();
+        let matches = matcher.find_matches(&TestData).collect_vec();
         assert_eq!(matches.len(), 1);
         let PatternMatch {
             pattern,

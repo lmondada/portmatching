@@ -5,7 +5,6 @@ pub(crate) mod portgraph;
 #[cfg(all(feature = "portgraph", feature = "proptest"))]
 pub mod test;
 mod toposort;
-pub(crate) mod unique_stack;
 
 use itertools::Itertools;
 #[cfg(feature = "portgraph")]
@@ -14,7 +13,6 @@ pub(crate) use portgraph::is_connected;
 pub use test::gen_portgraph_connected;
 
 pub(crate) use toposort::{online_toposort, OnlineToposort};
-pub(crate) use unique_stack::UniqueStack;
 
 /// Sort a vector and return a vector of pairs of the original value and its position.
 #[allow(dead_code)]

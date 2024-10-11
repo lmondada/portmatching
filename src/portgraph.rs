@@ -17,14 +17,14 @@ use portgraph::PortGraph;
 use self::indexing::{PGIndexKey, PGIndexingScheme};
 
 /// A matcher for a single port graph pattern.
-pub type PGSinglePatternMatcher = SinglePatternMatcher<PGConstraint, PGIndexingScheme>;
+pub type PGSinglePatternMatcher = SinglePatternMatcher<PGIndexKey, PGPredicate, PGIndexingScheme>;
 /// An automaton-based matcher for many port graph patterns.
 pub type PGManyPatternMatcher =
     ManyMatcher<PGPattern<PortGraph>, PGIndexKey, PGPredicate, PGIndexingScheme>;
 /// A naive matcher for many port graph patterns.
 ///
 /// Use for testing only.
-pub type PGNaiveManyPatternMatcher = NaiveManyMatcher<PGConstraint, PGIndexingScheme>;
+pub type PGNaiveManyPatternMatcher = NaiveManyMatcher<PGIndexKey, PGPredicate, PGIndexingScheme>;
 
 #[cfg(test)]
 mod tests {

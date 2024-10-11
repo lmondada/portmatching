@@ -5,6 +5,7 @@ use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHasher;
 
+use crate::indexing::{DataKVMap, IndexedData};
 use crate::{
     indexing::{IndexKey, Key},
     utils, HashMap, HashSet, IndexMap, IndexingScheme, PatternID, Predicate,
@@ -12,50 +13,46 @@ use crate::{
 
 use super::{ConstraintAutomaton, StateID};
 
-impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
+impl<P, I: IndexingScheme> ConstraintAutomaton<Key<I>, P, I> {
     /// Run the automaton on the `host` input data.
-    pub fn run<'a, 'd, D>(&'a self, host: &'d D) -> AutomatonTraverser<'a, 'd, K, P, I, D>
+    pub fn run<'a, 'd, D>(&'a self, host: &'d D) -> AutomatonTraverser<'a, 'd, Key<I>, P, I, D>
     where
+        D: IndexedData<IndexingScheme = I>,
         P: Predicate<D>,
-        I: IndexingScheme<D>,
-        I::Map: IndexMap<Key = K, Value = P::Value>,
     {
         AutomatonTraverser::new(self, host)
     }
 
     /// An iterator of the allowed transitions
-    fn next_legal_states<'a, D, S>(
+    fn next_legal_states<'a, D>(
         &'a self,
-        state: TraversalState<S>,
+        state: TraversalState<DataKVMap<D>>,
         host: &'a D,
-    ) -> impl Iterator<Item = TraversalState<S>> + 'a
+    ) -> impl Iterator<Item = TraversalState<DataKVMap<D>>> + 'a
     where
         P: Predicate<D>,
-        S: IndexMap<Key = K, Value = P::Value>,
-        I: IndexingScheme<D, Map = S>,
-        S: 'a,
-        K: IndexKey,
-        P::Value: Clone,
+        D: IndexedData<IndexingScheme = I>,
     {
+        // Try to bind all (as many as possible of the) required keys
+        let mut all_bindings = host.bind_all(
+            state.bindings,
+            self.required_bindings(state.state_id).iter().copied(),
+            true,
+        );
+
+        // Retain only the required bindings
+        let required_bindings_set =
+            HashSet::from_iter(self.required_bindings(state.state_id).to_vec());
+        for bindings in all_bindings.iter_mut() {
+            bindings.retain_keys(&required_bindings_set);
+        }
+
+        // Find all transitions that are satisfied
+        // First non-fails, then fails (if needed)
         let non_fails = self
             .all_constraint_transitions(state.state_id)
             .map(|t| (self.next_state(t), self.constraint(t).unwrap()))
             .collect_vec();
-        let required_keys = non_fails
-            .iter()
-            .flat_map(|(_, constraint)| constraint.required_bindings())
-            .copied()
-            .unique()
-            .collect_vec();
-
-        let mut all_bindings = self
-            .host_indexing
-            .try_bind_all(state.bindings.clone(), required_keys, host)
-            .unwrap();
-
-        if all_bindings.is_empty() {
-            all_bindings.push(state.bindings);
-        }
 
         all_bindings.into_iter().flat_map(move |bindings| {
             let bindings_clone = bindings.clone();
@@ -109,7 +106,7 @@ impl<S: Default> TraversalState<S> {
 ///  - S: scope assignments mapping variable names to values
 ///  - C: constraint type on transitions
 ///  - D: arbitrary input "host" data to evaluate constraints on.
-pub struct AutomatonTraverser<'a, 'd, K: IndexKey, P, I: IndexingScheme<D>, D> {
+pub struct AutomatonTraverser<'a, 'd, K: IndexKey, P, I: IndexingScheme, D> {
     matches_queue: VecDeque<(PatternID, I::Map)>,
     state_queue: VecDeque<TraversalState<I::Map>>,
     automaton: &'a ConstraintAutomaton<K, P, I>,
@@ -119,7 +116,7 @@ pub struct AutomatonTraverser<'a, 'd, K: IndexKey, P, I: IndexingScheme<D>, D> {
     previous_bindings: HashMap<StateID, HashSet<u64>>,
 }
 
-impl<'a, 'd, K: IndexKey, P, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, K, P, I, D> {
+impl<'a, 'd, K: IndexKey, P, I: IndexingScheme, D> AutomatonTraverser<'a, 'd, K, P, I, D> {
     fn new(automaton: &'a ConstraintAutomaton<K, P, I>, host: &'d D) -> Self {
         let matches_queue = VecDeque::new();
         let state_queue = VecDeque::from_iter([TraversalState::new(automaton.root())]);
@@ -134,15 +131,22 @@ impl<'a, 'd, K: IndexKey, P, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd,
     }
 }
 
-impl<'a, 'd, P, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, Key<I, D>, P, I, D> {
+impl<'a, 'd, P, I: IndexingScheme, D> AutomatonTraverser<'a, 'd, Key<I>, P, I, D> {
     /// Mark a state as visited if it wasn't visited already.
     ///
     /// Return whether the visit was successful, i.e. the state had not been
     /// visited before.
+    ///
+    /// Keep track of visited stated by hashing the bindings on the set of
+    /// variables that are relevant, i.e.
+    ///  - the state scope (relevant for future constraints)
+    ///  - the bindings required by matches at the current state
     fn visit(&mut self, state: &TraversalState<I::Map>) -> bool {
         let state_id = state.state_id;
-        let scope = &self.automaton.graph[state_id.0].scope;
-        let hash = bindings_hash(&state.bindings, scope);
+        let scope = &self.automaton.graph[state_id.0].required_bindings;
+        let req_bindings_matches = self.automaton.matches(state_id).values().flatten().unique();
+        let all_useful_bindings = scope.iter().chain(req_bindings_matches).copied();
+        let hash = bindings_hash(&state.bindings, all_useful_bindings);
         self.previous_bindings
             .entry(state_id)
             .or_default()
@@ -150,22 +154,22 @@ impl<'a, 'd, P, I: IndexingScheme<D>, D> AutomatonTraverser<'a, 'd, Key<I, D>, P
     }
 }
 
-fn bindings_hash<S: IndexMap>(bindings: &S, scope: &HashSet<S::Key>) -> u64 {
+fn bindings_hash<S: IndexMap>(bindings: &S, scope: impl IntoIterator<Item = S::Key>) -> u64 {
     let mut hasher = FxHasher::default();
     for key in scope {
-        let value = bindings.get(key);
+        let value = bindings.get(&key);
         value.as_ref().map(|v| v.borrow()).hash(&mut hasher);
     }
     hasher.finish()
 }
 
-impl<'a, 'd, P, D, I> Iterator for AutomatonTraverser<'a, 'd, Key<I, D>, P, I, D>
+impl<'a, 'd, P, D> Iterator
+    for AutomatonTraverser<'a, 'd, Key<D::IndexingScheme>, P, D::IndexingScheme, D>
 where
     P: Predicate<D>,
-    I: IndexingScheme<D>,
-    I::Map: IndexMap<Value = P::Value>,
+    D: IndexedData,
 {
-    type Item = (PatternID, I::Map);
+    type Item = (PatternID, DataKVMap<D>);
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.matches_queue.is_empty() {
@@ -175,12 +179,28 @@ where
             if !self.visit(&state) {
                 continue;
             }
-            self.matches_queue.extend(
-                self.automaton
-                    .matches(state.state_id)
-                    .iter()
-                    .map(|&id| (id, state.bindings.clone())),
-            );
+            self.matches_queue
+                .extend(
+                    self.automaton
+                        .matches(state.state_id)
+                        .iter()
+                        .flat_map(|(&id, scope)| {
+                            let new_keys = scope
+                                .iter()
+                                .copied()
+                                .filter(|k| state.bindings.get(k).is_none())
+                                .collect_vec();
+                            let bindings = if !new_keys.is_empty() {
+                                self.host.bind_all(state.bindings.clone(), new_keys, false)
+                            } else {
+                                vec![state.bindings.clone()]
+                            };
+                            bindings.into_iter().map(move |mut bindings| {
+                                bindings.retain_keys(&scope);
+                                (id, bindings)
+                            })
+                        }),
+                );
             let legal_next_states = self.automaton.next_legal_states(state, self.host);
             self.state_queue.extend(legal_next_states);
         }
@@ -217,7 +237,7 @@ impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
 mod tests {
     use crate::{
         automaton::tests::TestAutomaton, constraint::tests::TestConstraint,
-        indexing::tests::TestIndexingScheme, HashMap, HashSet,
+        indexing::tests::TestData, HashMap, HashSet,
     };
 
     use super::*;
@@ -245,7 +265,7 @@ mod tests {
                         state_id: automaton.root(),
                         bindings: ass.clone(),
                     },
-                    &(),
+                    &TestData,
                 )
                 .map(|TraversalState { state_id, .. }| state_id),
         );
@@ -261,7 +281,7 @@ mod tests {
                         state_id: automaton.root(),
                         bindings: ass.clone(),
                     },
-                    &(),
+                    &TestData,
                 )
                 .map(|TraversalState { state_id, .. }| state_id),
         );
@@ -282,7 +302,7 @@ mod tests {
                         state_id: automaton.root(),
                         bindings: ass.clone(),
                     },
-                    &(),
+                    &TestData,
                 )
                 .count(),
             0
@@ -298,7 +318,7 @@ mod tests {
                         state_id: automaton.root(),
                         bindings: ass.clone(),
                     },
-                    &(),
+                    &TestData,
                 )
                 .count(),
             1
@@ -313,7 +333,7 @@ mod tests {
                         state_id: automaton.root(),
                         bindings: ass.clone(),
                     },
-                    &(),
+                    &TestData,
                 )
                 .count(),
             1
@@ -323,19 +343,29 @@ mod tests {
     #[test]
     fn run_automaton() {
         let mut automaton = TestAutomaton::new();
-        automaton.add_pattern(vec![true_constraint(), false_constraint()], PatternID(0));
+        automaton.add_pattern(
+            vec![true_constraint(), false_constraint()],
+            PatternID(0),
+            None,
+        );
         let match_pattern1 = PatternID(1);
-        automaton.add_pattern(vec![true_constraint(), true_constraint()], match_pattern1);
+        automaton.add_pattern(
+            vec![true_constraint(), true_constraint()],
+            match_pattern1,
+            None,
+        );
         let match_pattern2 = PatternID(2);
         automaton.add_pattern(
             vec![true_constraint(), true_constraint(), true_constraint()],
             match_pattern2,
+            None,
         );
         automaton.add_pattern(
             vec![true_constraint(), true_constraint(), false_constraint()],
             PatternID(3),
+            None,
         );
-        let matches: HashSet<_> = automaton.run(&()).map(|(id, _)| id).collect();
+        let matches: HashSet<_> = automaton.run(&TestData).map(|(id, _)| id).collect();
         assert_eq!(
             matches,
             HashSet::from_iter([match_pattern1, match_pattern2])

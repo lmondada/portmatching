@@ -1,6 +1,6 @@
 use petgraph::{visit::EdgeRef, Direction};
 
-use crate::{indexing::IndexKey, Constraint, PatternID};
+use crate::{indexing::IndexKey, Constraint, HashMap, HashSet, PatternID};
 
 use super::{ConstraintAutomaton, State, StateID, TransitionID};
 
@@ -52,15 +52,6 @@ where
             .map(|t| self.next_state(t))
     }
 
-    /// Get the next state obtained from following a transition
-    pub(super) fn next_state(&self, transition: TransitionID) -> StateID {
-        self.graph
-            .edge_endpoints(transition.0)
-            .expect("invalid transition")
-            .1
-            .into()
-    }
-
     /// Iterate over all transitions of a state, in order.
     pub(super) fn all_transitions(
         &self,
@@ -68,10 +59,6 @@ where
     ) -> impl Iterator<Item = TransitionID> + '_ {
         self.all_constraint_transitions(state)
             .chain(self.all_epsilon_transitions(state))
-    }
-
-    pub(super) fn is_unreachable(&self, state: StateID) -> bool {
-        self.incoming_transitions(state).next().is_none()
     }
 
     pub(super) fn constraints(
@@ -82,16 +69,47 @@ where
             .map(|transition| self.constraint(transition).unwrap())
     }
 
-    /// Get the constraint corresponding to a transition
-    pub(super) fn constraint(&self, transition: TransitionID) -> Option<&Constraint<K, P>> {
-        self.graph[transition.0].constraint.as_ref()
-    }
-
     /// The states reached by a single transition from `state`
     #[allow(dead_code)]
     pub(super) fn children(&self, state: StateID) -> impl Iterator<Item = StateID> + '_ {
         self.all_transitions(state)
             .map(|transition| self.next_state(transition))
+    }
+
+    /// Get a tuple of data that fully specifies the action of a `state`.
+    ///
+    /// Two states with the same tuple ID may be merged into one without
+    /// changing the behavior of the matcher.
+    pub(super) fn state_tuple(&self, state: StateID) -> StateTuple<Constraint<K, P>> {
+        let transitions = self
+            .all_transitions(state)
+            .map(|transition| (self.constraint(transition), self.next_state(transition)))
+            .collect();
+        StateTuple {
+            deterministic: self.is_deterministic(state),
+            matches: self.matches(state).keys().copied().collect(),
+            transitions,
+        }
+    }
+}
+
+impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
+    /// Get the next state obtained from following a transition
+    pub(super) fn next_state(&self, transition: TransitionID) -> StateID {
+        self.graph
+            .edge_endpoints(transition.0)
+            .expect("invalid transition")
+            .1
+            .into()
+    }
+
+    pub(super) fn is_unreachable(&self, state: StateID) -> bool {
+        self.incoming_transitions(state).next().is_none()
+    }
+
+    /// Get the constraint corresponding to a transition
+    pub(super) fn constraint(&self, transition: TransitionID) -> Option<&Constraint<K, P>> {
+        self.graph[transition.0].constraint.as_ref()
     }
 
     pub(super) fn incoming_transitions(
@@ -103,7 +121,7 @@ where
             .map(|e| e.id().into())
     }
 
-    pub(super) fn matches(&self, state: StateID) -> &[PatternID] {
+    pub(super) fn matches(&self, state: StateID) -> &HashMap<PatternID, HashSet<K>> {
         &self.node_weight(state).matches
     }
 
@@ -120,20 +138,8 @@ where
             .into()
     }
 
-    /// Get a tuple of data that fully specifies the action of a `state`.
-    ///
-    /// Two states with the same tuple ID may be merged into one without
-    /// changing the behavior of the matcher.
-    pub(super) fn state_tuple(&self, state: StateID) -> StateTuple<Constraint<K, P>> {
-        let transitions = self
-            .all_transitions(state)
-            .map(|transition| (self.constraint(transition), self.next_state(transition)))
-            .collect();
-        StateTuple {
-            deterministic: self.is_deterministic(state),
-            matches: self.matches(state),
-            transitions,
-        }
+    pub(super) fn required_bindings(&self, state: StateID) -> &[K] {
+        &self.node_weight(state).required_bindings
     }
 }
 
@@ -141,7 +147,7 @@ where
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct StateTuple<'a, C> {
     deterministic: bool,
-    matches: &'a [PatternID],
+    matches: Vec<PatternID>,
     transitions: Vec<(Option<&'a C>, StateID)>,
 }
 

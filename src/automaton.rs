@@ -11,7 +11,7 @@ use petgraph::dot::Dot;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::stable_graph::{StableDiGraph, StableGraph};
 
-use crate::HashSet;
+use crate::{HashMap, HashSet};
 use std::fmt::{self, Debug};
 
 use derive_more::{From, Into};
@@ -129,8 +129,9 @@ struct TransitionID(EdgeIndex);
 #[derive_where(Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 struct State<K: IndexKey> {
-    /// The pattern matches at current state
-    matches: Vec<PatternID>,
+    /// The pattern matches at current state, along with the bindings associated
+    /// with each match.
+    matches: HashMap<PatternID, HashSet<K>>,
     /// Whether the state is deterministic
     deterministic: bool,
     /// The order of the outgoing contraint transitions. Must map one-to-one to
@@ -139,8 +140,15 @@ struct State<K: IndexKey> {
     /// The order of the outgoing epsilon transitions. Must map one-to-one to
     /// the outgoing epsilon edges, i.e. the edges with None weights.
     epsilon_order: Vec<TransitionID>,
-    /// The scope of the state
-    scope: HashSet<K>,
+    /// The required bindings to evaluate the constraints outgoing from the state.
+    ///
+    /// Note that this could be a subset of the bindings required by a match
+    /// at the current state, so matches should be evaluated and returned
+    /// before discarding any bindings that may no longer be required.
+    ///
+    /// The bindings are given in a toposort order, i.e. it is guaranteed
+    /// that bindings [0..i] are sufficient to determine binding i.
+    required_bindings: Vec<K>,
 }
 
 impl<K: IndexKey> Debug for State<K> {
@@ -153,6 +161,8 @@ impl<K: IndexKey> Debug for State<K> {
         if !self.matches.is_empty() {
             write!(f, " {:?}", self.matches)?;
         }
+        writeln!(f)?;
+        write!(f, "scope: {:?}", self.required_bindings)?;
         Ok(())
     }
 }

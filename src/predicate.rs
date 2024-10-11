@@ -18,7 +18,9 @@
 //! `FilterPredicate` by calling `assign_check` and then checking that the binding
 //! for <var2> is in the returned set.
 
-use std::{borrow::Borrow, fmt::Debug};
+use std::borrow::Borrow;
+
+use crate::indexing::{DataValue, IndexedData};
 
 /// A predicate with a fixed arity.
 pub trait ArityPredicate: Eq + Clone {
@@ -33,14 +35,11 @@ pub trait ArityPredicate: Eq + Clone {
 ///
 /// ## Parameter types
 /// - `Data`: The subject data type on which predicates are evaluated.
-pub trait Predicate<Data>: ArityPredicate {
-    /// The indexed value type
-    type Value: Clone + PartialEq + Debug;
-
+pub trait Predicate<Data: IndexedData>: ArityPredicate {
     /// Check if the predicate is satisfied by the given data and values.
     ///
     /// `values` must be of length [Predicate::arity].
-    fn check(&self, data: &Data, args: &[impl Borrow<Self::Value>]) -> bool;
+    fn check(&self, data: &Data, args: &[impl Borrow<DataValue<Data>>]) -> bool;
 }
 
 #[cfg(test)]
@@ -51,6 +50,8 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use rstest::rstest;
 
+    use crate::indexing::tests::TestData;
+    use crate::indexing::DataValue;
     use crate::predicate::Predicate;
 
     use super::ArityPredicate;
@@ -66,10 +67,8 @@ pub(crate) mod tests {
         }
     }
 
-    impl Predicate<()> for TestPredicate {
-        type Value = usize;
-
-        fn check(&self, _: &(), args: &[impl Borrow<Self::Value>]) -> bool {
+    impl Predicate<TestData> for TestPredicate {
+        fn check(&self, _: &TestData, args: &[impl Borrow<DataValue<TestData>>]) -> bool {
             if args.len() != self.arity {
                 panic!("Invalid constraint: arity mismatch");
             }
@@ -97,7 +96,7 @@ pub(crate) mod tests {
     fn test_arity_match(#[case] arity: usize) {
         let p = TestPredicate { arity };
         let args = vec![&3; p.arity()];
-        assert!(p.check(&(), &args));
+        assert!(p.check(&TestData, &args));
     }
 
     #[test]
@@ -105,6 +104,6 @@ pub(crate) mod tests {
     fn test_arity_mismatch() {
         let p = TestPredicate { arity: 2 };
         let args = vec![&3];
-        p.check(&(), &args);
+        p.check(&TestData, &args);
     }
 }

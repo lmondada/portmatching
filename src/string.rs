@@ -27,7 +27,7 @@ use derive_more::{From, Into};
 use itertools::Itertools;
 
 use crate::{
-    indexing::{BindVariableError, BindingResult, MissingIndexKeys, ValidBindings},
+    indexing::{BindVariableError, IndexedData},
     IndexMap, IndexingScheme, ManyMatcher,
 };
 pub use constraint::StringConstraint;
@@ -117,34 +117,50 @@ impl IndexMap for StringPositionMap {
     }
 }
 
-impl IndexingScheme<String> for StringIndexingScheme {
+impl IndexingScheme for StringIndexingScheme {
     type Map = StringPositionMap;
 
-    fn valid_bindings(
+    fn required_bindings(
         &self,
-        key: &StringPatternPosition,
-        known_bindings: &Self::Map,
-        data: &String,
-    ) -> BindingResult<Self, String> {
+        key: &crate::indexing::Key<Self>,
+    ) -> Vec<crate::indexing::Key<Self>> {
         let &StringPatternPosition(offset) = key;
 
         if offset == 0 {
-            // No key has been bound yet
-            assert!(matches!(known_bindings, Self::Map::Unbound));
+            vec![]
+        } else {
+            // Must bind the start position first; all other positions are
+            // obtained by offsetting from start
+            vec![StringPatternPosition::start()]
+        }
+    }
+}
+
+impl IndexedData for String {
+    type IndexingScheme = StringIndexingScheme;
+
+    fn list_bind_options(
+        &self,
+        key: &crate::indexing::Key<Self::IndexingScheme>,
+        known_bindings: &<Self::IndexingScheme as IndexingScheme>::Map,
+    ) -> Vec<crate::indexing::Value<Self::IndexingScheme>> {
+        let &StringPatternPosition(offset) = key;
+
+        if offset == 0 {
             // For binding the start position, any string position is valid
-            Ok(ValidBindings((0..data.len()).map_into().collect()))
+            (0..self.len()).map_into().collect()
         } else {
             // Must bind the start position first; all other positions are
             // obtained by offsetting from start
             let Some(StringSubjectPosition(start_pos)) = known_bindings.start_pos() else {
-                return Err(MissingIndexKeys(vec![StringPatternPosition::start()]));
+                return vec![];
             };
 
             let str_pos = start_pos + offset;
-            if str_pos < data.len() {
-                Ok(ValidBindings(vec![(start_pos + offset).into()]))
+            if str_pos < self.len() {
+                vec![(start_pos + offset).into()]
             } else {
-                Ok(ValidBindings(vec![]))
+                vec![]
             }
         }
     }
@@ -268,6 +284,7 @@ pub(super) mod tests {
         slice: Range<usize>,
     ) -> impl Iterator<Item = Vec<PatternMatch<StringPositionMap>>> + '_ {
         MATCHER_FACTORIES[slice].iter().map(move |matcher_factory| {
+            println!("{}", matcher_factory(patterns.clone()).dot_string());
             matcher_factory(patterns.clone())
                 .find_matches(&subject.to_string())
                 .collect_vec()
@@ -329,9 +346,6 @@ pub(super) mod tests {
         let (mut non_det, mut default) = apply_all_matchers(patterns, subject, 0..2)
             .collect_tuple()
             .unwrap();
-
-        clean_match_data(&mut non_det);
-        clean_match_data(&mut default);
 
         // Compare results up to reordering
         non_det.sort();
