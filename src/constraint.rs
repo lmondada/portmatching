@@ -4,7 +4,10 @@
 //!
 //! The predicate is either an AssignPredicate or a FilterPredicate.
 
-use crate::predicate::ArityPredicate;
+use crate::{
+    indexing::{DataKVMap, IndexedData},
+    predicate::ArityPredicate,
+};
 
 use super::{
     indexing::{BindVariableError, IndexMap},
@@ -165,13 +168,14 @@ impl<K, P> Constraint<K, P> {
     ///
     /// `Result<bool, InvalidConstraint>` - Ok(true) if the constraint is satisfied,
     /// Ok(false) if it's not, or an Err if there's an invalid constraint.
-    pub fn is_satisfied<V, D>(
+    pub fn is_satisfied<D: IndexedData>(
         &self,
         data: &D,
-        known_bindings: &impl IndexMap<Key = K, Value = V>,
+        known_bindings: &DataKVMap<D>,
     ) -> Result<bool, InvalidConstraint>
     where
-        P: Predicate<D, Value = V>,
+        P: Predicate<D>,
+        DataKVMap<D>: IndexMap<Key = K>,
         K: Debug,
     {
         let args = self
@@ -204,7 +208,7 @@ impl<K: Debug, P: Debug> Debug for Constraint<K, P> {
 pub(crate) mod tests {
     use std::cmp;
 
-    use crate::{predicate::tests::TestPredicate, HashMap};
+    use crate::{indexing::tests::TestData, predicate::tests::TestPredicate, HashMap};
 
     use super::*;
     pub(crate) type TestConstraint = Constraint<usize, TestPredicate>;
@@ -256,7 +260,7 @@ pub(crate) mod tests {
     fn test_is_satisfied() {
         let c = TestConstraint::new(vec![0, 1]);
         let assmap = HashMap::from_iter([(0, 1), (1, 1)]);
-        let result = c.is_satisfied(&(), &assmap).unwrap();
+        let result = c.is_satisfied(&TestData, &assmap).unwrap();
         assert!(result);
     }
 
@@ -264,7 +268,7 @@ pub(crate) mod tests {
     fn test_not_is_satisfied() {
         let c = TestConstraint::new(vec![0, 1]);
         let assmap = HashMap::from_iter([(0, 1), (1, 2)]);
-        let result = c.is_satisfied(&(), &assmap).unwrap();
+        let result = c.is_satisfied(&TestData, &assmap).unwrap();
         assert!(!result);
     }
 
@@ -272,7 +276,7 @@ pub(crate) mod tests {
     fn test_not_bound() {
         let c = TestConstraint::new(vec![0, 2]);
         let assmap = HashMap::from_iter([(0, 1), (1, 2)]);
-        let err_msg = c.is_satisfied(&(), &assmap).unwrap_err();
+        let err_msg = c.is_satisfied(&TestData, &assmap).unwrap_err();
         assert_eq!(err_msg, InvalidConstraint::UnboundVariable("2".to_string()));
     }
 }

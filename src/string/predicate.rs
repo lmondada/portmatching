@@ -28,9 +28,7 @@ impl ArityPredicate for CharacterPredicate {
 }
 
 impl Predicate<String> for CharacterPredicate {
-    type Value = StringSubjectPosition;
-
-    fn check(&self, data: &String, args: &[impl Borrow<Self::Value>]) -> bool {
+    fn check(&self, data: &String, args: &[impl Borrow<StringSubjectPosition>]) -> bool {
         match self {
             CharacterPredicate::BindingEq => {
                 let (StringSubjectPosition(pos1), StringSubjectPosition(pos2)) =

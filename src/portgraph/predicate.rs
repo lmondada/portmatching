@@ -78,9 +78,7 @@ impl<W: Clone + Eq> ArityPredicate for PGPredicate<W> {
 }
 
 impl Predicate<PortGraph> for PGPredicate {
-    type Value = NodeIndex;
-
-    fn check(&self, data: &PortGraph, args: &[impl Borrow<Self::Value>]) -> bool {
+    fn check(&self, data: &PortGraph, args: &[impl Borrow<NodeIndex>]) -> bool {
         self.is_satisfied(data, &UnmanagedDenseMap::default(), args)
     }
 }
@@ -90,9 +88,7 @@ where
     M: SecondaryMap<NodeIndex, W>,
     W: Clone + Eq + Debug,
 {
-    type Value = NodeIndex;
-
-    fn check(&self, data: &(&PortGraph, &M), args: &[impl Borrow<Self::Value>]) -> bool {
+    fn check(&self, data: &(&PortGraph, &M), args: &[impl Borrow<NodeIndex>]) -> bool {
         let &(graph, weights) = data;
         self.is_satisfied(graph, weights, args)
     }

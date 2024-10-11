@@ -4,7 +4,6 @@ use itertools::Itertools;
 use petgraph::{
     data::DataMap,
     graph::NodeIndex,
-    prelude::StableGraph,
     visit::{
         Data, EdgeRef, GraphBase, IntoEdgesDirected, IntoNeighborsDirected, IntoNodeIdentifiers,
         NodeFiltered, Reversed, Visitable,
@@ -18,7 +17,7 @@ use crate::{
     indexing::IndexKey,
     mutex_tree::{MutuallyExclusiveTree, ToConstraintsTree},
     utils::OnlineToposort,
-    HashMap, HashSet, PatternID,
+    HashMap, HashSet, IndexMap, IndexingScheme, PatternID,
 };
 
 mod modify;
@@ -26,7 +25,7 @@ mod node_depth;
 
 use self::node_depth::NodeDepthCache;
 
-use super::{State, Transition, TransitionID};
+use super::{State, Transition, TransitionGraph, TransitionID};
 
 /// A predicate on a list of constraints
 pub type ConstraintListPredicate<'c, K, P> = Box<dyn FnMut(&[&Constraint<K, P>]) -> bool + 'c>;
@@ -91,24 +90,29 @@ where
     /// constraints.
     ///
     /// Use `I::default()` as the indexing scheme.
-    pub fn from_constraints(patterns: impl IntoIterator<Item = Vec<Constraint<K, P>>>) -> Self
+    pub fn from_constraints<M>(patterns: impl IntoIterator<Item = Vec<Constraint<K, P>>>) -> Self
     where
-        I: Default,
+        I: Default + IndexingScheme<Map = M>,
+        M: IndexMap<Key = K>,
     {
         Self::from_constraints_with_index_scheme(patterns, I::default())
     }
 
     /// Construct an automaton builder from a list of patterns with a custom
     /// indexing scheme.
-    pub fn from_constraints_with_index_scheme(
+    pub fn from_constraints_with_index_scheme<M>(
         patterns: impl IntoIterator<Item = Vec<Constraint<K, P>>>,
         host_indexing: I,
-    ) -> Self {
+    ) -> Self
+    where
+        I: IndexingScheme<Map = M>,
+        M: IndexMap<Key = K>,
+    {
         let mut pattern_id = 0;
         patterns.into_iter().fold(
             Self::with_indexing_scheme(host_indexing),
             |mut builder, pattern| {
-                builder.add_pattern(pattern, PatternID(pattern_id));
+                builder.add_pattern(pattern, PatternID(pattern_id), None);
                 pattern_id += 1;
                 builder
             },
@@ -116,9 +120,17 @@ where
     }
 
     /// Add a pattern to the automaton builder.
-    pub fn add_pattern(&mut self, pattern: Vec<Constraint<K, P>>, id: impl Into<PatternID>) {
+    pub fn add_pattern<M>(
+        &mut self,
+        pattern: Vec<Constraint<K, P>>,
+        id: impl Into<PatternID>,
+        required_bindings: impl IntoIterator<Item = K>,
+    ) where
+        I: IndexingScheme<Map = M>,
+        M: IndexMap<Key = K>,
+    {
         let id = id.into();
-        self.matcher.add_pattern(pattern, id);
+        self.matcher.add_pattern(pattern, id, required_bindings);
         self.patterns_ids.push(id);
     }
 
@@ -177,7 +189,11 @@ where
     /// The `make_det` predicate specifies the heuristic used to determine whether
     /// to turn a state into a deterministic one. To reduce the automaton size,
     /// states are merged whenever possible.
-    pub fn finish(mut self) -> (ConstraintAutomaton<K, P, I>, Vec<PatternID>) {
+    pub fn finish<M>(mut self) -> (ConstraintAutomaton<K, P, I>, Vec<PatternID>)
+    where
+        I: IndexingScheme<Map = M>,
+        M: IndexMap<Key = K>,
+    {
         // Traverse the prefix tree from root to leaves and make the invariants
         // hold. The changes only affect nodes in the future of the root, i.e.
         // nodes on which the invariant does not hold yet.
@@ -217,27 +233,76 @@ where
     /// Populate the scope of each automaton state.
     ///
     /// The scope is the set of bindings that are "relevant" to the current
-    /// traversal. They are the set of bindings that either
-    ///  - are in all paths from root to `state`, or
-    ///  - are in at least one path from `state` to the end.
-    fn populate_scopes(&mut self) {
-        // The child scope is obtained from the parents' by taking the intersection
-        let mut forward_scopes = compute_scopes(&self.matcher.graph, |mut a, b| {
+    /// traversal. They are the set of bindings that
+    ///  - are in all paths from root to `state`, and
+    ///  - appear in at least one pattern match in the future of `state`, or
+    ///  - are required to evaluate outgoing constraints at `state`.
+    fn populate_scopes<M>(&mut self)
+    where
+        I: IndexingScheme<Map = M>,
+        M: IndexMap<Key = K>,
+    {
+        // The child scope is obtained by:
+        // - taking the intersection of the parents' scopes
+        // - adding the constraints of the current edge
+        let intersect_vec = |mut a: Vec<_>, b: Vec<_>| {
             a.retain(|x| b.contains(x));
             a
-        });
-        // The parent scope is obtained from the children's by taking the union
-        let mut backward_scopes = compute_scopes(Reversed(&self.matcher.graph), |mut a, b| {
+        };
+        let mut forward_scopes = compute_scopes(
+            &self.matcher.graph,
+            intersect_vec,
+            |edge, known_bindings| {
+                let new_bindings = edge
+                    .weight()
+                    .constraint
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|c| c.required_bindings())
+                    .copied();
+                self.matcher
+                    .host_indexing()
+                    .all_missing_bindings(new_bindings, known_bindings.iter().copied())
+            },
+        );
+
+        // The parent scope is obtained by:
+        // - taking the union of the children's scopes
+        // - adding the required bindings of the matches at the child
+        let union_set = |mut a: HashSet<_>, b| {
             a.extend(b);
             a
-        });
+        };
+        let mut backward_scopes =
+            compute_scopes(Reversed(&self.matcher.graph), union_set, |edge, _| {
+                let s = StateID(edge.source());
+                let pattern_matches = self.matcher.matches(s);
+                pattern_matches
+                    .values()
+                    .flat_map(|s| s.iter())
+                    .copied()
+                    .collect()
+            });
 
-        // Merge the two scopes
+        // Intersect the two scopes, and add the bindings required to evaluate
+        // the outgoing constraints at `state`
         let all_nodes = self.matcher.graph.node_indices().collect_vec();
         for node in all_nodes {
-            let scope = &mut self.matcher.graph[node].scope;
-            *scope = forward_scopes.remove(&node).unwrap();
-            scope.extend(backward_scopes.remove(&node).unwrap());
+            let mut forward_scope = forward_scopes.remove(&node).unwrap();
+            let backward_scope = backward_scopes.remove(&node).unwrap();
+            forward_scope.retain(|k| backward_scope.contains(k));
+            let mut scope = forward_scope;
+
+            scope.extend(
+                self.matcher.host_indexing().all_missing_bindings(
+                    self.matcher
+                        .constraints(StateID(node))
+                        .flat_map(|c| c.required_bindings())
+                        .copied(),
+                    scope.iter().copied(),
+                ),
+            );
+            self.matcher.graph[node].required_bindings = scope;
         }
     }
 
@@ -324,9 +389,9 @@ where
             // Copy all transitions of `old_children` to `new_child`
             for &old_child in &old_children {
                 self.matcher.clone_outgoing(new_child, old_child);
-                let pattern_matches = self.matcher.matches(old_child).to_vec();
-                for pattern in pattern_matches {
-                    self.matcher.add_match(new_child, pattern);
+                let pattern_matches = self.matcher.matches(old_child).clone();
+                for (pattern, bindings) in pattern_matches {
+                    self.matcher.add_match(new_child, pattern, bindings);
                 }
                 if self.matcher.is_unreachable(old_child) {
                     self.matcher.remove_state(old_child);
@@ -366,10 +431,7 @@ where
 
     fn recently_added_subgraph(
         &self,
-    ) -> NodeFiltered<
-        Reversed<&StableGraph<State<K>, Transition<Constraint<K, P>>>>,
-        &HashSet<NodeIndex>,
-    > {
+    ) -> NodeFiltered<Reversed<&TransitionGraph<K, P>>, &HashSet<NodeIndex>> {
         let graph = &self.matcher.graph;
         NodeFiltered(Reversed(graph), &self.recently_added)
     }
@@ -462,47 +524,40 @@ where
         self.add_transition(state, Some(constraint))
     }
 }
-// StableGraph<State<K>, Transition<Constraint<K, P>>>
-fn compute_scopes<K, P, G>(
+
+fn compute_scopes<K, P, G, Container>(
     graph: G,
-    merge_scopes: impl Fn(HashSet<K>, HashSet<K>) -> HashSet<K>,
-) -> HashMap<NodeIndex, HashSet<K>>
+    merge_scopes: impl Fn(Container, Container) -> Container,
+    get_scope: impl Fn(G::EdgeRef, &Container) -> Container,
+) -> HashMap<NodeIndex, Container>
 where
     K: IndexKey,
     G: Data<EdgeWeight = Transition<Constraint<K, P>>, NodeWeight = State<K>>,
     G: IntoNeighborsDirected + IntoNodeIdentifiers + Visitable + IntoEdgesDirected,
     G: GraphBase<NodeId = NodeIndex>,
     G: DataMap,
+    Container: Extend<K> + Default + Clone + IntoIterator<Item = K>,
 {
-    let topo_order = petgraph::algo::toposort(&graph, None)
-        .ok()
-        .expect("Graph should be acyclic");
+    let topo_order = petgraph::algo::toposort(&graph, None).expect("Graph should be acyclic");
 
-    let mut ret = HashMap::default();
+    let mut ret: HashMap<NodeIndex, Container> = HashMap::default();
 
     // Iterate over the nodes in topological order
     for node_index in topo_order {
-        let scope: &mut HashSet<K> = ret.entry(node_index).or_default();
-
         // Get all parents in the graph
         let parent_edges = graph.edges_directed(node_index, Direction::Incoming);
 
-        // Iterate over all parent edges
-        *scope = parent_edges
+        // Iterate over all parent edges and aggregate the scopes
+        let scope = parent_edges
             .map(|e| {
-                let parent_id = StateID(e.source());
-                let mut parent_scope = graph.node_weight(parent_id.0).unwrap().scope.clone();
-                let new_args = e
-                    .weight()
-                    .constraint
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|c| c.required_bindings());
-                parent_scope.extend(new_args.copied());
+                let mut parent_scope = ret[&e.source()].clone();
+                parent_scope.extend(get_scope(e, &parent_scope));
                 parent_scope
             })
             .reduce(&merge_scopes)
             .unwrap_or_default();
+
+        ret.insert(node_index, scope);
     }
     ret
 }
@@ -540,10 +595,12 @@ where
     }
 }
 
-impl<'c, K: IndexKey, P, I: Default> FromIterator<Vec<Constraint<K, P>>>
+impl<'c, K: IndexKey, P, I: Default, M> FromIterator<Vec<Constraint<K, P>>>
     for AutomatonBuilder<'c, K, P, I>
 where
     Constraint<K, P>: Clone + Eq,
+    I: IndexingScheme<Map = M>,
+    M: IndexMap<Key = K>,
 {
     fn from_iter<T: IntoIterator<Item = Vec<Constraint<K, P>>>>(iter: T) -> Self {
         Self::from_constraints(iter)
@@ -630,9 +687,9 @@ mod tests {
     fn test_build() {
         let mut builder = TestBuilder::new().set_det_heuristic(|_| false);
         let [constraint_root, _, constraint_b, constraint_c, constraint_d] = constraints();
-        builder.add_pattern(vec![constraint_root.clone(), constraint_b.clone()], 0);
-        builder.add_pattern(vec![constraint_root.clone(), constraint_c.clone()], 1);
-        builder.add_pattern(vec![constraint_root, constraint_d.clone()], 2);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_b.clone()], 0, None);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_c.clone()], 1, None);
+        builder.add_pattern(vec![constraint_root, constraint_d.clone()], 2, None);
         let (matcher, pattern_ids) = builder.finish();
         assert_eq!(matcher.graph.node_count(), 6);
         assert_eq!(pattern_ids, vec![PatternID(0), PatternID(1), PatternID(2)]);

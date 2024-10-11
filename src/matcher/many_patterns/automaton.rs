@@ -3,6 +3,7 @@ use std::hash::Hash;
 
 use itertools::Itertools;
 
+use crate::indexing::{DataKVMap, DataKey, IndexedData};
 use crate::{
     automaton::{AutomatonBuilder, ConstraintAutomaton},
     constraint::{Constraint, DetHeuristic},
@@ -10,8 +11,9 @@ use crate::{
     matcher::PatternMatch,
     mutex_tree::ToConstraintsTree,
     pattern::Pattern,
-    HashMap, IndexMap, IndexingScheme, PatternID, PortMatcher, Predicate,
+    HashMap, PatternID, PortMatcher, Predicate,
 };
+use crate::{IndexMap, IndexingScheme};
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
@@ -21,15 +23,13 @@ pub struct ManyMatcher<PT, K: IndexKey, P, I> {
     patterns: HashMap<PatternID, PT>,
 }
 
-impl<PT, K, P, D, I> PortMatcher<D> for ManyMatcher<PT, K, P, I>
+impl<PT, P, D> PortMatcher<D> for ManyMatcher<PT, DataKey<D>, P, D::IndexingScheme>
 where
     P: Predicate<D>,
-    PT: Pattern<Constraint = Constraint<K, P>>,
-    K: IndexKey,
-    I: IndexingScheme<D>,
-    I::Map: IndexMap<Key = K, Value = P::Value>,
+    PT: Pattern<Constraint = Constraint<DataKey<D>, P>>,
+    D: IndexedData,
 {
-    type Match = I::Map;
+    type Match = DataKVMap<D>;
 
     fn find_matches<'a>(
         &'a self,
@@ -54,29 +54,35 @@ where
     Constraint<K, P>: Eq + Clone + Hash,
     P: ToConstraintsTree<K>,
     PT: Pattern<Constraint = Constraint<K, P>>,
-    I: Default,
+    I: IndexingScheme + Default,
 {
     /// Create a new matcher from patterns.
     ///
     /// The patterns are converted to constraints. Uses the deterministic
     /// heuristic provided by the constraint type.
-    pub fn try_from_patterns(
+    pub fn try_from_patterns<M>(
         patterns: Vec<PT>,
         fallback: PatternFallback,
     ) -> Result<Self, PT::Error>
     where
         P: DetHeuristic<K>,
+        I: IndexingScheme<Map = M>,
+        M: IndexMap<Key = K>,
     {
         Self::try_from_patterns_with_det_heuristic(patterns, P::make_det, fallback)
     }
 
     /// Create a new matcher from a vector of patterns, using a custom deterministic
     /// heuristic.
-    pub fn try_from_patterns_with_det_heuristic(
+    pub fn try_from_patterns_with_det_heuristic<M>(
         patterns: Vec<PT>,
         make_det: impl for<'c> FnMut(&[&'c Constraint<K, P>]) -> bool,
         fallback: PatternFallback,
-    ) -> Result<Self, PT::Error> {
+    ) -> Result<Self, PT::Error>
+    where
+        I: IndexingScheme<Map = M>,
+        M: IndexMap<Key = K>,
+    {
         let mut builder = AutomatonBuilder::new().set_det_heuristic(make_det);
         for (id, pattern) in patterns.iter().enumerate() {
             let constraints = match fallback {
@@ -88,14 +94,14 @@ where
                 }
                 PatternFallback::Fail => pattern.try_to_constraint_vec()?,
             };
-            builder.add_pattern(constraints, id);
+            builder.add_pattern(constraints, id, None);
         }
         let (automaton, pattern_ids) = builder.finish();
         let patterns = patterns
             .into_iter()
             .enumerate()
             .map(|(i, p)| (PatternID(i), p))
-            .filter(|(i, _)| pattern_ids.contains(&i))
+            .filter(|(i, _)| pattern_ids.contains(i))
             .collect();
         Ok(Self {
             automaton,

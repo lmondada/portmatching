@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use crate::automaton::{ConstraintAutomaton, State, StateID, Transition, TransitionID};
 use crate::indexing::IndexKey;
-use crate::{Constraint, PatternID};
+use crate::{Constraint, HashSet, IndexMap, IndexingScheme, PatternID};
 
 /// Methods for modifying the automaton
 impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
@@ -84,23 +84,42 @@ where
         self.add_transition(parent, None)
     }
 
-    pub(super) fn add_match(&mut self, state: StateID, pattern: PatternID) {
-        if !self.node_weight(state).matches.contains(&pattern) {
-            self.node_weight_mut(state).matches.push(pattern);
+    pub(super) fn add_match(&mut self, state: StateID, pattern: PatternID, scope: HashSet<K>) {
+        if !self.node_weight(state).matches.contains_key(&pattern) {
+            self.node_weight_mut(state).matches.insert(pattern, scope);
         }
     }
 
-    pub(crate) fn add_pattern(
+    /// Add a pattern to the automaton.
+    ///
+    /// Add a pattern to the automaton with the given `id`. The pattern is
+    /// represented by a list of `constraints`.
+    ///
+    /// The `required_bindings` define the domain of the pattern, i.e., the set
+    /// of index keys that will be mapped to values in the data by a pattern
+    /// match. The required bindings will always include all keys that appear
+    /// in the pattern's constraints, but the argument can be used to specify
+    /// additional required bindings. Pass `None` otherwise.
+    pub(crate) fn add_pattern<M>(
         &mut self,
         constraints: impl IntoIterator<Item = Constraint<K, P>>,
         id: PatternID,
-    ) {
-        let match_state = constraints
-            .into_iter()
-            .fold(self.root(), |state, constraint| {
-                self.add_constraint(state, constraint)
-            });
-        self.add_match(match_state, id);
+        required_bindings: impl IntoIterator<Item = K>,
+    ) where
+        // A complicated way of saying Key<I> == K
+        I: IndexingScheme<Map = M>,
+        M: IndexMap<Key = K>,
+    {
+        let mut state = self.root();
+        let mut required_bindings: HashSet<_> = required_bindings.into_iter().collect();
+        for constraint in constraints {
+            required_bindings.extend(self.host_indexing.all_missing_bindings(
+                constraint.required_bindings().iter().copied(),
+                required_bindings.iter().copied(),
+            ));
+            state = self.add_constraint(state, constraint);
+        }
+        self.add_match(state, id, required_bindings);
     }
 
     /// Split the `transition`'s target and return the new state.
@@ -237,7 +256,6 @@ pub mod tests {
     use crate::{
         automaton::{tests::TestAutomaton, AutomatonBuilder},
         constraint::tests::TestConstraint,
-        indexing::tests::TestIndexingScheme,
         HashSet,
     };
 
@@ -250,10 +268,10 @@ pub mod tests {
         let mut builder = AutomatonBuilder::new().set_det_heuristic(|_| false);
         let [constraint_root, constraint_a, constraint_b, constraint_c, constraint_d] =
             constraints();
-        builder.add_pattern(vec![constraint_root.clone(), constraint_a], 0);
-        builder.add_pattern(vec![constraint_root.clone(), constraint_b], 1);
-        builder.add_pattern(vec![constraint_root.clone(), constraint_c], 2);
-        builder.add_pattern(vec![constraint_root, constraint_d], 3);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_a], 0, None);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_b], 1, None);
+        builder.add_pattern(vec![constraint_root.clone(), constraint_c], 2, None);
+        builder.add_pattern(vec![constraint_root, constraint_d], 3, None);
         builder.finish().0
     }
 
