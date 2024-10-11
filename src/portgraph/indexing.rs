@@ -8,7 +8,7 @@ use std::{cmp, fmt::Debug, iter};
 use portgraph::{LinkView, NodeIndex, PortGraph, PortIndex, PortOffset, PortView};
 
 use crate::{
-    indexing::{BindingResult, MissingIndexKeys, ValidBindings},
+    indexing::{IndexedData, Key, Value},
     HashMap, IndexingScheme,
 };
 
@@ -48,36 +48,46 @@ pub enum PGIndexKey {
     },
 }
 
-impl IndexingScheme<PortGraph> for PGIndexingScheme {
+impl IndexingScheme for PGIndexingScheme {
     type Map = HashMap<PGIndexKey, NodeIndex>;
 
-    fn valid_bindings(
-        &self,
-        key: &PGIndexKey,
-        known_bindings: &Self::Map,
-        data: &PortGraph,
-    ) -> BindingResult<Self, PortGraph> {
+    fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>> {
         match *key {
             PGIndexKey::PathRoot { index } => {
                 if index == 0 {
-                    return Ok(ValidBindings(data.nodes_iter().collect()));
-                }
-                let first_unassigned_index = (0..=index).find(|&index| {
-                    known_bindings
-                        .get(&PGIndexKey::PathRoot { index })
-                        .is_none()
-                });
-                if first_unassigned_index.is_none() {
-                    // `key` has already been assigned
-                    Ok(ValidBindings(vec![*known_bindings.get(key).unwrap()]))
-                } else if first_unassigned_index.unwrap() < index {
-                    // Assign a lower root first
-                    Err(MissingIndexKeys(vec![PGIndexKey::PathRoot {
-                        index: first_unassigned_index.unwrap(),
-                    }]))
+                    vec![]
                 } else {
-                    let candidates = find_root_candidates(data, known_bindings);
-                    Ok(ValidBindings(candidates))
+                    vec![PGIndexKey::PathRoot { index: index - 1 }]
+                }
+            }
+            PGIndexKey::AlongPath { path_root, .. } => {
+                vec![PGIndexKey::PathRoot { index: path_root }]
+            }
+        }
+    }
+}
+
+impl IndexedData for PortGraph {
+    type IndexingScheme = PGIndexingScheme;
+
+    fn list_bind_options(
+        &self,
+        key: &PGIndexKey,
+        known_bindings: &<PGIndexingScheme as IndexingScheme>::Map,
+    ) -> Vec<NodeIndex> {
+        if let Some(val) = known_bindings.get(key) {
+            return vec![val.clone()];
+        }
+        match *key {
+            PGIndexKey::PathRoot { index: 0 } => self.nodes_iter().collect(),
+            PGIndexKey::PathRoot { index } => {
+                if known_bindings
+                    .get(&PGIndexKey::PathRoot { index: index - 1 })
+                    .is_none()
+                {
+                    vec![]
+                } else {
+                    find_root_candidates(self, known_bindings)
                 }
             }
             PGIndexKey::AlongPath {
@@ -87,12 +97,26 @@ impl IndexingScheme<PortGraph> for PGIndexingScheme {
             } => {
                 let path_root = PGIndexKey::PathRoot { index: path_root };
                 let Some(&root_binding) = known_bindings.get(&path_root) else {
-                    return Err(MissingIndexKeys(vec![path_root]));
+                    return vec![];
                 };
-                let binding = walk_path_nodes(data, root_binding, path_start_port).nth(path_length);
-                Ok(ValidBindings(Vec::from_iter(binding)))
+                walk_path_nodes(self, root_binding, path_start_port)
+                    .nth(path_length)
+                    .into_iter()
+                    .collect()
             }
         }
+    }
+}
+
+impl<M> IndexedData for (&PortGraph, &M) {
+    type IndexingScheme = PGIndexingScheme;
+
+    fn list_bind_options(
+        &self,
+        key: &Key<Self::IndexingScheme>,
+        known_bindings: &<Self::IndexingScheme as IndexingScheme>::Map,
+    ) -> Vec<Value<Self::IndexingScheme>> {
+        self.0.list_bind_options(key, known_bindings)
     }
 }
 
@@ -232,10 +256,7 @@ mod tests {
 
         while let Some((root_index, bindings)) = curr_bindings.pop() {
             let root_key = PGIndexKey::PathRoot { index: root_index };
-            let options = PGIndexingScheme.valid_bindings(&root_key, &bindings, graph);
-            let Ok(ValidBindings(candidates)) = options else {
-                panic!("Could not assign bindings for root {root_index}");
-            };
+            let candidates = graph.list_bind_options(&root_key, &bindings);
             if candidates.is_empty() {
                 final_bindings.push(bindings);
                 continue;
@@ -251,11 +272,7 @@ mod tests {
                             path_start_port: port,
                             path_length,
                         };
-                        let Ok(ValidBindings(candidates)) =
-                            PGIndexingScheme.valid_bindings(&key, &new_bindings, graph)
-                        else {
-                            panic!("Could not assign bindings for key {key:?}");
-                        };
+                        let candidates = graph.list_bind_options(&key, &new_bindings);
                         let binding = candidates.into_iter().exactly_one().unwrap();
                         new_bindings.insert(key, binding);
                     }

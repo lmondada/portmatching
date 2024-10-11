@@ -12,7 +12,7 @@ use derive_more::{From, Into};
 use itertools::Itertools;
 
 use crate::{
-    indexing::{BindVariableError, BindingResult, MissingIndexKeys, ValidBindings},
+    indexing::{BindVariableError, IndexedData, Key},
     string::{CharacterPredicate, StringConstraint},
     IndexMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
 };
@@ -49,11 +49,10 @@ pub type MatrixManyMatcher =
 /// A naive matcher for 2D character matrices.
 ///
 /// Only use for testing, as it is too slow for practical purposes.
-pub type MatrixNaiveManyMatcher = NaiveManyMatcher<MatrixConstraint, MatrixIndexingScheme>;
+pub type MatrixNaiveManyMatcher =
+    NaiveManyMatcher<MatrixPatternPosition, CharacterPredicate, MatrixIndexingScheme>;
 
 impl Predicate<MatrixString> for CharacterPredicate {
-    type Value = MatrixSubjectPosition;
-
     fn check(&self, data: &MatrixString, args: &[impl Borrow<MatrixSubjectPosition>]) -> bool {
         match self {
             CharacterPredicate::BindingEq => {
@@ -173,45 +172,58 @@ impl IndexMap for MatrixPositionMap {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MatrixIndexingScheme;
 
-impl IndexingScheme<MatrixString> for MatrixIndexingScheme {
+impl IndexingScheme for MatrixIndexingScheme {
     type Map = MatrixPositionMap;
 
-    fn valid_bindings(
+    fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>> {
+        let &MatrixPatternPosition(key_row, key_col) = key;
+
+        if key_row == 0 && key_col == 0 {
+            // The start binding does not require any previous bindings
+            Vec::new()
+        } else {
+            // Must bind the start position first
+            vec![MatrixPatternPosition::start()]
+        }
+    }
+}
+
+impl IndexedData for MatrixString {
+    type IndexingScheme = MatrixIndexingScheme;
+
+    fn list_bind_options(
         &self,
         key: &MatrixPatternPosition,
         known_bindings: &MatrixPositionMap,
-        data: &MatrixString,
-    ) -> BindingResult<Self, MatrixString> {
+    ) -> Vec<MatrixSubjectPosition> {
         let &MatrixPatternPosition(key_row, key_col) = key;
 
         if key_row == 0 && key_col == 0 {
             // No key has been bound yet
-            assert!(matches!(known_bindings, Self::Map::Unbound));
+            assert!(matches!(known_bindings, MatrixPositionMap::Unbound));
             // For the root binding, any matrix position is valid
-            Ok(ValidBindings(
-                (0..data.rows.len())
-                    .flat_map(|row| (0..data.rows[row].len()).map(move |col| (row, col)))
-                    .map_into()
-                    .collect(),
-            ))
+            (0..self.rows.len())
+                .flat_map(|row| (0..self.rows[row].len()).map(move |col| (row, col)))
+                .map_into()
+                .collect()
         } else {
             // Must bind the start position first; all other positions are
             // obtained by offsetting from start
             let Some(MatrixSubjectPosition(start_row, start_col)) = known_bindings.start_pos()
             else {
-                return Err(MissingIndexKeys(vec![MatrixPatternPosition::start()]));
+                return vec![];
             };
 
             let Some(new_row) = start_row.checked_add_signed(key_row) else {
-                return Ok(ValidBindings(vec![]));
+                return vec![];
             };
             let Some(new_col) = start_col.checked_add_signed(key_col) else {
-                return Ok(ValidBindings(vec![]));
+                return vec![];
             };
-            if new_row < data.rows.len() && new_col < data.rows[new_row].len() {
-                Ok(ValidBindings(vec![(new_row, new_col).into()]))
+            if new_row < self.rows.len() && new_col < self.rows[new_row].len() {
+                vec![(new_row, new_col).into()]
             } else {
-                Ok(ValidBindings(vec![]))
+                vec![]
             }
         }
     }

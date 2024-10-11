@@ -1,6 +1,6 @@
 use crate::{
     constraint::Constraint,
-    indexing,
+    indexing::{DataKVMap, DataKey, IndexKey, IndexedData, Key},
     matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
     pattern::Pattern,
     IndexingScheme, Predicate,
@@ -12,11 +12,11 @@ use crate::{
 ///
 /// You probably do not want to use this matcher for anything other than as a
 /// baseline in benchmarking.
-pub struct NaiveManyMatcher<C, I> {
-    matchers: Vec<SinglePatternMatcher<C, I>>,
+pub struct NaiveManyMatcher<K, P, I> {
+    matchers: Vec<SinglePatternMatcher<K, P, I>>,
 }
 
-impl<C, I> NaiveManyMatcher<C, I> {
+impl<P, I: IndexingScheme + Default> NaiveManyMatcher<Key<I>, P, I> {
     /// Create a new naive matcher from patterns.
     ///
     /// Use [`IndexingScheme::default`] as the indexing scheme.
@@ -24,8 +24,7 @@ impl<C, I> NaiveManyMatcher<C, I> {
         patterns: impl IntoIterator<Item = &'p PT>,
     ) -> Result<Self, PT::Error>
     where
-        PT: Pattern<Constraint = C> + 'p,
-        I: Default,
+        PT: Pattern<Constraint = Constraint<Key<I>, P>> + 'p,
     {
         let matchers = patterns
             .into_iter()
@@ -41,7 +40,7 @@ impl<C, I> NaiveManyMatcher<C, I> {
     ) -> Result<Self, PT::Error>
     where
         I: Clone,
-        PT: Pattern<Constraint = C> + 'p,
+        PT: Pattern<Constraint = Constraint<Key<I>, P>> + 'p,
     {
         let matchers = patterns
             .into_iter()
@@ -51,7 +50,7 @@ impl<C, I> NaiveManyMatcher<C, I> {
     }
 }
 
-impl<C, I> Default for NaiveManyMatcher<C, I> {
+impl<K: IndexKey, P, I> Default for NaiveManyMatcher<K, P, I> {
     fn default() -> Self {
         Self {
             matchers: Default::default(),
@@ -59,12 +58,12 @@ impl<C, I> Default for NaiveManyMatcher<C, I> {
     }
 }
 
-impl<P, D, I> PortMatcher<D> for NaiveManyMatcher<Constraint<indexing::Key<I, D>, P>, I>
+impl<P, D> PortMatcher<D> for NaiveManyMatcher<DataKey<D>, P, <D as IndexedData>::IndexingScheme>
 where
-    P: Predicate<D, Value = indexing::Value<I, D>>,
-    I: IndexingScheme<D>,
+    D: IndexedData,
+    P: Predicate<D>,
 {
-    type Match = I::Map;
+    type Match = DataKVMap<D>;
 
     fn find_matches<'a>(
         &'a self,
@@ -80,8 +79,8 @@ where
     }
 }
 
-impl<C, I> FromIterator<SinglePatternMatcher<C, I>> for NaiveManyMatcher<C, I> {
-    fn from_iter<T: IntoIterator<Item = SinglePatternMatcher<C, I>>>(iter: T) -> Self {
+impl<K: IndexKey, P, I> FromIterator<SinglePatternMatcher<K, P, I>> for NaiveManyMatcher<K, P, I> {
+    fn from_iter<T: IntoIterator<Item = SinglePatternMatcher<K, P, I>>>(iter: T) -> Self {
         Self {
             matchers: iter.into_iter().collect(),
         }

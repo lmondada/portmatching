@@ -6,24 +6,14 @@
 //! The bindings are stored and retrieved in a map-like struct that implements
 //! the [IndexMap] trait.
 
-mod binding_builder;
-
-use crate::HashMap;
-use derive_more::{From, Into};
+use crate::{HashMap, HashSet};
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 use thiserror::Error;
 
-use self::binding_builder::BindingBuilder;
-
 /// Index key type alias for indexing schemes.
-pub type Key<S, D> = <<S as IndexingScheme<D>>::Map as IndexMap>::Key;
+pub type Key<S> = <<S as IndexingScheme>::Map as IndexMap>::Key;
 /// Index value type alias for indexing schemes.
-pub type Value<S, D> = <<S as IndexingScheme<D>>::Map as IndexMap>::Value;
-
-/// The result of a call to [IndexingScheme::valid_bindings].
-///
-/// Either a list of valid bindings or a list of missing index keys.
-pub type BindingResult<S, D> = Result<ValidBindings<Value<S, D>>, MissingIndexKeys<Key<S, D>>>;
+pub type Value<S> = <<S as IndexingScheme>::Map as IndexMap>::Value;
 
 /// Access a data structure through a set of index keys.
 ///
@@ -36,79 +26,145 @@ pub type BindingResult<S, D> = Result<ValidBindings<Value<S, D>>, MissingIndexKe
 ///
 /// ## Generic Parameter
 /// - `Data`: The underlying data structure to index.
-pub trait IndexingScheme<Data> {
+pub trait IndexingScheme {
     /// The index key - value map used to store index bindings.
     type Map: IndexMap;
 
-    /// List valid bindings for an index key.
+    /// List required bindings for an index key.
     ///
-    /// Return either a list of valid bindings for the index key or a list of
-    /// other keys that must be bound in `known_bindings` before `key` can
-    /// itself be bound.
+    /// Return the list of index keys that must be bound before `key` can be
+    /// bound. The order of the returned keys specifies the order in which the
+    /// bindings must be considered.
     ///
     /// When binding values, this will be called recursively on missing bindings.
-    /// Avoid therefore cyclic bindings dependencies and at least one index key
-    /// must be assignable for an empty `known_values`.
-    fn valid_bindings(
-        &self,
-        key: &Key<Self, Data>,
-        known_bindings: &Self::Map,
-        data: &Data,
-    ) -> BindingResult<Self, Data>;
+    /// Avoid therefore cyclic bindings dependencies (and at least one index key
+    /// must be bindable without prior bindings).
+    fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>>;
 
-    /// Try to recursively bind values for all `keys`.
-    ///
-    /// Return all possible binding maps. Returned maps may not have bindings
-    /// for all keys, and different maps may have different key sets.
-    /// This happens when an empty valid bindings list was returned for a key.
-    fn try_bind_all(
+    /// List all missing bindings for an index key, in topological order.
+    fn missing_bindings(
         &self,
-        known_bindings: Self::Map,
-        keys: impl IntoIterator<Item = Key<Self, Data>>,
-        data: &Data,
-    ) -> Result<Vec<Self::Map>, BindVariableError> {
-        let mut curr_bindings = vec![BindingBuilder::new(keys, known_bindings)];
-        let mut final_bindings = Vec::new();
-        while let Some(mut builder) = curr_bindings.pop() {
-            let Some(key) = builder.top_missing_key() else {
-                // All keys have been bound, we can return the current binding
-                final_bindings.push(builder.finish());
-                continue;
-            };
-            let binding_options = self.valid_bindings(&key, builder.bindings(), data);
-            match binding_options {
-                Ok(ValidBindings(values)) => {
-                    if values.is_empty() {
-                        // Cannot bind this key, exclude it from further consideration
-                        builder.exclude_key(key);
-                        curr_bindings.push(builder);
-                    } else {
-                        // Successful binding
-                        curr_bindings.extend(builder.apply_bindings(key, values)?);
+        key: &Key<Self>,
+        known_bindings: &HashSet<Key<Self>>,
+    ) -> Vec<Key<Self>> {
+        enum DfsState<K> {
+            DfsEnter(K),
+            DfsExit(K),
+        }
+        use DfsState::*;
+
+        // DFS traversing missing keys, until all required keys are in `known_bindings`
+        let mut missing_keys = Vec::new();
+        let mut visited = HashSet::default();
+        let mut stack = Vec::new();
+        if !known_bindings.contains(key) {
+            stack.push(DfsEnter(*key));
+            visited.insert(*key);
+        }
+        while let Some(state) = stack.pop() {
+            match state {
+                DfsEnter(key) => {
+                    stack.push(DfsExit(key));
+                    for req_key in self.required_bindings(&key) {
+                        if !known_bindings.contains(&req_key) && visited.insert(req_key) {
+                            stack.push(DfsEnter(req_key));
+                        }
                     }
                 }
-                Err(MissingIndexKeys(new_missing_keys)) => {
-                    if !builder.extend_missing_keys(new_missing_keys) {
-                        // All missing keys are already excluded, so we exclude
-                        // `key` and proceed
-                        builder.exclude_key(key);
-                    }
-                    curr_bindings.push(builder);
+                DfsExit(key) => {
+                    missing_keys.push(key);
                 }
             }
         }
-        Ok(final_bindings)
+        missing_keys
+    }
+
+    /// List all missing bindings for a list of index keys, in topological order.
+    fn all_missing_bindings(
+        &self,
+        keys: impl IntoIterator<Item = Key<Self>>,
+        known_bindings: impl IntoIterator<Item = Key<Self>>,
+    ) -> Vec<Key<Self>> {
+        let mut missing_keys = Vec::new();
+        let mut known_bindings: HashSet<_> = known_bindings.into_iter().collect();
+        for key in keys {
+            if !known_bindings.contains(&key) {
+                let missing = self.missing_bindings(&key, &known_bindings);
+                missing_keys.extend(missing.clone());
+                known_bindings.extend(missing);
+            }
+        }
+        missing_keys
     }
 }
 
-/// A list of valid bindings, in the order they should be considered
-#[derive(Debug, Clone, PartialEq, Eq, From, Into)]
-pub struct ValidBindings<V>(pub Vec<V>);
+/// Index key type alias for a data type.
+pub type DataKey<D> =
+    <<<D as IndexedData>::IndexingScheme as IndexingScheme>::Map as IndexMap>::Key;
+/// Index value type alias for a data type.
+pub type DataValue<D> =
+    <<<D as IndexedData>::IndexingScheme as IndexingScheme>::Map as IndexMap>::Value;
+/// Index key-value map type alias for a data type.
+pub type DataKVMap<D> = <<D as IndexedData>::IndexingScheme as IndexingScheme>::Map;
 
-/// Indicates that valid bindings cannot be found unless bindings are provided
-/// for the missing index keys.
-#[derive(Debug, Clone, PartialEq, Eq, From, Into)]
-pub struct MissingIndexKeys<K>(pub Vec<K>);
+/// A data structure that can be accessed through an [IndexingScheme].
+pub trait IndexedData {
+    /// The indexing scheme used to access the data.
+    type IndexingScheme: IndexingScheme;
+
+    /// List all valid bindings for an index key.
+    ///
+    /// Return a list of valid bindings for the index key.
+    ///
+    /// If `known_bindings` does not contain all the required bindings or the
+    /// binding is not possible, return the empty list.
+    fn list_bind_options(
+        &self,
+        key: &Key<Self::IndexingScheme>,
+        known_bindings: &DataKVMap<Self>,
+    ) -> Vec<Value<Self::IndexingScheme>>;
+
+    /// Return all ways to extend `bindings` by binding all keys in `new_keys`,
+    /// in order.
+    ///
+    /// If `allow_incomplete` is true, also return bindings that do not bind all
+    /// keys in `new_keys`.
+    fn bind_all(
+        &self,
+        bindings: DataKVMap<Self>,
+        new_keys: impl IntoIterator<Item = DataKey<Self>>,
+        allow_incomplete: bool,
+    ) -> Vec<DataKVMap<Self>> {
+        let mut all_bindings = vec![bindings];
+
+        // Bind one key at a time to every possible value
+        for key in new_keys {
+            let mut new_bindings = Vec::new();
+            for bindings in all_bindings {
+                if bindings.get(&key).is_none() {
+                    // Key is not bound yet, try to bind it
+                    let valid_bindings = self.list_bind_options(&key, &bindings);
+                    if valid_bindings.is_empty() && allow_incomplete {
+                        // Can't bind this key, but it might still be useful as-is
+                        new_bindings.push(bindings);
+                    } else {
+                        for value in valid_bindings {
+                            let mut bindings = bindings.clone();
+                            let Ok(()) = bindings.bind(key, value) else {
+                                continue;
+                            };
+                            new_bindings.push(bindings);
+                        }
+                    }
+                } else {
+                    new_bindings.push(bindings);
+                }
+            }
+            all_bindings = new_bindings;
+        }
+        all_bindings
+    }
+}
 
 /// A map-like trait for index key-value bindings.
 pub trait IndexMap: Default + Clone {
@@ -129,6 +185,17 @@ pub trait IndexMap: Default + Clone {
     /// Returns an error if attempting to bind a new value to an existing index
     /// key.
     fn bind(&mut self, var: Self::Key, val: Self::Value) -> Result<(), BindVariableError>;
+
+    /// Retain only the bindings for the given keys.
+    fn retain_keys(&mut self, keys: &HashSet<Self::Key>) {
+        let mut new_self = Self::default();
+        for &key in keys {
+            if let Some(val) = self.get(&key) {
+                new_self.bind(key, val.borrow().clone()).unwrap();
+            }
+        }
+        *self = new_self;
+    }
 }
 
 /// Errors in creating index key-value bindings.
@@ -192,6 +259,10 @@ impl<K: IndexKey + 'static, V: IndexValue + 'static> IndexMap for HashMap<K, V> 
         self.insert(var, val);
         Ok(())
     }
+
+    fn retain_keys(&mut self, keys: &HashSet<Self::Key>) {
+        self.retain(|key, _| keys.contains(key));
+    }
 }
 
 #[cfg(test)]
@@ -203,21 +274,34 @@ pub(crate) mod tests {
     #[derive(Clone, Debug)]
     pub(crate) struct TestIndexingScheme;
 
-    impl IndexingScheme<()> for TestIndexingScheme {
+    pub(crate) struct TestData;
+
+    impl IndexingScheme for TestIndexingScheme {
         type Map = HashMap<usize, usize>;
 
-        fn valid_bindings(
+        fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>> {
+            if *key == 0 {
+                vec![]
+            } else {
+                vec![key - 1]
+            }
+        }
+    }
+
+    impl IndexedData for TestData {
+        type IndexingScheme = TestIndexingScheme;
+
+        fn list_bind_options(
             &self,
-            key: &usize,
-            known_bindings: &Self::Map,
-            (): &(),
-        ) -> BindingResult<Self, ()> {
+            key: &Key<TestIndexingScheme>,
+            known_bindings: &<TestIndexingScheme as IndexingScheme>::Map,
+        ) -> Vec<Value<TestIndexingScheme>> {
             if *key == 0 || known_bindings.get(&(key - 1)).is_some() {
                 // All previous keys were assigned, we can (dummy) bind the key
-                Ok(ValidBindings(vec![*key]))
+                vec![*key]
             } else {
                 // Require key - 1 to be bound first
-                Err(MissingIndexKeys(vec![key - 1]))
+                vec![]
             }
         }
     }
@@ -234,29 +318,31 @@ pub(crate) mod tests {
         let scheme = TestIndexingScheme;
         let key = 4;
 
+        // The list of keys that must be bound before `key` can be bound
+        let all_missing_keys = scheme.missing_bindings(&key, &HashSet::default());
+        assert_eq!(all_missing_keys, (0..=key).collect_vec());
+
         // Test binding a new value
-        let index_map = scheme
-            .try_bind_all(index_map, vec![key], &())
-            .unwrap()
-            .into_iter()
-            .exactly_one()
-            .unwrap();
+        let all_index_maps = TestData.bind_all(index_map, all_missing_keys.iter().copied(), false);
+        let index_map = all_index_maps.into_iter().exactly_one().unwrap();
         assert_eq!(index_map.get(&key), Some(&key));
+
         // Must have bound all values smaller than `key` as well
         assert_eq!(index_map.len(), key + 1);
 
         // Test binding the same value again (should succeed)
-        assert!(scheme.try_bind_all(index_map, vec![key], &()).is_ok());
+        let all_index_maps =
+            TestData.bind_all(index_map.clone(), all_missing_keys.iter().copied(), false);
+        let new_index_map = all_index_maps.into_iter().exactly_one().unwrap();
+        assert_eq!(new_index_map, index_map);
 
         // Test binding multiple values at the same time, with some other values
         // already preset
         let index_map = HashMap::from_iter([(3, 3)]);
-        let index_map = scheme
-            .try_bind_all(index_map, vec![1, 4], &())
-            .unwrap()
-            .into_iter()
-            .exactly_one()
-            .unwrap();
+        let all_missing_keys = scheme.all_missing_bindings([1, 4], [3]);
+        assert_eq!(all_missing_keys, vec![0, 1, 4]);
+        let all_index_maps = TestData.bind_all(index_map, all_missing_keys, false);
+        let index_map = all_index_maps.into_iter().exactly_one().unwrap();
         assert_eq!(
             index_map.into_keys().sorted().collect_vec(),
             vec![0, 1, 3, 4]
