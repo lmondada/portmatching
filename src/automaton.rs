@@ -9,7 +9,7 @@ mod view;
 use derive_where::derive_where;
 use petgraph::dot::Dot;
 use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::stable_graph::{StableDiGraph, StableGraph};
+use petgraph::stable_graph::StableDiGraph;
 
 use crate::{HashMap, HashSet};
 use std::fmt::{self, Debug};
@@ -19,6 +19,9 @@ use derive_more::{From, Into};
 use crate::indexing::IndexKey;
 use crate::{Constraint, PatternID};
 pub use builder::AutomatonBuilder;
+
+/// The underlying petgraph type for the ConstraintAutomaton.
+type TransitionGraph<K, P> = StableDiGraph<State<K>, Transition<Constraint<K, P>>>;
 
 /// An automaton-like datastructure to evaluate sets of constraints efficiently.
 ///
@@ -45,7 +48,7 @@ pub use builder::AutomatonBuilder;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConstraintAutomaton<K: IndexKey, P, I> {
     /// The transition graph
-    graph: StableDiGraph<State<K>, Transition<Constraint<K, P>>>,
+    graph: TransitionGraph<K, P>,
     /// The root of the transition graph
     root: StateID,
     /// The indexing scheme used
@@ -72,7 +75,7 @@ impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
 
     /// An empty constraint automaton, with the given indexing scheme
     pub fn with_indexing_scheme(host_indexing: I) -> Self {
-        let mut graph = StableGraph::new();
+        let mut graph = TransitionGraph::new();
         let root = graph.add_node(State::<K>::default());
         Self {
             graph,

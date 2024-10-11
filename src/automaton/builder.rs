@@ -4,7 +4,6 @@ use itertools::Itertools;
 use petgraph::{
     data::DataMap,
     graph::NodeIndex,
-    prelude::StableGraph,
     visit::{
         Data, EdgeRef, GraphBase, IntoEdgesDirected, IntoNeighborsDirected, IntoNodeIdentifiers,
         NodeFiltered, Reversed, Visitable,
@@ -26,7 +25,7 @@ mod node_depth;
 
 use self::node_depth::NodeDepthCache;
 
-use super::{State, Transition, TransitionID};
+use super::{State, Transition, TransitionGraph, TransitionID};
 
 /// A predicate on a list of constraints
 pub type ConstraintListPredicate<'c, K, P> = Box<dyn FnMut(&[&Constraint<K, P>]) -> bool + 'c>;
@@ -432,10 +431,7 @@ where
 
     fn recently_added_subgraph(
         &self,
-    ) -> NodeFiltered<
-        Reversed<&StableGraph<State<K>, Transition<Constraint<K, P>>>>,
-        &HashSet<NodeIndex>,
-    > {
+    ) -> NodeFiltered<Reversed<&TransitionGraph<K, P>>, &HashSet<NodeIndex>> {
         let graph = &self.matcher.graph;
         NodeFiltered(Reversed(graph), &self.recently_added)
     }
@@ -528,7 +524,7 @@ where
         self.add_transition(state, Some(constraint))
     }
 }
-// StableGraph<State<K>, Transition<Constraint<K, P>>>
+
 fn compute_scopes<K, P, G, Container>(
     graph: G,
     merge_scopes: impl Fn(Container, Container) -> Container,
@@ -542,9 +538,7 @@ where
     G: DataMap,
     Container: Extend<K> + Default + Clone + IntoIterator<Item = K>,
 {
-    let topo_order = petgraph::algo::toposort(&graph, None)
-        .ok()
-        .expect("Graph should be acyclic");
+    let topo_order = petgraph::algo::toposort(&graph, None).expect("Graph should be acyclic");
 
     let mut ret: HashMap<NodeIndex, Container> = HashMap::default();
 

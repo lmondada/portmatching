@@ -101,7 +101,7 @@ where
             .into_iter()
             .enumerate()
             .map(|(i, p)| (PatternID(i), p))
-            .filter(|(i, _)| pattern_ids.contains(&i))
+            .filter(|(i, _)| pattern_ids.contains(i))
             .collect();
         Ok(Self {
             automaton,

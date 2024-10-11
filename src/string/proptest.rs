@@ -24,7 +24,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::string::tests::{apply_all_matchers, clean_match_data};
+    use crate::string::tests::apply_all_matchers;
 
     use super::*;
 
@@ -38,10 +38,6 @@ mod tests {
             let (mut nondet, mut default, mut det) = apply_all_matchers(patterns, &subject, 0..3)
                 .collect_tuple()
                 .unwrap();
-
-            clean_match_data(&mut nondet);
-            clean_match_data(&mut default);
-            clean_match_data(&mut det);
 
             nondet.sort();
             default.sort();
@@ -60,9 +56,6 @@ mod tests {
             let (mut nondet, mut default) = apply_all_matchers(patterns, &subject, 0..2)
                 .collect_tuple()
                 .unwrap();
-
-            clean_match_data(&mut nondet);
-            clean_match_data(&mut default);
 
             nondet.sort();
             default.sort();

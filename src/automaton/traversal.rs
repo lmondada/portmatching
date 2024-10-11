@@ -196,7 +196,7 @@ where
                                 vec![state.bindings.clone()]
                             };
                             bindings.into_iter().map(move |mut bindings| {
-                                bindings.retain_keys(&scope);
+                                bindings.retain_keys(scope);
                                 (id, bindings)
                             })
                         }),

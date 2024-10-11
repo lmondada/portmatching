@@ -291,16 +291,6 @@ pub(super) mod tests {
         })
     }
 
-    // Do not compare str_len, as more than the string might have been matched
-    pub(super) fn clean_match_data(matches: &mut [PatternMatch<StringPositionMap>]) {
-        matches.iter_mut().for_each(|m| {
-            let data = &mut m.match_data;
-            if let StringPositionMap::Bound { str_len, .. } = data {
-                *str_len = 0;
-            }
-        });
-    }
-
     #[rstest]
     #[case("h", vec!["h$aa", "$a$b"])]
     #[case("aa", vec!["a", "b"])]
