@@ -28,7 +28,7 @@ use itertools::Itertools;
 
 use crate::{
     indexing::{BindVariableError, IndexedData},
-    IndexMap, IndexingScheme, ManyMatcher,
+    BindMap, IndexingScheme, ManyMatcher,
 };
 pub use constraint::StringConstraint;
 pub use pattern::{CharVar, StringPattern};
@@ -73,7 +73,7 @@ impl StringPositionMap {
     }
 }
 
-impl IndexMap for StringPositionMap {
+impl BindMap for StringPositionMap {
     type Key = StringPatternPosition;
     type Value = StringSubjectPosition;
     type ValueRef<'a> = StringSubjectPosition;
@@ -118,7 +118,7 @@ impl IndexMap for StringPositionMap {
 }
 
 impl IndexingScheme for StringIndexingScheme {
-    type Map = StringPositionMap;
+    type BindMap = StringPositionMap;
 
     fn required_bindings(
         &self,
@@ -142,7 +142,7 @@ impl IndexedData for String {
     fn list_bind_options(
         &self,
         key: &crate::indexing::Key<Self::IndexingScheme>,
-        known_bindings: &<Self::IndexingScheme as IndexingScheme>::Map,
+        known_bindings: &<Self::IndexingScheme as IndexingScheme>::BindMap,
     ) -> Vec<crate::indexing::Value<Self::IndexingScheme>> {
         let &StringPatternPosition(offset) = key;
 

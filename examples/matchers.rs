@@ -11,7 +11,7 @@ use portmatching::{
     matrix::{MatrixManyMatcher, MatrixPattern, MatrixString},
     portgraph::{indexing::PGIndexKey, PGManyPatternMatcher, PGPattern},
     string::{StringManyMatcher, StringPattern},
-    IndexMap, ManyMatcher, PatternMatch, PortMatcher,
+    BindMap, ManyMatcher, PatternMatch, PortMatcher,
 };
 
 fn main() {
@@ -127,7 +127,7 @@ fn save_dot_string<PT, K: IndexKey, P: Debug, I>(
     println!("Matcher's dotstring written to '{}'", filename);
 }
 
-fn print_matches<K, V: Debug, M: IndexMap<Key = K, Value = V>>(
+fn print_matches<K, V: Debug, M: BindMap<Key = K, Value = V>>(
     matches: &[PatternMatch<M>],
     root_pos: &K,
 ) {

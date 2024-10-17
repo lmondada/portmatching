@@ -14,7 +14,7 @@ use itertools::Itertools;
 use crate::{
     indexing::{BindVariableError, IndexedData, Key},
     string::{CharacterPredicate, StringConstraint},
-    IndexMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
+    BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
 };
 
 pub use self::pattern::MatrixPattern;
@@ -105,7 +105,7 @@ impl MatrixPositionMap {
     }
 }
 
-impl IndexMap for MatrixPositionMap {
+impl BindMap for MatrixPositionMap {
     type Key = MatrixPatternPosition;
     type Value = MatrixSubjectPosition;
     type ValueRef<'a> = MatrixSubjectPosition;
@@ -173,7 +173,7 @@ impl IndexMap for MatrixPositionMap {
 pub struct MatrixIndexingScheme;
 
 impl IndexingScheme for MatrixIndexingScheme {
-    type Map = MatrixPositionMap;
+    type BindMap = MatrixPositionMap;
 
     fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>> {
         let &MatrixPatternPosition(key_row, key_col) = key;

@@ -5,10 +5,10 @@ use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHasher;
 
-use crate::indexing::{DataKVMap, IndexedData};
+use crate::indexing::{DataBindMap, IndexedData};
 use crate::{
     indexing::{IndexKey, Key},
-    utils, HashMap, HashSet, IndexMap, IndexingScheme, PatternID, Predicate,
+    utils, HashMap, HashSet, BindMap, IndexingScheme, PatternID, Predicate,
 };
 
 use super::{ConstraintAutomaton, StateID};
@@ -26,9 +26,9 @@ impl<P, I: IndexingScheme> ConstraintAutomaton<Key<I>, P, I> {
     /// An iterator of the allowed transitions
     fn next_legal_states<'a, D>(
         &'a self,
-        state: TraversalState<DataKVMap<D>>,
+        state: TraversalState<DataBindMap<D>>,
         host: &'a D,
-    ) -> impl Iterator<Item = TraversalState<DataKVMap<D>>> + 'a
+    ) -> impl Iterator<Item = TraversalState<DataBindMap<D>>> + 'a
     where
         P: Predicate<D>,
         D: IndexedData<IndexingScheme = I>,
@@ -107,8 +107,8 @@ impl<S: Default> TraversalState<S> {
 ///  - C: constraint type on transitions
 ///  - D: arbitrary input "host" data to evaluate constraints on.
 pub struct AutomatonTraverser<'a, 'd, K: IndexKey, P, I: IndexingScheme, D> {
-    matches_queue: VecDeque<(PatternID, I::Map)>,
-    state_queue: VecDeque<TraversalState<I::Map>>,
+    matches_queue: VecDeque<(PatternID, I::BindMap)>,
+    state_queue: VecDeque<TraversalState<I::BindMap>>,
     automaton: &'a ConstraintAutomaton<K, P, I>,
     host: &'d D,
     /// For each state, the set of hashes of bindings already visited (prune
@@ -141,7 +141,7 @@ impl<'a, 'd, P, I: IndexingScheme, D> AutomatonTraverser<'a, 'd, Key<I>, P, I, D
     /// variables that are relevant, i.e.
     ///  - the state scope (relevant for future constraints)
     ///  - the bindings required by matches at the current state
-    fn visit(&mut self, state: &TraversalState<I::Map>) -> bool {
+    fn visit(&mut self, state: &TraversalState<I::BindMap>) -> bool {
         let state_id = state.state_id;
         let scope = &self.automaton.graph[state_id.0].required_bindings;
         let req_bindings_matches = self.automaton.matches(state_id).values().flatten().unique();
@@ -154,7 +154,7 @@ impl<'a, 'd, P, I: IndexingScheme, D> AutomatonTraverser<'a, 'd, Key<I>, P, I, D
     }
 }
 
-fn bindings_hash<S: IndexMap>(bindings: &S, scope: impl IntoIterator<Item = S::Key>) -> u64 {
+fn bindings_hash<S: BindMap>(bindings: &S, scope: impl IntoIterator<Item = S::Key>) -> u64 {
     let mut hasher = FxHasher::default();
     for key in scope {
         let value = bindings.get(&key);
@@ -169,7 +169,7 @@ where
     P: Predicate<D>,
     D: IndexedData,
 {
-    type Item = (PatternID, DataKVMap<D>);
+    type Item = (PatternID, DataBindMap<D>);
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.matches_queue.is_empty() {

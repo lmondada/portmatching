@@ -8,7 +8,7 @@ use portgraph::{LinkView, MultiPortGraph, NodeIndex, PortGraph, PortMut, PortVie
 use serde::{Deserialize, Serialize};
 
 use crate::portgraph::indexing::PGIndexKey;
-use crate::{IndexMap, PatternID, PatternMatch};
+use crate::{BindMap, PatternID, PatternMatch};
 
 use super::portgraph::connected_components;
 
@@ -19,7 +19,7 @@ pub struct SerialPatternMatch {
     root: NodeIndex,
 }
 
-impl<S: IndexMap<Key = PGIndexKey, Value = NodeIndex>> From<PatternMatch<S>>
+impl<S: BindMap<Key = PGIndexKey, Value = NodeIndex>> From<PatternMatch<S>>
     for SerialPatternMatch
 {
     fn from(value: PatternMatch<S>) -> Self {

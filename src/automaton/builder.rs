@@ -17,7 +17,7 @@ use crate::{
     indexing::IndexKey,
     mutex_tree::{MutuallyExclusiveTree, ToConstraintsTree},
     utils::OnlineToposort,
-    HashMap, HashSet, IndexMap, IndexingScheme, PatternID,
+    HashMap, HashSet, BindMap, IndexingScheme, PatternID,
 };
 
 mod modify;
@@ -92,8 +92,8 @@ where
     /// Use `I::default()` as the indexing scheme.
     pub fn from_constraints<M>(patterns: impl IntoIterator<Item = Vec<Constraint<K, P>>>) -> Self
     where
-        I: Default + IndexingScheme<Map = M>,
-        M: IndexMap<Key = K>,
+        I: Default + IndexingScheme<BindMap = M>,
+        M: BindMap<Key = K>,
     {
         Self::from_constraints_with_index_scheme(patterns, I::default())
     }
@@ -105,8 +105,8 @@ where
         host_indexing: I,
     ) -> Self
     where
-        I: IndexingScheme<Map = M>,
-        M: IndexMap<Key = K>,
+        I: IndexingScheme<BindMap = M>,
+        M: BindMap<Key = K>,
     {
         let mut pattern_id = 0;
         patterns.into_iter().fold(
@@ -126,8 +126,8 @@ where
         id: impl Into<PatternID>,
         required_bindings: impl IntoIterator<Item = K>,
     ) where
-        I: IndexingScheme<Map = M>,
-        M: IndexMap<Key = K>,
+        I: IndexingScheme<BindMap = M>,
+        M: BindMap<Key = K>,
     {
         let id = id.into();
         self.matcher.add_pattern(pattern, id, required_bindings);
@@ -191,8 +191,8 @@ where
     /// states are merged whenever possible.
     pub fn finish<M>(mut self) -> (ConstraintAutomaton<K, P, I>, Vec<PatternID>)
     where
-        I: IndexingScheme<Map = M>,
-        M: IndexMap<Key = K>,
+        I: IndexingScheme<BindMap = M>,
+        M: BindMap<Key = K>,
     {
         // Traverse the prefix tree from root to leaves and make the invariants
         // hold. The changes only affect nodes in the future of the root, i.e.
@@ -239,8 +239,8 @@ where
     ///  - are required to evaluate outgoing constraints at `state`.
     fn populate_scopes<M>(&mut self)
     where
-        I: IndexingScheme<Map = M>,
-        M: IndexMap<Key = K>,
+        I: IndexingScheme<BindMap = M>,
+        M: BindMap<Key = K>,
     {
         // The child scope is obtained by:
         // - taking the intersection of the parents' scopes
@@ -599,8 +599,8 @@ impl<'c, K: IndexKey, P, I: Default, M> FromIterator<Vec<Constraint<K, P>>>
     for AutomatonBuilder<'c, K, P, I>
 where
     Constraint<K, P>: Clone + Eq,
-    I: IndexingScheme<Map = M>,
-    M: IndexMap<Key = K>,
+    I: IndexingScheme<BindMap = M>,
+    M: BindMap<Key = K>,
 {
     fn from_iter<T: IntoIterator<Item = Vec<Constraint<K, P>>>>(iter: T) -> Self {
         Self::from_constraints(iter)

@@ -49,7 +49,7 @@ pub enum PGIndexKey {
 }
 
 impl IndexingScheme for PGIndexingScheme {
-    type Map = HashMap<PGIndexKey, NodeIndex>;
+    type BindMap = HashMap<PGIndexKey, NodeIndex>;
 
     fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>> {
         match *key {
@@ -73,7 +73,7 @@ impl IndexedData for PortGraph {
     fn list_bind_options(
         &self,
         key: &PGIndexKey,
-        known_bindings: &<PGIndexingScheme as IndexingScheme>::Map,
+        known_bindings: &<PGIndexingScheme as IndexingScheme>::BindMap,
     ) -> Vec<NodeIndex> {
         if let Some(val) = known_bindings.get(key) {
             return vec![val.clone()];
@@ -114,7 +114,7 @@ impl<M> IndexedData for (&PortGraph, &M) {
     fn list_bind_options(
         &self,
         key: &Key<Self::IndexingScheme>,
-        known_bindings: &<Self::IndexingScheme as IndexingScheme>::Map,
+        known_bindings: &<Self::IndexingScheme as IndexingScheme>::BindMap,
     ) -> Vec<Value<Self::IndexingScheme>> {
         self.0.list_bind_options(key, known_bindings)
     }

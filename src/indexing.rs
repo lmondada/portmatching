@@ -7,13 +7,13 @@
 //! the [IndexMap] trait.
 
 use crate::{HashMap, HashSet};
-use std::{borrow::Borrow, fmt::Debug, hash::Hash};
+use std::{borrow::Borrow, collections::BTreeMap, fmt::Debug, hash::Hash};
 use thiserror::Error;
 
 /// Index key type alias for indexing schemes.
-pub type Key<S> = <<S as IndexingScheme>::Map as IndexMap>::Key;
+pub type Key<S> = <<S as IndexingScheme>::BindMap as BindMap>::Key;
 /// Index value type alias for indexing schemes.
-pub type Value<S> = <<S as IndexingScheme>::Map as IndexMap>::Value;
+pub type Value<S> = <<S as IndexingScheme>::BindMap as BindMap>::Value;
 
 /// Access a data structure through a set of index keys.
 ///
@@ -28,7 +28,7 @@ pub type Value<S> = <<S as IndexingScheme>::Map as IndexMap>::Value;
 /// - `Data`: The underlying data structure to index.
 pub trait IndexingScheme {
     /// The index key - value map used to store index bindings.
-    type Map: IndexMap;
+    type BindMap: BindMap;
 
     /// List required bindings for an index key.
     ///
@@ -100,12 +100,12 @@ pub trait IndexingScheme {
 
 /// Index key type alias for a data type.
 pub type DataKey<D> =
-    <<<D as IndexedData>::IndexingScheme as IndexingScheme>::Map as IndexMap>::Key;
+    <<<D as IndexedData>::IndexingScheme as IndexingScheme>::BindMap as BindMap>::Key;
 /// Index value type alias for a data type.
 pub type DataValue<D> =
-    <<<D as IndexedData>::IndexingScheme as IndexingScheme>::Map as IndexMap>::Value;
+    <<<D as IndexedData>::IndexingScheme as IndexingScheme>::BindMap as BindMap>::Value;
 /// Index key-value map type alias for a data type.
-pub type DataKVMap<D> = <<D as IndexedData>::IndexingScheme as IndexingScheme>::Map;
+pub type DataBindMap<D> = <<D as IndexedData>::IndexingScheme as IndexingScheme>::BindMap;
 
 /// A data structure that can be accessed through an [IndexingScheme].
 pub trait IndexedData {
@@ -121,7 +121,7 @@ pub trait IndexedData {
     fn list_bind_options(
         &self,
         key: &Key<Self::IndexingScheme>,
-        known_bindings: &DataKVMap<Self>,
+        known_bindings: &DataBindMap<Self>,
     ) -> Vec<Value<Self::IndexingScheme>>;
 
     /// Return all ways to extend `bindings` by binding all keys in `new_keys`,
@@ -131,10 +131,10 @@ pub trait IndexedData {
     /// keys in `new_keys`.
     fn bind_all(
         &self,
-        bindings: DataKVMap<Self>,
+        bindings: DataBindMap<Self>,
         new_keys: impl IntoIterator<Item = DataKey<Self>>,
         allow_incomplete: bool,
-    ) -> Vec<DataKVMap<Self>> {
+    ) -> Vec<DataBindMap<Self>> {
         let mut all_bindings = vec![bindings];
 
         // Bind one key at a time to every possible value
@@ -167,7 +167,7 @@ pub trait IndexedData {
 }
 
 /// A map-like trait for index key-value bindings.
-pub trait IndexMap: Default + Clone {
+pub trait BindMap: Default + Clone {
     /// Index keys used to access the data.
     type Key: IndexKey;
     /// Values of the indexed data.
@@ -238,7 +238,34 @@ pub trait IndexValue: Clone + PartialEq + Debug + Hash + Borrow<Self> {}
 impl<T: Eq + Copy + Debug + Hash> IndexKey for T {}
 impl<T: Clone + PartialEq + Debug + Hash + Borrow<Self>> IndexValue for T {}
 
-impl<K: IndexKey + 'static, V: IndexValue + 'static> IndexMap for HashMap<K, V> {
+impl<K: IndexKey + 'static, V: IndexValue + 'static> BindMap for HashMap<K, V> {
+    type Key = K;
+    type Value = V;
+    type ValueRef<'a> = &'a V;
+
+    fn get(&self, var: &K) -> Option<Self::ValueRef<'_>> {
+        self.get(var)
+    }
+
+    fn bind(&mut self, var: K, val: V) -> Result<(), BindVariableError> {
+        let curr_val = self.get(&var);
+        if curr_val.is_some() && curr_val != Some(&val) {
+            return Err(BindVariableError::VariableExists {
+                key: format!("{:?}", var),
+                curr_value: format!("{:?}", curr_val),
+                new_value: format!("{:?}", val),
+            });
+        }
+        self.insert(var, val);
+        Ok(())
+    }
+
+    fn retain_keys(&mut self, keys: &HashSet<Self::Key>) {
+        self.retain(|key, _| keys.contains(key));
+    }
+}
+
+impl<K: IndexKey + Ord + 'static, V: IndexValue + 'static> BindMap for BTreeMap<K, V> {
     type Key = K;
     type Value = V;
     type ValueRef<'a> = &'a V;
@@ -277,7 +304,7 @@ pub(crate) mod tests {
     pub(crate) struct TestData;
 
     impl IndexingScheme for TestIndexingScheme {
-        type Map = HashMap<usize, usize>;
+        type BindMap = HashMap<usize, usize>;
 
         fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>> {
             if *key == 0 {
@@ -294,7 +321,7 @@ pub(crate) mod tests {
         fn list_bind_options(
             &self,
             key: &Key<TestIndexingScheme>,
-            known_bindings: &<TestIndexingScheme as IndexingScheme>::Map,
+            known_bindings: &<TestIndexingScheme as IndexingScheme>::BindMap,
         ) -> Vec<Value<TestIndexingScheme>> {
             if *key == 0 || known_bindings.get(&(key - 1)).is_some() {
                 // All previous keys were assigned, we can (dummy) bind the key
