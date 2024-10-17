@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use crate::automaton::{ConstraintAutomaton, State, StateID, Transition, TransitionID};
 use crate::indexing::IndexKey;
-use crate::{Constraint, HashSet, IndexMap, IndexingScheme, PatternID};
+use crate::{Constraint, HashSet, BindMap, IndexingScheme, PatternID};
 
 /// Methods for modifying the automaton
 impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
@@ -107,8 +107,8 @@ where
         required_bindings: impl IntoIterator<Item = K>,
     ) where
         // A complicated way of saying Key<I> == K
-        I: IndexingScheme<Map = M>,
-        M: IndexMap<Key = K>,
+        I: IndexingScheme<BindMap = M>,
+        M: BindMap<Key = K>,
     {
         let mut state = self.root();
         let mut required_bindings: HashSet<_> = required_bindings.into_iter().collect();

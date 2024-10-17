@@ -6,9 +6,9 @@ use std::collections::VecDeque;
 
 use crate::{
     constraint::Constraint,
-    indexing::{DataKVMap, DataKey, IndexKey, IndexedData, Key},
+    indexing::{DataBindMap, DataKey, IndexKey, IndexedData, Key},
     pattern::Pattern,
-    HashSet, IndexMap, IndexingScheme, PatternID, Predicate,
+    HashSet, BindMap, IndexingScheme, PatternID, Predicate,
 };
 
 use super::{PatternMatch, PortMatcher};
@@ -29,7 +29,7 @@ where
     D: IndexedData,
     P: Predicate<D>,
 {
-    type Match = DataKVMap<D>;
+    type Match = DataBindMap<D>;
 
     fn find_matches<'a>(
         &'a self,
@@ -85,21 +85,21 @@ impl<K: IndexKey, P, I: IndexingScheme> SinglePatternMatcher<K, P, I> {
     pub fn match_exists<D>(&self, host: &D) -> bool
     where
         P: Predicate<D>,
-        DataKVMap<D>: IndexMap<Key = K>,
+        DataBindMap<D>: BindMap<Key = K>,
         D: IndexedData<IndexingScheme = I>,
     {
         !self.get_all_bindings(host).is_empty()
     }
 
     /// Get the valid scope assignments as a map from variable names to host nodes.
-    fn get_all_bindings<D>(&self, host: &D) -> Vec<I::Map>
+    fn get_all_bindings<D>(&self, host: &D) -> Vec<I::BindMap>
     where
         P: Predicate<D>,
-        DataKVMap<D>: IndexMap<Key = K>,
+        DataBindMap<D>: BindMap<Key = K>,
         D: IndexedData<IndexingScheme = I>,
     {
         let mut candidates = VecDeque::new();
-        candidates.push_back((self.constraints.as_slice(), I::Map::default()));
+        candidates.push_back((self.constraints.as_slice(), I::BindMap::default()));
         let mut final_bindings = Vec::new();
         while let Some((constraints, mut bindings)) = candidates.pop_front() {
             let [constraint, remaining @ ..] = constraints else {

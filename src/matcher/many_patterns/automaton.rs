@@ -3,7 +3,7 @@ use std::hash::Hash;
 
 use itertools::Itertools;
 
-use crate::indexing::{DataKVMap, DataKey, IndexedData};
+use crate::indexing::{DataBindMap, DataKey, IndexedData};
 use crate::{
     automaton::{AutomatonBuilder, ConstraintAutomaton},
     constraint::{Constraint, DetHeuristic},
@@ -13,7 +13,7 @@ use crate::{
     pattern::Pattern,
     HashMap, PatternID, PortMatcher, Predicate,
 };
-use crate::{IndexMap, IndexingScheme};
+use crate::{BindMap, IndexingScheme};
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
@@ -29,7 +29,7 @@ where
     PT: Pattern<Constraint = Constraint<DataKey<D>, P>>,
     D: IndexedData,
 {
-    type Match = DataKVMap<D>;
+    type Match = DataBindMap<D>;
 
     fn find_matches<'a>(
         &'a self,
@@ -66,8 +66,8 @@ where
     ) -> Result<Self, PT::Error>
     where
         P: DetHeuristic<K>,
-        I: IndexingScheme<Map = M>,
-        M: IndexMap<Key = K>,
+        I: IndexingScheme<BindMap = M>,
+        M: BindMap<Key = K>,
     {
         Self::try_from_patterns_with_det_heuristic(patterns, P::make_det, fallback)
     }
@@ -80,8 +80,8 @@ where
         fallback: PatternFallback,
     ) -> Result<Self, PT::Error>
     where
-        I: IndexingScheme<Map = M>,
-        M: IndexMap<Key = K>,
+        I: IndexingScheme<BindMap = M>,
+        M: BindMap<Key = K>,
     {
         let mut builder = AutomatonBuilder::new().set_det_heuristic(make_det);
         for (id, pattern) in patterns.iter().enumerate() {

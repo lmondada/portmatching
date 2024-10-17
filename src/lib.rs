@@ -15,7 +15,9 @@ pub mod string;
 pub mod utils;
 
 pub use constraint::{Constraint, DetHeuristic};
-pub use indexing::{IndexMap, IndexingScheme};
+pub use indexing::{
+    BindMap, DataBindMap, DataKey, DataValue, IndexedData, IndexingScheme, Key, Value,
+};
 pub use matcher::{
     ManyMatcher, NaiveManyMatcher, PatternFallback, PatternID, PatternMatch, PortMatcher,
     SinglePatternMatcher,

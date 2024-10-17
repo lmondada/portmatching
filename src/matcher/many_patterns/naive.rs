@@ -1,6 +1,6 @@
 use crate::{
     constraint::Constraint,
-    indexing::{DataKVMap, DataKey, IndexKey, IndexedData, Key},
+    indexing::{DataBindMap, DataKey, IndexKey, IndexedData, Key},
     matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
     pattern::Pattern,
     IndexingScheme, Predicate,
@@ -63,7 +63,7 @@ where
     D: IndexedData,
     P: Predicate<D>,
 {
-    type Match = DataKVMap<D>;
+    type Match = DataBindMap<D>;
 
     fn find_matches<'a>(
         &'a self,

@@ -5,12 +5,12 @@
 //! The predicate is either an AssignPredicate or a FilterPredicate.
 
 use crate::{
-    indexing::{DataKVMap, IndexedData},
+    indexing::{DataBindMap, IndexedData},
     predicate::ArityPredicate,
 };
 
 use super::{
-    indexing::{BindVariableError, IndexMap},
+    indexing::{BindMap, BindVariableError},
     predicate::Predicate,
 };
 use itertools::Itertools;
@@ -171,11 +171,11 @@ impl<K, P> Constraint<K, P> {
     pub fn is_satisfied<D: IndexedData>(
         &self,
         data: &D,
-        known_bindings: &DataKVMap<D>,
+        known_bindings: &DataBindMap<D>,
     ) -> Result<bool, InvalidConstraint>
     where
         P: Predicate<D>,
-        DataKVMap<D>: IndexMap<Key = K>,
+        DataBindMap<D>: BindMap<Key = K>,
         K: Debug,
     {
         let args = self
