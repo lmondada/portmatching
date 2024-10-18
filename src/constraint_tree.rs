@@ -105,7 +105,12 @@ where
 #[derive(Clone, Debug)]
 pub struct ConstraintTree<C> {
     nodes: Vec<TreeNode<C>>,
-    make_det: bool,
+    /// Whether the root state should be turned into a deterministic transition.
+    ///
+    /// If true, it is assumed that the constraints at the root are mutually
+    /// exclusive, i.e. constraints A, B, C on children of root are interpreted
+    /// as A, B ∧ ¬A, and C ∧ ¬A ∧ ¬B respectively.
+    pub make_det: bool,
 }
 
 impl<C> ConstraintTree<C> {
@@ -116,6 +121,13 @@ impl<C> ConstraintTree<C> {
             nodes: vec![root],
             make_det: false,
         }
+    }
+
+    /// Construct a new constraint tree with a root node.
+    pub fn with_make_det(make_det: bool) -> Self {
+        let mut tree = Self::new();
+        tree.set_make_det(make_det);
+        tree
     }
 
     /// Set the make_det flag for the root node.

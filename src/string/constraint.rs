@@ -1,5 +1,4 @@
 use crate::{
-    constraint::DetHeuristic,
     constraint_tree::{ConstraintTree, ToConstraintsTree},
     utils::sort_with_indices,
     Constraint,
@@ -31,14 +30,15 @@ impl<K: Copy + Ord> ToConstraintsTree<K> for CharacterPredicate {
         constraints: Vec<StringConstraint<K>>,
     ) -> ConstraintTree<StringConstraint<K>> {
         if constraints.is_empty() {
-            return ConstraintTree::new();
+            return ConstraintTree::with_make_det(true);
         }
         let mut constraints = sort_with_indices(constraints);
         let first_constraint = &constraints[0].0;
-        match *first_constraint.predicate() {
+        let make_det = match *first_constraint.predicate() {
             CharacterPredicate::BindingEq => {
                 // Only keep the first constraint
                 constraints.truncate(1);
+                false
             }
             CharacterPredicate::ConstVal(_) => {
                 // Checks of a variable against constant values are always mutually
@@ -50,15 +50,12 @@ impl<K: Copy + Ord> ToConstraintsTree<K> for CharacterPredicate {
                     matches!(c.predicate(), CharacterPredicate::ConstVal(_))
                         && c.required_bindings() == [first_cst_binding]
                 });
+                true
             }
-        }
-        ConstraintTree::with_children(constraints.into_iter().map(|(c, i)| (c, vec![i])))
-    }
-}
-
-impl<K: Copy + Ord> DetHeuristic<K> for CharacterPredicate {
-    fn make_det(constraints: &[&StringConstraint<K>]) -> bool {
-        constraints.is_empty()
-            || matches!(constraints[0].predicate(), CharacterPredicate::ConstVal(_))
+        };
+        let mut tree =
+            ConstraintTree::with_children(constraints.into_iter().map(|(c, i)| (c, vec![i])));
+        tree.set_make_det(make_det);
+        tree
     }
 }

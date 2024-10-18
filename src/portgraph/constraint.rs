@@ -16,7 +16,6 @@ use portgraph::{NodeIndex, PortGraph, PortView};
 use thiserror::Error;
 
 use crate::{
-    constraint::DetHeuristic,
     constraint_tree::{ConditionedPredicate, ConstraintTree, ToConstraintsTree},
     utils::{portgraph::line_partition, sort_with_indices},
     Constraint, HashMap,
@@ -36,7 +35,9 @@ impl ToConstraintsTree<PGIndexKey> for PGPredicate {
         let constraints = sort_with_indices(constraints);
         // This will always add the first constraint to the tree, plus any other
         // that are mutually exclusive
-        mutex_filter(constraints)
+        let mut tree = mutex_filter(constraints);
+        tree.set_make_det(true);
+        tree
     }
 }
 
@@ -68,12 +69,6 @@ impl ConditionedPredicate<PGIndexKey> for PGPredicate {
         let n_other = keys.len();
         args.extend(keys);
         Some(PGConstraint::try_new(PGPredicate::IsNotEqual { n_other }, args).unwrap())
-    }
-}
-
-impl DetHeuristic<PGIndexKey> for PGPredicate {
-    fn make_det(_: &[&PGConstraint]) -> bool {
-        true
     }
 }
 

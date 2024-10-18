@@ -17,7 +17,7 @@ use crate::{
     constraint_tree::{ConstraintTree, ToConstraintsTree},
     indexing::IndexKey,
     utils::OnlineToposort,
-    BindMap, HashMap, HashSet, IndexingScheme, PatternID,
+    BindMap, DetHeuristic, HashMap, HashSet, IndexingScheme, PatternID,
 };
 
 mod modify;
@@ -27,24 +27,18 @@ use self::node_depth::NodeDepthCache;
 
 use super::{State, Transition, TransitionGraph, TransitionID};
 
-/// A predicate on a list of constraints
-pub type ConstraintListPredicate<'c, K, P> = Box<dyn FnMut(&[&Constraint<K, P>]) -> bool + 'c>;
-
 /// Create constraint automata from lists of patterns, given by lists of
 /// constraints.
-pub struct AutomatonBuilder<'c, K: IndexKey, P, I> {
+pub struct AutomatonBuilder<K: IndexKey, P, I> {
     /// The matcher being built
     matcher: ConstraintAutomaton<K, P, I>,
     /// The list of all patterns IDs, in order of addition
     patterns_ids: Vec<PatternID>,
-    /// The heuristic used to determine whether to turn a state into a deterministic
-    /// one.
-    make_det: Option<ConstraintListPredicate<'c, K, P>>,
     /// The list of all nodes that were added in the last iteration
     recently_added: HashSet<NodeIndex>,
 }
 
-impl<'c, K: IndexKey, P, I> AutomatonBuilder<'c, K, P, I>
+impl<K: IndexKey, P, I> AutomatonBuilder<K, P, I>
 where
     Constraint<K, P>: Eq + Clone,
 {
@@ -56,7 +50,6 @@ where
         Self {
             matcher: ConstraintAutomaton::new(),
             patterns_ids: Vec::new(),
-            make_det: None,
             recently_added: HashSet::default(),
         }
     }
@@ -65,24 +58,7 @@ where
         Self {
             matcher: ConstraintAutomaton::with_indexing_scheme(host_indexing),
             patterns_ids: Vec::new(),
-            make_det: None,
             recently_added: HashSet::default(),
-        }
-    }
-
-    /// Set the deterministic heuristic to use.
-    ///
-    /// The heuristic is a function that takes a list of constraints and returns
-    /// true if the state should be turned into a deterministic one.
-    pub fn set_det_heuristic(
-        self,
-        make_det: impl FnMut(&[&Constraint<K, P>]) -> bool + 'c,
-    ) -> Self {
-        Self {
-            matcher: self.matcher,
-            patterns_ids: self.patterns_ids,
-            make_det: Some(Box::new(make_det)),
-            recently_added: self.recently_added,
         }
     }
 
@@ -173,7 +149,7 @@ where
     }
 }
 
-impl<'c, K: IndexKey, P, I> AutomatonBuilder<'c, K, P, I>
+impl<K: IndexKey, P, I> AutomatonBuilder<K, P, I>
 where
     P: ToConstraintsTree<K>,
     Constraint<K, P>: Eq + Clone + Hash,
@@ -189,7 +165,18 @@ where
     /// The `make_det` predicate specifies the heuristic used to determine whether
     /// to turn a state into a deterministic one. To reduce the automaton size,
     /// states are merged whenever possible.
-    pub fn finish<M>(mut self) -> (ConstraintAutomaton<K, P, I>, Vec<PatternID>)
+    pub fn finish<M>(self) -> (ConstraintAutomaton<K, P, I>, Vec<PatternID>)
+    where
+        I: IndexingScheme<BindMap = M>,
+        M: BindMap<Key = K>,
+    {
+        self.finish_with_det_heuristic(DetHeuristic::Default)
+    }
+
+    pub(crate) fn finish_with_det_heuristic<M>(
+        mut self,
+        det_heuristic: DetHeuristic<K, P>,
+    ) -> (ConstraintAutomaton<K, P, I>, Vec<PatternID>)
     where
         I: IndexingScheme<BindMap = M>,
         M: BindMap<Key = K>,
@@ -205,18 +192,20 @@ where
             self.make_constraints_unique(state);
 
             // Make the mutually exclusivity invariant hold
-            self.make_mutex(state);
+            let make_det = self.insert_constraint_tree(state);
 
             // The invariant might have been broken by the previous step
             self.make_constraints_unique(state);
 
             // Turn some of the states into deterministic transitions, according to
             // `make_det`
-            let constraints = self.matcher.constraints(state).collect_vec();
-            if self.make_det.as_mut().unwrap()(&constraints) {
-                self.make_det(state);
-                // Add `state` to the set of recently added nodes as it has been changed
-                self.recently_added.insert(state.0);
+            if make_det {
+                let constraints = self.matcher.constraints(state).collect_vec();
+                if det_heuristic.make_det(&constraints) {
+                    self.make_det(state);
+                    // Add `state` to the set of recently added nodes as it has been changed
+                    self.recently_added.insert(state.0);
+                }
             }
 
             // For all nodes that were added try to merge them with existing
@@ -306,22 +295,25 @@ where
         }
     }
 
-    /// Turn outgoing constraints at `state` into a mutually exclusive set.
+    /// Decompose outgoing constraints at `state` by replacing them with a
+    /// constraint tree.
     ///
-    /// Use `ToMutuallyExclusiveTree` to turn the constraints into a mutually
-    /// exclusive tree, which is inserted in place of `state`.
+    /// Return whether the root state should be made deterministic.
+    ///
+    /// Use [`ToConstraintsTree`] to turn the constraints into a constraint
+    /// tree, which is inserted in place of `state`.
     ///
     /// This may insert epsilon transitions, i.e. edges with no associated
     /// constraint. These will always be last in the constraint order.
-    fn make_mutex(&mut self, state: StateID) {
+    fn insert_constraint_tree(&mut self, state: StateID) -> bool {
         if self.matcher.is_deterministic(state) {
             // Nothing to do
-            return;
+            return false;
         }
 
         if !self.matcher.constraints(state).any(|_| true) {
             // There are no constraints, already in a deterministic state
-            return;
+            return false;
         }
         // Disconnect all non-fail children
         let constraints_children = self.matcher.drain_constraints(state).collect_vec();
@@ -333,11 +325,12 @@ where
             .unzip();
 
         // Organise constraints into a tree of mutually exclusive constraints
-        let mutex_tree = P::to_constraints_tree(constraints.clone());
+        let constraint_tree = P::to_constraints_tree(constraints.clone());
+        let make_det = constraint_tree.make_det;
 
-        let added_constraints = self.add_mutex_tree(mutex_tree, state, &children);
+        let added_constraints = self.add_constraint_tree(constraint_tree, state, &children);
 
-        // All constraints that were not present in the mutex tree are added as
+        // All constraints that were not present in the constraint tree are added as
         // children of an epsilon transition at `state`.
         let not_added = (0..constraints.len())
             .filter(|i| !added_constraints.contains(i))
@@ -352,6 +345,8 @@ where
                     .append_edge(fail_state, children[i], Some(constraints[i].clone()));
             }
         }
+
+        make_det
     }
 
     fn make_constraints_unique(&mut self, state: StateID) {
@@ -472,34 +467,34 @@ where
         self.recently_added.clear();
     }
 
-    fn add_mutex_tree(
+    fn add_constraint_tree(
         &mut self,
-        mutex_tree: ConstraintTree<Constraint<K, P>>,
+        constraint_tree: ConstraintTree<Constraint<K, P>>,
         state: StateID,
         children: &[StateID],
     ) -> HashSet<usize> {
         let mut added_constraints = HashSet::default();
 
-        // Add FAIL transitions for constraints at the root of the mutex tree
-        for &ind in mutex_tree.constraint_indices(mutex_tree.root()) {
+        // Add FAIL transitions for constraints at the root of the constraint tree
+        for &ind in constraint_tree.constraint_indices(constraint_tree.root()) {
             added_constraints.insert(ind);
             self.matcher.append_edge(state, children[ind], None);
         }
 
-        // Traverse the mutex tree, making sure to
+        // Traverse the constraint tree, making sure to
         //  - add each state of the tree to the matcher as we go
         //  - keep track of the matcher states corresponding to tree states
         //  - add edges to children when the constraint index is set
-        let mut curr_states = vec![(mutex_tree.root(), state)];
+        let mut curr_states = vec![(constraint_tree.root(), state)];
         while let Some((tree_state, matcher_state)) = curr_states.pop() {
-            for (child_tree_state, c) in mutex_tree.children(tree_state) {
-                if mutex_tree.n_children(child_tree_state) > 0 {
+            for (child_tree_state, c) in constraint_tree.children(tree_state) {
+                if constraint_tree.n_children(child_tree_state) > 0 {
                     let child_matcher_state = self.add_constraint(matcher_state, c.clone());
                     curr_states.push((child_tree_state, child_matcher_state));
                 }
 
                 // Add edges to the final children for `indices`
-                let indices = mutex_tree.constraint_indices(child_tree_state);
+                let indices = constraint_tree.constraint_indices(child_tree_state);
                 for &ind in indices {
                     added_constraints.insert(ind);
                     self.matcher
@@ -586,7 +581,7 @@ impl From<TracedTransitionID> for TransitionID {
     }
 }
 
-impl<'c, K: IndexKey, P, I: Default> Default for AutomatonBuilder<'c, K, P, I>
+impl<K: IndexKey, P, I: Default> Default for AutomatonBuilder<K, P, I>
 where
     Constraint<K, P>: Clone + Eq + Hash,
 {
@@ -595,8 +590,8 @@ where
     }
 }
 
-impl<'c, K: IndexKey, P, I: Default, M> FromIterator<Vec<Constraint<K, P>>>
-    for AutomatonBuilder<'c, K, P, I>
+impl<K: IndexKey, P, I: Default, M> FromIterator<Vec<Constraint<K, P>>>
+    for AutomatonBuilder<K, P, I>
 where
     Constraint<K, P>: Clone + Eq,
     I: IndexingScheme<BindMap = M>,
@@ -647,14 +642,10 @@ mod tests {
     }
 
     impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
-        fn wrap_builder(
-            self,
-            with_builder: impl Fn(&mut AutomatonBuilder<'static, K, P, I>),
-        ) -> Self {
+        fn wrap_builder(self, with_builder: impl Fn(&mut AutomatonBuilder<K, P, I>)) -> Self {
             let mut builder = AutomatonBuilder {
                 matcher: self,
                 patterns_ids: Vec::new(),
-                make_det: None,
                 recently_added: HashSet::default(),
             };
             with_builder(&mut builder);
@@ -663,10 +654,10 @@ mod tests {
     }
 
     #[test]
-    fn test_add_mutex_tree() {
+    fn test_add_constraint_tree() {
         let mut builder = AutomatonBuilder::<_, _, TestIndexingScheme>::default();
         let n2 = builder.matcher.add_non_det_node();
-        let mutex_tree = {
+        let constraint_tree = {
             let mut tree = ConstraintTree::new();
             let tree_child = tree.get_or_add_child(tree.root(), TestConstraint::new(vec![1]));
             tree.add_constraint_index(tree_child, 0);
@@ -674,16 +665,15 @@ mod tests {
             tree.add_constraint_index(tree_gchild, 1);
             tree
         };
-        builder.add_mutex_tree(mutex_tree, builder.matcher.root(), &[n2, n2]);
+        builder.add_constraint_tree(constraint_tree, builder.matcher.root(), &[n2, n2]);
         assert_snapshot!(builder.matcher.dot_string());
     }
 
-    pub(crate) type TestBuilder<'a> =
-        AutomatonBuilder<'a, usize, TestPredicate, TestIndexingScheme>;
+    pub(crate) type TestBuilder = AutomatonBuilder<usize, TestPredicate, TestIndexingScheme>;
 
     #[test]
     fn test_build() {
-        let mut builder = TestBuilder::new().set_det_heuristic(|_| false);
+        let mut builder = TestBuilder::new();
         let [constraint_root, _, constraint_b, constraint_c, constraint_d] = constraints();
         builder.add_pattern(vec![constraint_root.clone(), constraint_b.clone()], 0, None);
         builder.add_pattern(vec![constraint_root.clone(), constraint_c.clone()], 1, None);

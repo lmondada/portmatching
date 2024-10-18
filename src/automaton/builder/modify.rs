@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use crate::automaton::{ConstraintAutomaton, State, StateID, Transition, TransitionID};
 use crate::indexing::IndexKey;
-use crate::{Constraint, HashSet, BindMap, IndexingScheme, PatternID};
+use crate::{BindMap, Constraint, HashSet, IndexingScheme, PatternID};
 
 /// Methods for modifying the automaton
 impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
@@ -265,7 +265,7 @@ pub mod tests {
     /// [a,b,c,d] at the only child
     #[fixture]
     pub fn automaton() -> TestAutomaton {
-        let mut builder = AutomatonBuilder::new().set_det_heuristic(|_| false);
+        let mut builder = AutomatonBuilder::new();
         let [constraint_root, constraint_a, constraint_b, constraint_c, constraint_d] =
             constraints();
         builder.add_pattern(vec![constraint_root.clone(), constraint_a], 0, None);

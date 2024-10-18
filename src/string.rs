@@ -201,11 +201,13 @@ pub(super) mod tests {
 
     macro_rules! define_matcher_factories {
         ($StringPattern:ty, $StringManyMatcher:ty) => {{
+            use crate::DetHeuristic;
+
             fn non_det_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
                 <$StringManyMatcher>::try_from_patterns_with_det_heuristic(
                     patterns,
-                    |_| false,
                     Default::default(),
+                    DetHeuristic::Never,
                 )
                 .unwrap()
             }
@@ -217,8 +219,8 @@ pub(super) mod tests {
             fn det_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
                 <$StringManyMatcher>::try_from_patterns_with_det_heuristic(
                     patterns,
-                    |_| true,
                     Default::default(),
+                    DetHeuristic::default(),
                 )
                 .unwrap()
             }
