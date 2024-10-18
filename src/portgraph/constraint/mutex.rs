@@ -1,6 +1,6 @@
 //! Logic to compute mutually exclusive PGConstraints.
 
-use crate::{mutex_tree::MutuallyExclusiveTree, portgraph::predicate::PGPredicate};
+use crate::{constraint_tree::ConstraintTree, portgraph::predicate::PGPredicate};
 
 use super::PGConstraint;
 
@@ -24,7 +24,7 @@ fn fst_required_binding_eq(a: &PGConstraint, b: &PGConstraint) -> bool {
 /// This assumes that all constraints are distinct and the vec is not empty.
 pub(super) fn mutex_filter(
     constraints: Vec<(PGConstraint, usize)>,
-) -> MutuallyExclusiveTree<PGConstraint> {
+) -> ConstraintTree<PGConstraint> {
     // Assume constraints is not empty
     let first_constraint = constraints[0].0.clone();
 
@@ -36,10 +36,10 @@ pub(super) fn mutex_filter(
                 matches!(c.predicate(), PGPredicate::IsNotEqual { .. })
                     && fst_required_binding_eq(c, &first_constraint)
             });
-            MutuallyExclusiveTree::with_powerset(constraints.collect())
+            ConstraintTree::with_powerset(constraints.collect())
         }
         PGPredicate::HasNodeWeight(..) | PGPredicate::IsConnected { .. } => {
-            MutuallyExclusiveTree::with_transitive_mutex(constraints, |a, b| {
+            ConstraintTree::with_transitive_mutex(constraints, |a, b| {
                 match (a.predicate(), b.predicate()) {
                     (PGPredicate::HasNodeWeight(..), PGPredicate::HasNodeWeight(..)) => {
                         fst_required_binding_eq(a, b)
@@ -104,7 +104,7 @@ mod tests {
                 2,
             ),
         ];
-        let tree = MutuallyExclusiveTree::with_powerset(constraints);
+        let tree = ConstraintTree::with_powerset(constraints);
         assert_eq!(tree.n_nodes(), 1 + 3 + 2 + 1 + 1);
         assert_debug_snapshot!(tree);
     }

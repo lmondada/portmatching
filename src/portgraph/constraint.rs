@@ -16,8 +16,7 @@ use portgraph::{NodeIndex, PortGraph, PortView};
 use thiserror::Error;
 
 use crate::{
-    constraint::DetHeuristic,
-    mutex_tree::{ConditionedPredicate, MutuallyExclusiveTree, ToConstraintsTree},
+    constraint_tree::{ConditionedPredicate, ConstraintTree, ToConstraintsTree},
     utils::{portgraph::line_partition, sort_with_indices},
     Constraint, HashMap,
 };
@@ -29,14 +28,16 @@ use mutex::*;
 pub type PGConstraint<W = ()> = Constraint<PGIndexKey, PGPredicate<W>>;
 
 impl ToConstraintsTree<PGIndexKey> for PGPredicate {
-    fn to_constraints_tree(constraints: Vec<PGConstraint>) -> MutuallyExclusiveTree<PGConstraint> {
+    fn to_constraints_tree(constraints: Vec<PGConstraint>) -> ConstraintTree<PGConstraint> {
         if constraints.is_empty() {
-            return MutuallyExclusiveTree::new();
+            return ConstraintTree::new();
         }
         let constraints = sort_with_indices(constraints);
         // This will always add the first constraint to the tree, plus any other
         // that are mutually exclusive
-        mutex_filter(constraints)
+        let mut tree = mutex_filter(constraints);
+        tree.set_make_det(true);
+        tree
     }
 }
 
@@ -68,12 +69,6 @@ impl ConditionedPredicate<PGIndexKey> for PGPredicate {
         let n_other = keys.len();
         args.extend(keys);
         Some(PGConstraint::try_new(PGPredicate::IsNotEqual { n_other }, args).unwrap())
-    }
-}
-
-impl DetHeuristic<PGIndexKey> for PGPredicate {
-    fn make_det(_: &[&PGConstraint]) -> bool {
-        true
     }
 }
 

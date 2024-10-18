@@ -6,14 +6,14 @@ use itertools::Itertools;
 use crate::indexing::{DataBindMap, DataKey, IndexedData};
 use crate::{
     automaton::{AutomatonBuilder, ConstraintAutomaton},
-    constraint::{Constraint, DetHeuristic},
+    constraint::Constraint,
+    constraint_tree::ToConstraintsTree,
     indexing::IndexKey,
     matcher::PatternMatch,
-    mutex_tree::ToConstraintsTree,
     pattern::Pattern,
     HashMap, PatternID, PortMatcher, Predicate,
 };
-use crate::{BindMap, IndexingScheme};
+use crate::{BindMap, DetHeuristic, IndexingScheme};
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
@@ -65,25 +65,24 @@ where
         fallback: PatternFallback,
     ) -> Result<Self, PT::Error>
     where
-        P: DetHeuristic<K>,
         I: IndexingScheme<BindMap = M>,
         M: BindMap<Key = K>,
     {
-        Self::try_from_patterns_with_det_heuristic(patterns, P::make_det, fallback)
+        Self::try_from_patterns_with_det_heuristic(patterns, fallback, Default::default())
     }
 
     /// Create a new matcher from a vector of patterns, using a custom deterministic
     /// heuristic.
     pub fn try_from_patterns_with_det_heuristic<M>(
         patterns: Vec<PT>,
-        make_det: impl for<'c> FnMut(&[&'c Constraint<K, P>]) -> bool,
         fallback: PatternFallback,
+        det_heuristic: DetHeuristic<K, P>,
     ) -> Result<Self, PT::Error>
     where
         I: IndexingScheme<BindMap = M>,
         M: BindMap<Key = K>,
     {
-        let mut builder = AutomatonBuilder::new().set_det_heuristic(make_det);
+        let mut builder = AutomatonBuilder::new();
         for (id, pattern) in patterns.iter().enumerate() {
             let constraints = match fallback {
                 PatternFallback::Skip => {
@@ -96,7 +95,7 @@ where
             };
             builder.add_pattern(constraints, id, None);
         }
-        let (automaton, pattern_ids) = builder.finish();
+        let (automaton, pattern_ids) = builder.finish_with_det_heuristic(det_heuristic);
         let patterns = patterns
             .into_iter()
             .enumerate()

@@ -28,7 +28,9 @@ pub type PGNaiveManyPatternMatcher = NaiveManyMatcher<PGIndexKey, PGPredicate, P
 
 #[cfg(test)]
 mod tests {
-    use crate::{HashMap, PatternMatch, PortMatcher};
+    use std::cell::RefCell;
+
+    use crate::{DetHeuristic, HashMap, PatternMatch, PortMatcher};
 
     use super::*;
     use itertools::Itertools;
@@ -246,11 +248,11 @@ mod tests {
         let mut rd_cnt = 0;
         let matcher = PGManyPatternMatcher::try_from_patterns_with_det_heuristic(
             vec![p1, p2],
-            move |_| {
+            Default::default(),
+            DetHeuristic::Custom(RefCell::new(Box::new(move |_| {
                 rd_cnt += 1;
                 rd_cnt <= 3
-            },
-            Default::default(),
+            }))),
         )
         .unwrap();
         assert_eq!(matcher.find_matches(&g).count(), 3);
@@ -329,8 +331,8 @@ mod tests {
         let p2 = PGPattern::from_host_pick_root(p2);
         let matcher = PGManyPatternMatcher::try_from_patterns_with_det_heuristic(
             vec![p1, p2],
-            |_| false,
             Default::default(),
+            DetHeuristic::Never,
         )
         .unwrap();
 

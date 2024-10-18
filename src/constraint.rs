@@ -14,7 +14,7 @@ use super::{
     predicate::Predicate,
 };
 use itertools::Itertools;
-use std::fmt::Debug;
+use std::{cell::RefCell, fmt::Debug};
 use thiserror::Error;
 
 /// A constraint for pattern matching.
@@ -41,13 +41,28 @@ pub struct Constraint<K, P> {
 /// More deterministic states will result in faster automaton runtimes, but at
 /// the cost of larger automata. A good heuristic is therefore important to
 /// find the best tradeoff.
-pub trait DetHeuristic<K>
-where
-    Self: Sized,
-{
-    /// Return true if the set of constraints should be turned into a deterministic
-    /// transition.
-    fn make_det(constraints: &[&Constraint<K, Self>]) -> bool;
+#[derive(Default)]
+pub enum DetHeuristic<K, P> {
+    /// Turn into deterministic state whenever indicated by the constraint tree
+    #[default]
+    Default,
+    /// Never turn into deterministic state
+    Never,
+    /// Use a custom heuristic that is ANDed with the constraint tree make_det flag
+    Custom(RefCell<Box<dyn FnMut(&[&Constraint<K, P>]) -> bool>>),
+}
+
+impl<K, P> DetHeuristic<K, P> {
+    /// Whether the constraints should be turned into a deterministic transition.
+    ///
+    /// This cannot override the `make_det` flag in the constraint tree.
+    pub fn make_det(&self, constraints: &[&Constraint<K, P>]) -> bool {
+        match self {
+            DetHeuristic::Default => true,
+            DetHeuristic::Never => false,
+            DetHeuristic::Custom(f) => f.borrow_mut()(constraints),
+        }
+    }
 }
 
 /// Errors that occur when constructing constraints.

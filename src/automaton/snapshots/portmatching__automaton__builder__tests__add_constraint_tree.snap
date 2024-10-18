@@ -1,0 +1,12 @@
+---
+source: src/automaton/builder.rs
+expression: builder.matcher.dot_string()
+---
+digraph {
+    0 [ label = "ND\lscope: []" ]
+    1 [ label = "ND\lscope: []" ]
+    2 [ label = "ND\lscope: []" ]
+    0 -> 2 [ label = "TestPredicate { arity: 1 }(1)" ]
+    0 -> 1 [ label = "TestPredicate { arity: 1 }(1)" ]
+    2 -> 1 [ label = "TestPredicate { arity: 1 }(2)" ]
+}

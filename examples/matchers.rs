@@ -24,12 +24,7 @@ fn string_matching() {
     let patterns = ["he$a$bo", "hello, world"];
     let patterns = patterns.map(StringPattern::parse_str).to_vec();
 
-    let matcher = StringManyMatcher::try_from_patterns_with_det_heuristic(
-        patterns,
-        |_| true,
-        Default::default(),
-    )
-    .unwrap();
+    let matcher = StringManyMatcher::try_from_patterns(patterns, Default::default()).unwrap();
 
     let text = "hey Enschede, hello world".to_string();
     let matches = matcher.find_matches(&text).collect_vec();
@@ -44,12 +39,7 @@ fn matrix_matching() {
     let patterns = patterns.map(MatrixPattern::parse_str).to_vec();
     dbg!(&patterns);
 
-    let matcher = MatrixManyMatcher::try_from_patterns_with_det_heuristic(
-        patterns,
-        |_| true,
-        Default::default(),
-    )
-    .unwrap();
+    let matcher = MatrixManyMatcher::try_from_patterns(patterns, Default::default()).unwrap();
 
     let text = MatrixString::from(
         r#"
@@ -101,12 +91,7 @@ fn portgraph_matching() {
     let patterns = [p1, p2];
     let patterns = patterns.map(PGPattern::from_host_pick_root).to_vec();
 
-    let matcher = PGManyPatternMatcher::try_from_patterns_with_det_heuristic(
-        patterns,
-        |_| false,
-        Default::default(),
-    )
-    .unwrap();
+    let matcher = PGManyPatternMatcher::try_from_patterns(patterns, Default::default()).unwrap();
 
     let matches = matcher.find_matches(&subject).collect_vec();
 

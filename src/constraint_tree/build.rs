@@ -6,7 +6,7 @@ use itertools::Itertools;
 
 use crate::Constraint;
 
-use super::{ConditionedPredicate, MutuallyExclusiveTree};
+use super::{ConditionedPredicate, ConstraintTree};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IndexedConstraint<C> {
@@ -33,7 +33,7 @@ struct QueueItem<'c, C> {
 }
 
 fn add_implied_constraints<'c, K, P: ConditionedPredicate<K>>(
-    tree: &mut MutuallyExclusiveTree<Constraint<K, P>>,
+    tree: &mut ConstraintTree<Constraint<K, P>>,
     node: usize,
     satisfied_constraints: &mut Vec<&'c Constraint<K, P>>,
     next_constraint_index: &mut usize,
@@ -52,7 +52,7 @@ fn add_implied_constraints<'c, K, P: ConditionedPredicate<K>>(
     None
 }
 
-impl<C> MutuallyExclusiveTree<C> {
+impl<C> ConstraintTree<C> {
     /// Creates a constraint tree with a filtered subset of mutually exclusive
     /// `constraints` by checking all pairwise constraints.
     pub fn with_pairwise_mutex(
@@ -71,7 +71,7 @@ impl<C> MutuallyExclusiveTree<C> {
                 mutex_constraints.push((c, vec![c_ind]));
             }
         }
-        MutuallyExclusiveTree::with_children(mutex_constraints)
+        ConstraintTree::with_children(mutex_constraints)
     }
 
     /// Creates a constraint tree with a filtered subset of mutually exclusive
@@ -89,19 +89,17 @@ impl<C> MutuallyExclusiveTree<C> {
     {
         let mut constraints = constraints.into_iter();
         let Some((first, first_ind)) = constraints.next() else {
-            return MutuallyExclusiveTree::new();
+            return ConstraintTree::new();
         };
         let constraints = constraints
             .filter(|(c, _)| is_mutex(&first, c))
             .map(|(c, i)| (c, vec![i]))
             .collect_vec();
-        MutuallyExclusiveTree::with_children(
-            [(first, vec![first_ind])].into_iter().chain(constraints),
-        )
+        ConstraintTree::with_children([(first, vec![first_ind])].into_iter().chain(constraints))
     }
 }
 
-impl<P: ConditionedPredicate<K>, K> MutuallyExclusiveTree<Constraint<K, P>> {
+impl<P: ConditionedPredicate<K>, K> ConstraintTree<Constraint<K, P>> {
     /// Creates a constraint tree of all the conjunctions of subsets of the given
     /// constraints.
     ///
@@ -111,12 +109,12 @@ impl<P: ConditionedPredicate<K>, K> MutuallyExclusiveTree<Constraint<K, P>> {
         Constraint<K, P>: PartialEq,
     {
         if constraints.is_empty() {
-            return MutuallyExclusiveTree::new();
+            return ConstraintTree::new();
         }
 
         // Start by putting the constraints themselves. We will put combinations
         // of these constraints as descendants
-        let mut tree = MutuallyExclusiveTree::new();
+        let mut tree = ConstraintTree::new();
 
         // A queue of nodes in the tree to add children to
         let mut queue = VecDeque::from_iter([QueueItem {
