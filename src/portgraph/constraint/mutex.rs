@@ -1,6 +1,6 @@
 //! Logic to compute mutually exclusive PGConstraints.
 
-use crate::{mutex_tree::ConstraintTree, portgraph::predicate::PGPredicate};
+use crate::{constraint_tree::ConstraintTree, portgraph::predicate::PGPredicate};
 
 use super::PGConstraint;
 

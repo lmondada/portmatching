@@ -14,10 +14,10 @@ use petgraph::{
 use crate::{
     automaton::{ConstraintAutomaton, StateID},
     constraint::Constraint,
+    constraint_tree::{ConstraintTree, ToConstraintsTree},
     indexing::IndexKey,
-    mutex_tree::{ConstraintTree, ToConstraintsTree},
     utils::OnlineToposort,
-    HashMap, HashSet, BindMap, IndexingScheme, PatternID,
+    BindMap, HashMap, HashSet, IndexingScheme, PatternID,
 };
 
 mod modify;
@@ -616,7 +616,7 @@ mod tests {
     use super::modify::tests::{automaton, automaton2};
     use crate::{
         automaton::tests::TestAutomaton, constraint::tests::TestConstraint,
-        indexing::tests::TestIndexingScheme, mutex_tree::ConstraintTree,
+        constraint_tree::ConstraintTree, indexing::tests::TestIndexingScheme,
         predicate::tests::TestPredicate,
     };
 
@@ -624,9 +624,7 @@ mod tests {
 
     // Dummy ToMutuallyExclusiveTree implementation for TestConstraint
     impl ToConstraintsTree<usize> for TestPredicate {
-        fn to_constraints_tree(
-            preds: Vec<TestConstraint>,
-        ) -> ConstraintTree<TestConstraint> {
+        fn to_constraints_tree(preds: Vec<TestConstraint>) -> ConstraintTree<TestConstraint> {
             // We take the first `k` constraints to be mutually exclusive,
             // where `k` is given by the arity of the first predicate (this has
             // no meaning).

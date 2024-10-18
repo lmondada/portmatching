@@ -1,6 +1,6 @@
 use crate::{
     constraint::DetHeuristic,
-    mutex_tree::{ConstraintTree, ToConstraintsTree},
+    constraint_tree::{ConstraintTree, ToConstraintsTree},
     utils::sort_with_indices,
     Constraint,
 };

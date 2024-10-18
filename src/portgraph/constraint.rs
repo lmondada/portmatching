@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::{
     constraint::DetHeuristic,
-    mutex_tree::{ConditionedPredicate, ConstraintTree, ToConstraintsTree},
+    constraint_tree::{ConditionedPredicate, ConstraintTree, ToConstraintsTree},
     utils::{portgraph::line_partition, sort_with_indices},
     Constraint, HashMap,
 };

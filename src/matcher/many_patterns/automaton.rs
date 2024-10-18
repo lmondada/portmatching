@@ -7,9 +7,9 @@ use crate::indexing::{DataBindMap, DataKey, IndexedData};
 use crate::{
     automaton::{AutomatonBuilder, ConstraintAutomaton},
     constraint::{Constraint, DetHeuristic},
+    constraint_tree::ToConstraintsTree,
     indexing::IndexKey,
     matcher::PatternMatch,
-    mutex_tree::ToConstraintsTree,
     pattern::Pattern,
     HashMap, PatternID, PortMatcher, Predicate,
 };
