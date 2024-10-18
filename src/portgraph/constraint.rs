@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::{
     constraint::DetHeuristic,
-    mutex_tree::{ConditionedPredicate, MutuallyExclusiveTree, ToConstraintsTree},
+    mutex_tree::{ConditionedPredicate, ConstraintTree, ToConstraintsTree},
     utils::{portgraph::line_partition, sort_with_indices},
     Constraint, HashMap,
 };
@@ -29,9 +29,9 @@ use mutex::*;
 pub type PGConstraint<W = ()> = Constraint<PGIndexKey, PGPredicate<W>>;
 
 impl ToConstraintsTree<PGIndexKey> for PGPredicate {
-    fn to_constraints_tree(constraints: Vec<PGConstraint>) -> MutuallyExclusiveTree<PGConstraint> {
+    fn to_constraints_tree(constraints: Vec<PGConstraint>) -> ConstraintTree<PGConstraint> {
         if constraints.is_empty() {
-            return MutuallyExclusiveTree::new();
+            return ConstraintTree::new();
         }
         let constraints = sort_with_indices(constraints);
         // This will always add the first constraint to the tree, plus any other

@@ -15,7 +15,7 @@ use crate::{
     automaton::{ConstraintAutomaton, StateID},
     constraint::Constraint,
     indexing::IndexKey,
-    mutex_tree::{MutuallyExclusiveTree, ToConstraintsTree},
+    mutex_tree::{ConstraintTree, ToConstraintsTree},
     utils::OnlineToposort,
     HashMap, HashSet, BindMap, IndexingScheme, PatternID,
 };
@@ -474,7 +474,7 @@ where
 
     fn add_mutex_tree(
         &mut self,
-        mutex_tree: MutuallyExclusiveTree<Constraint<K, P>>,
+        mutex_tree: ConstraintTree<Constraint<K, P>>,
         state: StateID,
         children: &[StateID],
     ) -> HashSet<usize> {
@@ -616,7 +616,7 @@ mod tests {
     use super::modify::tests::{automaton, automaton2};
     use crate::{
         automaton::tests::TestAutomaton, constraint::tests::TestConstraint,
-        indexing::tests::TestIndexingScheme, mutex_tree::MutuallyExclusiveTree,
+        indexing::tests::TestIndexingScheme, mutex_tree::ConstraintTree,
         predicate::tests::TestPredicate,
     };
 
@@ -626,7 +626,7 @@ mod tests {
     impl ToConstraintsTree<usize> for TestPredicate {
         fn to_constraints_tree(
             preds: Vec<TestConstraint>,
-        ) -> MutuallyExclusiveTree<TestConstraint> {
+        ) -> ConstraintTree<TestConstraint> {
             // We take the first `k` constraints to be mutually exclusive,
             // where `k` is given by the arity of the first predicate (this has
             // no meaning).
@@ -636,10 +636,10 @@ mod tests {
                 .sorted_by(|(_, p1), (_, p2)| p1.cmp(p2))
                 .unzip();
             let Some(k) = preds.first().map(|c| c.predicate().arity) else {
-                return MutuallyExclusiveTree::new();
+                return ConstraintTree::new();
             };
             let first_k = preds.into_iter().take(k);
-            let mut tree = MutuallyExclusiveTree::new();
+            let mut tree = ConstraintTree::new();
             let new_children = tree.add_children(tree.root(), first_k).collect_vec();
             for (index, child) in inds.into_iter().zip(new_children) {
                 tree.add_constraint_index(child, index);
@@ -669,7 +669,7 @@ mod tests {
         let mut builder = AutomatonBuilder::<_, _, TestIndexingScheme>::default();
         let n2 = builder.matcher.add_non_det_node();
         let mutex_tree = {
-            let mut tree = MutuallyExclusiveTree::new();
+            let mut tree = ConstraintTree::new();
             let tree_child = tree.get_or_add_child(tree.root(), TestConstraint::new(vec![1]));
             tree.add_constraint_index(tree_child, 0);
             let tree_gchild = tree.get_or_add_child(tree_child, TestConstraint::new(vec![2]));

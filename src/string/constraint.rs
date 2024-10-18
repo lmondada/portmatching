@@ -1,6 +1,6 @@
 use crate::{
     constraint::DetHeuristic,
-    mutex_tree::{MutuallyExclusiveTree, ToConstraintsTree},
+    mutex_tree::{ConstraintTree, ToConstraintsTree},
     utils::sort_with_indices,
     Constraint,
 };
@@ -29,9 +29,9 @@ impl<K: Copy + Ord> PartialOrd for StringConstraint<K> {
 impl<K: Copy + Ord> ToConstraintsTree<K> for CharacterPredicate {
     fn to_constraints_tree(
         constraints: Vec<StringConstraint<K>>,
-    ) -> MutuallyExclusiveTree<StringConstraint<K>> {
+    ) -> ConstraintTree<StringConstraint<K>> {
         if constraints.is_empty() {
-            return MutuallyExclusiveTree::new();
+            return ConstraintTree::new();
         }
         let mut constraints = sort_with_indices(constraints);
         let first_constraint = &constraints[0].0;
@@ -52,7 +52,7 @@ impl<K: Copy + Ord> ToConstraintsTree<K> for CharacterPredicate {
                 });
             }
         }
-        MutuallyExclusiveTree::with_children(constraints.into_iter().map(|(c, i)| (c, vec![i])))
+        ConstraintTree::with_children(constraints.into_iter().map(|(c, i)| (c, vec![i])))
     }
 }
 

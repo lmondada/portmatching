@@ -55,7 +55,7 @@ where
     /// of the subset of constraints present in the tree.
     fn to_constraints_tree(
         constraints: Vec<Constraint<K, Self>>,
-    ) -> MutuallyExclusiveTree<Constraint<K, Self>>;
+    ) -> ConstraintTree<Constraint<K, Self>>;
 }
 
 /// Condition predicate on a set of satisfied predicates.
@@ -83,11 +83,11 @@ where
 /// If a index label appears at least once, then it is assumed that the
 /// constraint is satisfied exactly when a labelled state is reacheable.
 #[derive(Clone, Debug)]
-pub struct MutuallyExclusiveTree<C> {
+pub struct ConstraintTree<C> {
     nodes: Vec<MutExTreeNode<C>>,
 }
 
-impl<C> MutuallyExclusiveTree<C> {
+impl<C> ConstraintTree<C> {
     /// Construct a new constraint tree with a root node.
     pub fn new() -> Self {
         let root = MutExTreeNode::new();
@@ -186,7 +186,7 @@ impl<C> MutuallyExclusiveTree<C> {
     }
 }
 
-impl<C> Default for MutuallyExclusiveTree<C> {
+impl<C> Default for ConstraintTree<C> {
     fn default() -> Self {
         Self::new()
     }

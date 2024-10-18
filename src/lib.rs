@@ -22,7 +22,7 @@ pub use matcher::{
     ManyMatcher, NaiveManyMatcher, PatternFallback, PatternID, PatternMatch, PortMatcher,
     SinglePatternMatcher,
 };
-pub use mutex_tree::{ConditionedPredicate, MutuallyExclusiveTree, ToConstraintsTree};
+pub use mutex_tree::{ConditionedPredicate, ConstraintTree, ToConstraintsTree};
 pub use pattern::Pattern;
 pub use predicate::{ArityPredicate, Predicate};
 
