@@ -71,7 +71,9 @@ impl<C> ConstraintTree<C> {
                 mutex_constraints.push((c, vec![c_ind]));
             }
         }
-        ConstraintTree::with_children(mutex_constraints)
+        let mut t = ConstraintTree::with_children(mutex_constraints);
+        t.set_make_det(true);
+        t
     }
 
     /// Creates a constraint tree with a filtered subset of mutually exclusive
@@ -95,7 +97,12 @@ impl<C> ConstraintTree<C> {
             .filter(|(c, _)| is_mutex(&first, c))
             .map(|(c, i)| (c, vec![i]))
             .collect_vec();
-        ConstraintTree::with_children([(first, vec![first_ind])].into_iter().chain(constraints))
+
+        let mut t = ConstraintTree::with_children(
+            [(first, vec![first_ind])].into_iter().chain(constraints),
+        );
+        t.set_make_det(true);
+        t
     }
 }
 
@@ -114,7 +121,7 @@ impl<P: ConditionedPredicate<K>, K> ConstraintTree<Constraint<K, P>> {
 
         // Start by putting the constraints themselves. We will put combinations
         // of these constraints as descendants
-        let mut tree = ConstraintTree::new();
+        let mut tree = ConstraintTree::with_make_det(true);
 
         // A queue of nodes in the tree to add children to
         let mut queue = VecDeque::from_iter([QueueItem {
