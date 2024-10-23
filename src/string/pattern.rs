@@ -1,9 +1,9 @@
 use std::{collections::hash_map::Entry, iter};
 
-use crate::{HashMap, Pattern};
+use crate::{Constraint, HashMap, Pattern};
 use derive_more::Display;
 
-use super::{constraint::StringConstraint, predicate::CharacterPredicate, StringPatternPosition};
+use super::{predicate::CharacterPredicate, StringPatternPosition};
 
 /// A pattern for matching on strings.
 ///
@@ -68,10 +68,13 @@ impl StringPattern {
 }
 
 impl Pattern for StringPattern {
-    type Constraint = StringConstraint;
+    type Key = StringPatternPosition;
+    type Predicate = CharacterPredicate;
     type Error = ();
 
-    fn try_to_constraint_vec(&self) -> Result<Vec<Self::Constraint>, Self::Error> {
+    fn try_to_constraint_vec(
+        &self,
+    ) -> Result<Vec<Constraint<Self::Key, Self::Predicate>>, Self::Error> {
         // For a variable name, the first position it appears at
         let mut var_to_pos: HashMap<char, _> = Default::default();
         let mut constraints = Vec::new();
@@ -80,14 +83,13 @@ impl Pattern for StringPattern {
             match char_var {
                 CharVar::Literal(c) => {
                     constraints.push(
-                        Self::Constraint::try_new(CharacterPredicate::ConstVal(c), vec![index])
-                            .unwrap(),
+                        Constraint::try_new(CharacterPredicate::ConstVal(c), vec![index]).unwrap(),
                     );
                 }
                 CharVar::Variable(c) => match var_to_pos.entry(c) {
                     Entry::Occupied(first_index) => {
                         constraints.push(
-                            Self::Constraint::try_new(
+                            Constraint::try_new(
                                 CharacterPredicate::BindingEq,
                                 vec![index, *first_index.get()],
                             )
@@ -110,7 +112,7 @@ impl Pattern for StringPattern {
                 .any(|c| c.required_bindings().contains(&max_index_key))
             {
                 constraints.push(
-                    Self::Constraint::try_new(
+                    Constraint::try_new(
                         CharacterPredicate::BindingEq,
                         vec![max_index_key, max_index_key],
                     )
