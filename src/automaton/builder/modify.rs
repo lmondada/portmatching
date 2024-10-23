@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use crate::automaton::{ConstraintAutomaton, State, StateID, Transition, TransitionID};
 use crate::indexing::IndexKey;
-use crate::{BindMap, Constraint, HashSet, IndexingScheme, PatternID};
+use crate::{BindMap, Constraint, IndexingScheme, PatternID};
 
 /// Methods for modifying the automaton
 impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
@@ -84,7 +84,7 @@ where
         self.add_transition(parent, None)
     }
 
-    pub(super) fn add_match(&mut self, state: StateID, pattern: PatternID, scope: HashSet<K>) {
+    pub(super) fn add_match(&mut self, state: StateID, pattern: PatternID, scope: Vec<K>) {
         if !self.node_weight(state).matches.contains_key(&pattern) {
             self.node_weight_mut(state).matches.insert(pattern, scope);
         }
@@ -111,7 +111,9 @@ where
         M: BindMap<Key = K>,
     {
         let mut state = self.root();
-        let mut required_bindings: HashSet<_> = required_bindings.into_iter().collect();
+        let mut required_bindings = self
+            .host_indexing
+            .all_missing_bindings(required_bindings, []);
         for constraint in constraints {
             required_bindings.extend(self.host_indexing.all_missing_bindings(
                 constraint.required_bindings().iter().copied(),

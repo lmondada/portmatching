@@ -49,6 +49,7 @@ pub enum DetHeuristic<K, P> {
     /// Never turn into deterministic state
     Never,
     /// Use a custom heuristic that is ANDed with the constraint tree make_det flag
+    #[allow(clippy::type_complexity)]
     Custom(RefCell<Box<dyn FnMut(&[&Constraint<K, P>]) -> bool>>),
 }
 

@@ -11,6 +11,9 @@ use thiserror::Error;
 
 use crate::Constraint;
 
+/// Vector of constraints expressing a pattern `PT`.
+pub type ConstraintVec<PT> = Vec<Constraint<<PT as Pattern>::Key, <PT as Pattern>::Predicate>>;
+
 /// A pattern for pattern matching.
 ///
 /// Define valid patterns by providing a conversion to a vector of constraints.
@@ -23,9 +26,7 @@ pub trait Pattern {
     type Error;
 
     /// Convert to a vector of constraints.
-    fn try_to_constraint_vec(
-        &self,
-    ) -> Result<Vec<Constraint<Self::Key, Self::Predicate>>, Self::Error>;
+    fn try_to_constraint_vec(&self) -> Result<ConstraintVec<Self>, Self::Error>;
 
     /// Optionally, get a list of required bindings.
     ///
