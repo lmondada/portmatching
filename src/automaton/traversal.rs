@@ -8,7 +8,7 @@ use rustc_hash::FxHasher;
 use crate::indexing::{DataBindMap, IndexedData};
 use crate::{
     indexing::{IndexKey, Key},
-    utils, HashMap, HashSet, BindMap, IndexingScheme, PatternID, Predicate,
+    utils, BindMap, HashMap, HashSet, IndexingScheme, PatternID, Predicate,
 };
 
 use super::{ConstraintAutomaton, StateID};
@@ -195,8 +195,9 @@ where
                             } else {
                                 vec![state.bindings.clone()]
                             };
+                            let scope = HashSet::from_iter(scope.iter().copied());
                             bindings.into_iter().map(move |mut bindings| {
-                                bindings.retain_keys(scope);
+                                bindings.retain_keys(&scope);
                                 (id, bindings)
                             })
                         }),

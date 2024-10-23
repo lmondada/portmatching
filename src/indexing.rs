@@ -42,6 +42,8 @@ pub trait IndexingScheme {
     fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>>;
 
     /// List all missing bindings for an index key, in topological order.
+    ///
+    /// Includes `key` if it is not already in `known_bindings`.
     fn missing_bindings(
         &self,
         key: &Key<Self>,

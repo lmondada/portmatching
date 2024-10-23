@@ -1,6 +1,6 @@
 use petgraph::{visit::EdgeRef, Direction};
 
-use crate::{indexing::IndexKey, Constraint, HashMap, HashSet, PatternID};
+use crate::{indexing::IndexKey, Constraint, HashMap, PatternID};
 
 use super::{ConstraintAutomaton, State, StateID, TransitionID};
 
@@ -121,7 +121,7 @@ impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
             .map(|e| e.id().into())
     }
 
-    pub(super) fn matches(&self, state: StateID) -> &HashMap<PatternID, HashSet<K>> {
+    pub(super) fn matches(&self, state: StateID) -> &HashMap<PatternID, Vec<K>> {
         &self.node_weight(state).matches
     }
 

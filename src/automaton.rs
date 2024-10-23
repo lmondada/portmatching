@@ -11,7 +11,7 @@ use petgraph::dot::Dot;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::stable_graph::StableDiGraph;
 
-use crate::{HashMap, HashSet};
+use crate::HashMap;
 use std::fmt::{self, Debug};
 
 use derive_more::{From, Into};
@@ -134,7 +134,9 @@ struct TransitionID(EdgeIndex);
 struct State<K: IndexKey> {
     /// The pattern matches at current state, along with the bindings associated
     /// with each match.
-    matches: HashMap<PatternID, HashSet<K>>,
+    ///
+    /// The requried bindings are stored topological order.
+    matches: HashMap<PatternID, Vec<K>>,
     /// Whether the state is deterministic
     deterministic: bool,
     /// The order of the outgoing contraint transitions. Must map one-to-one to
