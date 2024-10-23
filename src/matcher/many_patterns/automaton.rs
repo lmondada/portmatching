@@ -26,7 +26,7 @@ pub struct ManyMatcher<PT, K: IndexKey, P, I> {
 impl<PT, P, D> PortMatcher<D> for ManyMatcher<PT, DataKey<D>, P, D::IndexingScheme>
 where
     P: Predicate<D>,
-    PT: Pattern<Constraint = Constraint<DataKey<D>, P>>,
+    PT: Pattern<Key = DataKey<D>, Predicate = P>,
     D: IndexedData,
 {
     type Match = DataBindMap<D>;
@@ -53,7 +53,7 @@ impl<K: IndexKey, P, PT, I> ManyMatcher<PT, K, P, I>
 where
     Constraint<K, P>: Eq + Clone + Hash,
     P: ToConstraintsTree<K>,
-    PT: Pattern<Constraint = Constraint<K, P>>,
+    PT: Pattern<Key = K, Predicate = P>,
     I: IndexingScheme + Default,
 {
     /// Create a new matcher from patterns.
@@ -93,7 +93,11 @@ where
                 }
                 PatternFallback::Fail => pattern.try_to_constraint_vec()?,
             };
-            builder.add_pattern(constraints, id, None);
+            builder.add_pattern(
+                constraints,
+                id,
+                pattern.required_bindings().unwrap_or_default(),
+            );
         }
         let (automaton, pattern_ids) = builder.finish_with_det_heuristic(det_heuristic);
         let patterns = patterns

@@ -9,17 +9,31 @@
 
 use thiserror::Error;
 
+use crate::Constraint;
+
 /// A pattern for pattern matching.
 ///
 /// Define valid patterns by providing a conversion to a vector of constraints.
 pub trait Pattern {
-    /// The constraint type that the pattern is defined over.
-    type Constraint;
+    /// The type of variable names used in the pattern.
+    type Key;
+    /// The type of predicates used in the pattern.
+    type Predicate;
     /// The error type returned by the conversion to a vector of constraints.
     type Error;
 
     /// Convert to a vector of constraints.
-    fn try_to_constraint_vec(&self) -> Result<Vec<Self::Constraint>, Self::Error>;
+    fn try_to_constraint_vec(
+        &self,
+    ) -> Result<Vec<Constraint<Self::Key, Self::Predicate>>, Self::Error>;
+
+    /// Optionally, get a list of required bindings.
+    ///
+    /// The set of bindings used during matching will always be returned (and
+    /// used by default if no further bindings are given).
+    fn required_bindings(&self) -> Option<Vec<Self::Key>> {
+        None
+    }
 }
 
 /// A pattern that can be viewed as concrete data that can be matched on.
@@ -45,12 +59,13 @@ pub(crate) mod tests {
     use derive_more::{From, Into};
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Into)]
-    pub(crate) struct TestPattern<C>(Vec<C>);
-    impl<C: Clone> Pattern for TestPattern<C> {
-        type Constraint = C;
+    pub(crate) struct TestPattern<K, P>(Vec<Constraint<K, P>>);
+    impl<K: Clone, P: Clone> Pattern for TestPattern<K, P> {
+        type Key = K;
+        type Predicate = P;
         type Error = ();
 
-        fn try_to_constraint_vec(&self) -> Result<Vec<Self::Constraint>, Self::Error> {
+        fn try_to_constraint_vec(&self) -> Result<Vec<Constraint<K, P>>, Self::Error> {
             Ok(self.0.clone())
         }
     }

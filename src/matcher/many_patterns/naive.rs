@@ -1,5 +1,4 @@
 use crate::{
-    constraint::Constraint,
     indexing::{DataBindMap, DataKey, IndexKey, IndexedData, Key},
     matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
     pattern::Pattern,
@@ -24,7 +23,7 @@ impl<P, I: IndexingScheme + Default> NaiveManyMatcher<Key<I>, P, I> {
         patterns: impl IntoIterator<Item = &'p PT>,
     ) -> Result<Self, PT::Error>
     where
-        PT: Pattern<Constraint = Constraint<Key<I>, P>> + 'p,
+        PT: Pattern<Key = Key<I>, Predicate = P> + 'p,
     {
         let matchers = patterns
             .into_iter()
@@ -40,7 +39,7 @@ impl<P, I: IndexingScheme + Default> NaiveManyMatcher<Key<I>, P, I> {
     ) -> Result<Self, PT::Error>
     where
         I: Clone,
-        PT: Pattern<Constraint = Constraint<Key<I>, P>> + 'p,
+        PT: Pattern<Key = Key<I>, Predicate = P> + 'p,
     {
         let matchers = patterns
             .into_iter()

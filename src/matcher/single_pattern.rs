@@ -8,7 +8,7 @@ use crate::{
     constraint::Constraint,
     indexing::{DataBindMap, DataKey, IndexKey, IndexedData, Key},
     pattern::Pattern,
-    HashSet, BindMap, IndexingScheme, PatternID, Predicate,
+    BindMap, HashSet, IndexingScheme, PatternID, Predicate,
 };
 
 use super::{PatternMatch, PortMatcher};
@@ -45,7 +45,7 @@ impl<P, I: IndexingScheme> SinglePatternMatcher<Key<I>, P, I> {
     /// Create a matcher from a vector of constraints.
     ///
     /// The host indexing scheme is the type's default.
-    pub fn try_from_pattern<PT: Pattern<Constraint = Constraint<Key<I>, P>>>(
+    pub fn try_from_pattern<PT: Pattern<Key = Key<I>, Predicate = P>>(
         pattern: &PT,
     ) -> Result<Self, PT::Error>
     where
@@ -55,7 +55,7 @@ impl<P, I: IndexingScheme> SinglePatternMatcher<Key<I>, P, I> {
     }
 
     /// Create a matcher from a vector of constraints with specified host indexing scheme.
-    pub fn try_from_pattern_with_indexing<PT: Pattern<Constraint = Constraint<Key<I>, P>>>(
+    pub fn try_from_pattern_with_indexing<PT: Pattern<Key = Key<I>, Predicate = P>>(
         pattern: &PT,
         indexing: I,
     ) -> Result<Self, PT::Error> {
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn test_single_pattern_matcher() {
         let eq_2 = TestConstraint::new(vec![2, 2]);
-        let pattern: TestPattern<TestConstraint> = vec![eq_2].into();
+        let pattern: TestPattern<usize, TestPredicate> = vec![eq_2].into();
         let matcher = TestMatcher::try_from_pattern(&pattern).unwrap();
 
         // Matching against itself works

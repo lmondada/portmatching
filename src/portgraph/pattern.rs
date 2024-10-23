@@ -1,9 +1,13 @@
 //! Patterns for matching port graphs.
 
-use crate::{pattern::ConcretePattern, utils::is_connected, Pattern};
+use crate::{pattern::ConcretePattern, utils::is_connected, Constraint, Pattern};
 use portgraph::{LinkView, NodeIndex, PortGraph};
 
-use super::constraint::{constraint_vec, PGConstraint, PGPatternError};
+use super::{
+    constraint::{constraint_vec, PGPatternError},
+    indexing::PGIndexKey,
+    PGPredicate,
+};
 
 /// A concrete port graph pattern.
 ///
@@ -16,10 +20,13 @@ pub struct PGPattern<G> {
 }
 
 impl Pattern for PGPattern<PortGraph> {
-    type Constraint = PGConstraint;
+    type Key = PGIndexKey;
+    type Predicate = PGPredicate;
     type Error = PGPatternError;
 
-    fn try_to_constraint_vec(&self) -> Result<Vec<Self::Constraint>, Self::Error> {
+    fn try_to_constraint_vec(
+        &self,
+    ) -> Result<Vec<Constraint<Self::Key, Self::Predicate>>, Self::Error> {
         constraint_vec(&self.graph, self.root.ok_or(PGPatternError::NoRoot)?)
     }
 }

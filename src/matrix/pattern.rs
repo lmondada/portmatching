@@ -1,9 +1,9 @@
 use std::{fmt, iter};
 
 use crate::string::CharVar;
-use crate::{HashMap, Pattern};
+use crate::{Constraint, HashMap, Pattern};
 
-use super::{CharacterPredicate, MatrixConstraint, MatrixPatternPosition};
+use super::{CharacterPredicate, MatrixPatternPosition};
 
 /// A pattern for matching a matrix of characters.
 ///
@@ -66,10 +66,13 @@ impl MatrixPattern {
 }
 
 impl Pattern for MatrixPattern {
-    type Constraint = MatrixConstraint;
+    type Key = MatrixPatternPosition;
+    type Predicate = CharacterPredicate;
     type Error = ();
 
-    fn try_to_constraint_vec(&self) -> Result<Vec<Self::Constraint>, Self::Error> {
+    fn try_to_constraint_vec(
+        &self,
+    ) -> Result<Vec<Constraint<Self::Key, Self::Predicate>>, Self::Error> {
         // For a variable name, the first position it appears at
         let mut var_to_pos: HashMap<char, _> = Default::default();
         let mut constraints = Vec::new();
@@ -78,14 +81,13 @@ impl Pattern for MatrixPattern {
             match char_var {
                 CharVar::Literal(c) => {
                     constraints.push(
-                        Self::Constraint::try_new(CharacterPredicate::ConstVal(c), vec![index])
-                            .unwrap(),
+                        Constraint::try_new(CharacterPredicate::ConstVal(c), vec![index]).unwrap(),
                     );
                 }
                 CharVar::Variable(c) => {
                     if let Some(&first_index) = var_to_pos.get(&c) {
                         constraints.push(
-                            Self::Constraint::try_new(
+                            Constraint::try_new(
                                 CharacterPredicate::BindingEq,
                                 vec![index, first_index],
                             )
@@ -103,7 +105,7 @@ impl Pattern for MatrixPattern {
             // string when matched. An alternative would be to explicitly
             // disallow empty patterns.
             constraints.push(
-                Self::Constraint::try_new(
+                Constraint::try_new(
                     CharacterPredicate::BindingEq,
                     vec![MatrixPatternPosition(0, 0), MatrixPatternPosition(0, 0)],
                 )
