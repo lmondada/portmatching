@@ -19,9 +19,7 @@ pub struct SerialPatternMatch {
     root: NodeIndex,
 }
 
-impl<S: BindMap<Key = PGIndexKey, Value = NodeIndex>> From<PatternMatch<S>>
-    for SerialPatternMatch
-{
+impl<S: BindMap<Key = PGIndexKey, Value = NodeIndex>> From<PatternMatch<S>> for SerialPatternMatch {
     fn from(value: PatternMatch<S>) -> Self {
         let pattern = value.pattern;
         let &root = value.match_data.get(&PGIndexKey::root(0)).unwrap().borrow();
