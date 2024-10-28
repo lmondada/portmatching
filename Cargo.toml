@@ -101,3 +101,6 @@ required-features = ["serde", "portgraph"]
 # name = "criterion"
 # harness = false
 # required-features = ["datagen", "serde"]
+
+[patch.crates-io]
+petgraph = { git = "https://github.com/lmondada/petgraph", branch = "master" }
