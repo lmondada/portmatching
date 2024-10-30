@@ -339,6 +339,13 @@ pub(super) mod tests {
         "ceaaaaaaaaaa$baa$a$caa$daa",
         "b$aaaa",
     ])]
+    #[case("abe", vec![
+        "$a",
+        "a$ae",
+        "b",
+        "aba",
+        "$cb$a",
+    ])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         use itertools::Itertools;
 
