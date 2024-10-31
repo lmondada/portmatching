@@ -1,12 +1,13 @@
-use std::hash::Hash;
+use std::{cmp::Reverse, hash::Hash};
 
 use itertools::Itertools;
 use petgraph::{
-    data::DataMap,
+    acyclic::Acyclic,
+    data::{DataMap, DataMapMut},
     graph::NodeIndex,
     visit::{
         Data, EdgeRef, GraphBase, IntoEdgesDirected, IntoNeighborsDirected, IntoNodeIdentifiers,
-        NodeFiltered, Reversed, Visitable,
+        Reversed, Visitable,
     },
     Direction,
 };
@@ -16,52 +17,68 @@ use crate::{
     constraint::Constraint,
     constraint_tree::{ConstraintTree, ToConstraintsTree},
     indexing::IndexKey,
-    utils::OnlineToposort,
     BindMap, DetHeuristic, HashMap, HashSet, IndexingScheme, PatternID,
 };
 
 mod modify;
-mod node_depth;
 
-use self::node_depth::NodeDepthCache;
-
-use super::{State, Transition, TransitionGraph, TransitionID};
+use super::{view::GraphView, State, Transition, TransitionGraph, TransitionID};
 
 /// Create constraint automata from lists of patterns, given by lists of
 /// constraints.
 pub struct AutomatonBuilder<K: IndexKey, P, I> {
-    /// The matcher being built
-    matcher: ConstraintAutomaton<K, P, I>,
+    /// The matcher being built, made of a graph, a root state and an indexing scheme
+    graph: Acyclic<TransitionGraph<K, P>>,
+    /// The root of the graph
+    root: StateID,
+    /// The indexing scheme used
+    host_indexing: I,
     /// The list of all patterns IDs, in order of addition
     patterns_ids: Vec<PatternID>,
     /// The list of all nodes that were added in the last iteration
-    recently_added: HashSet<NodeIndex>,
+    recently_added: HashSet<StateID>,
 }
 
-impl<K: IndexKey, P, I> AutomatonBuilder<K, P, I>
-where
-    Constraint<K, P>: Eq + Clone,
-{
+impl<K: IndexKey, P, I> AutomatonBuilder<K, P, I> {
     /// Construct an empty automaton builder.
     pub fn new() -> Self
     where
         I: Default,
+        P: 'static,
     {
+        Self::with_indexing_scheme(I::default())
+    }
+
+    fn with_indexing_scheme(host_indexing: I) -> Self
+    where
+        P: 'static,
+    {
+        Self::from_matcher(ConstraintAutomaton::with_indexing_scheme(host_indexing))
+    }
+
+    fn from_matcher(automaton: ConstraintAutomaton<K, P, I>) -> Self
+    where
+        P: 'static,
+    {
+        let ConstraintAutomaton {
+            graph,
+            root,
+            host_indexing,
+        } = automaton;
         Self {
-            matcher: ConstraintAutomaton::new(),
+            graph: Acyclic::try_from_graph(graph).unwrap(),
+            root,
+            host_indexing,
             patterns_ids: Vec::new(),
             recently_added: HashSet::default(),
         }
     }
+}
 
-    fn with_indexing_scheme(host_indexing: I) -> Self {
-        Self {
-            matcher: ConstraintAutomaton::with_indexing_scheme(host_indexing),
-            patterns_ids: Vec::new(),
-            recently_added: HashSet::default(),
-        }
-    }
-
+impl<K: IndexKey, P: 'static, I> AutomatonBuilder<K, P, I>
+where
+    Constraint<K, P>: Eq + Clone,
+{
     /// Construct an automaton builder from a list of patterns, given by lists of
     /// constraints.
     ///
@@ -70,6 +87,8 @@ where
     where
         I: Default + IndexingScheme<BindMap = M>,
         M: BindMap<Key = K>,
+        K: 'static,
+        P: 'static,
     {
         Self::from_constraints_with_index_scheme(patterns, I::default())
     }
@@ -83,6 +102,8 @@ where
     where
         I: IndexingScheme<BindMap = M>,
         M: BindMap<Key = K>,
+        K: 'static,
+        P: 'static,
     {
         let mut pattern_id = 0;
         patterns.into_iter().fold(
@@ -95,63 +116,55 @@ where
         )
     }
 
-    /// Add a pattern to the automaton builder.
-    pub fn add_pattern<M>(
-        &mut self,
-        pattern: Vec<Constraint<K, P>>,
-        id: impl Into<PatternID>,
-        required_bindings: impl IntoIterator<Item = K>,
-    ) where
-        I: IndexingScheme<BindMap = M>,
-        M: BindMap<Key = K>,
-    {
-        let id = id.into();
-        self.matcher.add_pattern(pattern, id, required_bindings);
-        self.patterns_ids.push(id);
-    }
-
-    fn find_mergeable_nodes(
-        &self,
-        node: NodeIndex,
-        node_depths: &NodeDepthCache<NodeIndex>,
-    ) -> Vec<StateID> {
-        let state = StateID(node);
-
+    fn find_mergeable_states(&self, state: StateID) -> Vec<StateID> {
         let siblings = {
             let Some(first_child) = self
-                .matcher
                 .all_transitions(state)
                 .next()
-                .map(|t| self.matcher.next_state(t))
+                .map(|t| self.next_state(t))
             else {
                 return vec![];
             };
-            self.matcher.incoming_transitions(first_child)
+            self.incoming_transitions(first_child)
+                .map(|t| self.parent(t))
         };
 
-        let mut no_path_siblings = HashSet::from_iter([node]);
-        for StateID(sibling) in siblings
-            .map(|t| self.matcher.parent(t))
-            .filter(|&n| n != state)
-            .unique()
-        {
-            if !node_depths.path_exists(sibling, &no_path_siblings, &self.matcher.graph) {
+        let mut no_path_siblings = HashSet::from_iter([state]);
+        for sibling in siblings.filter(|&n| n != state).unique() {
+            if !path_exists(sibling, no_path_siblings.iter().copied(), &self.graph) {
                 no_path_siblings.insert(sibling);
             }
         }
 
-        let state_tuple = self.matcher.state_tuple(state);
+        let state_tuple = self.state_tuple(state);
         no_path_siblings
             .into_iter()
             .map_into()
-            .filter(|&n| self.matcher.state_tuple(n) == state_tuple)
+            .filter(|&n| self.state_tuple(n) == state_tuple)
             .collect_vec()
     }
+
+    /// Get the root of the automaton.
+    pub(super) fn root(&self) -> StateID {
+        self.root
+    }
+}
+
+/// Check if there is a path from/to `node` to/from any of the nodes in
+/// `other_nodes`.
+fn path_exists<K: IndexKey, P: 'static>(
+    node: StateID,
+    other_nodes: impl IntoIterator<Item = StateID>,
+    graph: &Acyclic<TransitionGraph<K, P>>,
+) -> bool {
+    other_nodes
+        .into_iter()
+        .any(|n| !graph.is_valid_edge(node.0, n.0) || !graph.is_valid_edge(n.0, node.0))
 }
 
 impl<K: IndexKey, P, I> AutomatonBuilder<K, P, I>
 where
-    P: ToConstraintsTree<K>,
+    P: ToConstraintsTree<K> + 'static,
     Constraint<K, P>: Eq + Clone + Hash,
     K: Clone,
 {
@@ -185,9 +198,15 @@ where
         // hold. The changes only affect nodes in the future of the root, i.e.
         // nodes on which the invariant does not hold yet.
 
-        // With this `toposort` we are allowed to add vertices and edges as we go
-        let mut traverser = self.matcher.toposort();
-        while let Some(state) = traverser.next(&self.matcher) {
+        // We traverse the graph in toposort order, with the twist that we are
+        // adding nodes and vertices as we go. We ensure this is well defined by
+        // only adding nodes in the future of the current node. Hence, we can
+        // keep a current `pos` in the topological ordering: everything before
+        // `pos` is immutable, whereas everything after `pos` is mutable.
+        let mut pos = 0;
+        while pos < self.graph.node_count() {
+            let state = StateID(self.graph.order()[pos]);
+
             // Group all identical constraints and FAIL transitions into one
             self.make_constraints_unique(state);
 
@@ -200,23 +219,38 @@ where
             // Turn some of the states into deterministic transitions, according to
             // `make_det`
             if make_det {
-                let constraints = self.matcher.constraints(state).collect_vec();
+                let constraints = self.constraints(state).collect_vec();
                 if det_heuristic.make_det(&constraints) {
                     self.make_det(state);
                     // Add `state` to the set of recently added nodes as it has been changed
-                    self.recently_added.insert(state.0);
+                    self.recently_added.insert(state);
                 }
             }
 
             // For all nodes that were added try to merge them with existing
             // ones.
             self.try_merge_new_nodes();
+
+            // The pos of state might have changed a bit. If this moves backwarks,
+            // then we will have to retraverse a couple of nodes -- not an issue
+            // in practice. If this is moving forwards, then just process the new
+            // node at `pos` again (this should only happen when an edge
+            // a -> state is added).
+            let new_pos = self.graph.get_position(state.0);
+            if new_pos <= pos {
+                pos = new_pos + 1;
+            }
         }
 
         // Now traverse from end to front to save the scope of each automaton state.
         self.populate_scopes();
 
-        (self.matcher, self.patterns_ids)
+        let matcher = ConstraintAutomaton {
+            graph: self.graph.into_inner(),
+            root: self.root,
+            host_indexing: self.host_indexing,
+        };
+        (matcher, self.patterns_ids)
     }
 
     /// Populate the scope of each automaton state.
@@ -238,10 +272,8 @@ where
             a.retain(|x| b.contains(x));
             a
         };
-        let mut forward_scopes = compute_scopes(
-            &self.matcher.graph,
-            intersect_vec,
-            |edge, known_bindings| {
+        let mut forward_scopes =
+            compute_scopes(self.graph.inner(), intersect_vec, |edge, known_bindings| {
                 let new_bindings = edge
                     .weight()
                     .constraint
@@ -249,11 +281,9 @@ where
                     .into_iter()
                     .flat_map(|c| c.required_bindings())
                     .copied();
-                self.matcher
-                    .host_indexing()
+                self.host_indexing
                     .all_missing_bindings(new_bindings, known_bindings.iter().copied())
-            },
-        );
+            });
 
         // The parent scope is obtained by:
         // - taking the union of the children's scopes
@@ -263,9 +293,9 @@ where
             a
         };
         let mut backward_scopes =
-            compute_scopes(Reversed(&self.matcher.graph), union_set, |edge, _| {
+            compute_scopes(Reversed(self.graph.inner()), union_set, |edge, _| {
                 let s = StateID(edge.source());
-                let pattern_matches = self.matcher.matches(s);
+                let pattern_matches = self.matches(s);
                 pattern_matches
                     .values()
                     .flat_map(|s| s.iter())
@@ -275,7 +305,7 @@ where
 
         // Intersect the two scopes, and add the bindings required to evaluate
         // the outgoing constraints at `state`
-        let all_nodes = self.matcher.graph.node_indices().collect_vec();
+        let all_nodes = self.graph.node_indices().collect_vec();
         for node in all_nodes {
             let mut forward_scope = forward_scopes.remove(&node).unwrap();
             let backward_scope = backward_scopes.remove(&node).unwrap();
@@ -283,15 +313,14 @@ where
             let mut scope = forward_scope;
 
             scope.extend(
-                self.matcher.host_indexing().all_missing_bindings(
-                    self.matcher
-                        .constraints(StateID(node))
+                self.host_indexing.all_missing_bindings(
+                    self.constraints(StateID(node))
                         .flat_map(|c| c.required_bindings())
                         .copied(),
                     scope.iter().copied(),
                 ),
             );
-            self.matcher.graph[node].required_bindings = scope;
+            self.graph.node_weight_mut(node).unwrap().required_bindings = scope;
         }
     }
 
@@ -306,17 +335,17 @@ where
     /// This may insert epsilon transitions, i.e. edges with no associated
     /// constraint. These will always be last in the constraint order.
     fn insert_constraint_tree(&mut self, state: StateID) -> bool {
-        if self.matcher.is_deterministic(state) {
+        if self.is_deterministic(state) {
             // Nothing to do
             return false;
         }
 
-        if !self.matcher.constraints(state).any(|_| true) {
+        if !self.constraints(state).any(|_| true) {
             // There are no constraints, already in a deterministic state
             return false;
         }
         // Disconnect all non-fail children
-        let constraints_children = self.matcher.drain_constraints(state).collect_vec();
+        let constraints_children = self.drain_constraints(state).collect_vec();
 
         // Filter out None constraint
         let (constraints, children): (Vec<_>, Vec<_>) = constraints_children
@@ -341,8 +370,7 @@ where
             let fail_state = self.add_fail(state);
             // Add edges to children
             for i in not_added {
-                self.matcher
-                    .append_edge(fail_state, children[i], Some(constraints[i].clone()));
+                self.append_edge(fail_state, children[i], Some(constraints[i].clone()));
             }
         }
 
@@ -351,8 +379,8 @@ where
 
     fn make_constraints_unique(&mut self, state: StateID) {
         let mut grouped_transitions = HashMap::default();
-        for t in self.matcher.all_transitions(state) {
-            let cons = self.matcher.constraint(t).cloned();
+        for t in self.all_transitions(state) {
+            let cons = self.constraint(t).cloned();
             grouped_transitions
                 .entry(cons)
                 .or_insert_with(Vec::new)
@@ -367,14 +395,14 @@ where
 
             let old_children = transitions
                 .iter()
-                .map(|&t| self.matcher.next_state(t))
+                .map(|&t| self.next_state(t))
                 .unique()
                 .collect_vec();
 
             // Remove transitions
             let mut removed_transition = None;
             for &t in &transitions {
-                removed_transition = Some(self.matcher.remove_transition(t));
+                removed_transition = Some(self.remove_transition(t));
             }
             let Transition { constraint, .. } = removed_transition.unwrap();
 
@@ -383,13 +411,13 @@ where
 
             // Copy all transitions of `old_children` to `new_child`
             for &old_child in &old_children {
-                self.matcher.clone_outgoing(new_child, old_child);
-                let pattern_matches = self.matcher.matches(old_child).clone();
+                self.clone_outgoing(new_child, old_child);
+                let pattern_matches = self.matches(old_child).clone();
                 for (pattern, bindings) in pattern_matches {
-                    self.matcher.add_match(new_child, pattern, bindings);
+                    self.add_match(new_child, pattern, bindings);
                 }
-                if self.matcher.is_unreachable(old_child) {
-                    self.matcher.remove_state(old_child);
+                if self.is_unreachable(old_child) {
+                    self.remove_state(old_child);
                 }
             }
         }
@@ -403,32 +431,21 @@ where
     /// Achieved by adding all transitions of the fail state to all other children
     /// of `state`.
     fn make_det(&mut self, state: StateID) {
-        if self.matcher.set_deterministic(state) {
+        if self.set_deterministic(state) {
             // Already deterministic
             return;
         }
-        let Some(fail_state) = self.matcher.fail_next_state(state) else {
+        let Some(fail_state) = self.fail_next_state(state) else {
             return;
         };
-        let transitions_fail = self.matcher.all_transitions(fail_state).collect_vec();
-        for transition in self.matcher.all_constraint_transitions(state).collect_vec() {
-            let target = self.matcher.split_target(transition);
-            self.recently_added.insert(target.0);
+        let transitions_fail = self.all_transitions(fail_state).collect_vec();
+        for transition in self.all_constraint_transitions(state).collect_vec() {
+            let target = self.split_target(transition);
+            self.recently_added.insert(target);
             for &t in &transitions_fail {
-                self.matcher.append_edge(
-                    target,
-                    self.matcher.next_state(t),
-                    self.matcher.constraint(t).cloned(),
-                );
+                self.append_edge(target, self.next_state(t), self.constraint(t).cloned());
             }
         }
-    }
-
-    fn recently_added_subgraph(
-        &self,
-    ) -> NodeFiltered<Reversed<&TransitionGraph<K, P>>, &HashSet<NodeIndex>> {
-        let graph = &self.matcher.graph;
-        NodeFiltered(Reversed(graph), &self.recently_added)
     }
 
     /// Attempt to merge all recently added nodes with its siblings.
@@ -440,31 +457,35 @@ where
         // We try to merge nodes in a (reverse) toposort order, as merging
         // children first might enable the merge of parent nodes.
         // We thus start at the newly added nodes that have no newly added descendants
-        let g = &self.recently_added_subgraph();
-        let roots = g
-            .node_identifiers()
-            .filter(|&n| g.neighbors_directed(n, Direction::Incoming).count() == 0)
+        let recently_added = self
+            .recently_added
+            .drain()
+            .sorted_by_key(|&n| Reverse(self.graph.get_position(n.0)))
             .collect_vec();
-        let mut traverser = OnlineToposort::from_iter(roots);
-        let mut node_depths = NodeDepthCache::with_graph(&self.matcher.graph).unwrap();
 
-        while let Some(node) = traverser.next(&self.recently_added_subgraph()) {
+        let mut to_remove = HashSet::default();
+
+        for state in recently_added {
+            if to_remove.contains(&state) {
+                continue;
+            }
             // Find all siblings that can be merged with `node`
-            let merge_nodes = self.find_mergeable_nodes(node, &node_depths);
+            let merge_states = self.find_mergeable_states(state);
 
             // merge all `nodes` into a single one.
-            if merge_nodes.len() <= 1 {
+            if merge_states.len() <= 1 {
                 // nothing to merge
                 continue;
             }
-            let first_node = merge_nodes[0];
-            for &node in &merge_nodes[1..] {
-                self.matcher.move_incoming(first_node, node);
-                self.matcher.remove_state(node);
+            let first_state = merge_states[0];
+            for &state in &merge_states[1..] {
+                self.move_incoming(first_state, state);
+                to_remove.insert(state);
             }
-            node_depths.merge_nodes(merge_nodes.into_iter().map(|n| n.0));
         }
-        self.recently_added.clear();
+        for state in to_remove {
+            self.remove_state(state);
+        }
     }
 
     fn add_constraint_tree(
@@ -478,7 +499,7 @@ where
         // Add FAIL transitions for constraints at the root of the constraint tree
         for &ind in constraint_tree.constraint_indices(constraint_tree.root()) {
             added_constraints.insert(ind);
-            self.matcher.append_edge(state, children[ind], None);
+            self.append_edge(state, children[ind], None);
         }
 
         // Traverse the constraint tree, making sure to
@@ -497,26 +518,11 @@ where
                 let indices = constraint_tree.constraint_indices(child_tree_state);
                 for &ind in indices {
                     added_constraints.insert(ind);
-                    self.matcher
-                        .append_edge(matcher_state, children[ind], Some(c.clone()));
+                    self.append_edge(matcher_state, children[ind], Some(c.clone()));
                 }
             }
         }
         added_constraints
-    }
-
-    fn add_fail(&mut self, state: StateID) -> StateID {
-        self.add_transition(state, None)
-    }
-
-    fn add_transition(&mut self, state: StateID, constraint: Option<Constraint<K, P>>) -> StateID {
-        let new_state = self.matcher.add_transition(state, constraint);
-        self.recently_added.insert(new_state.0);
-        new_state
-    }
-
-    fn add_constraint(&mut self, state: StateID, constraint: Constraint<K, P>) -> StateID {
-        self.add_transition(state, Some(constraint))
     }
 }
 
@@ -581,7 +587,7 @@ impl From<TracedTransitionID> for TransitionID {
     }
 }
 
-impl<K: IndexKey, P, I: Default> Default for AutomatonBuilder<K, P, I>
+impl<K: IndexKey, P: 'static, I: Default> Default for AutomatonBuilder<K, P, I>
 where
     Constraint<K, P>: Clone + Eq + Hash,
 {
@@ -590,7 +596,7 @@ where
     }
 }
 
-impl<K: IndexKey, P, I: Default, M> FromIterator<Vec<Constraint<K, P>>>
+impl<K: IndexKey, P: 'static, I: Default, M> FromIterator<Vec<Constraint<K, P>>>
     for AutomatonBuilder<K, P, I>
 where
     Constraint<K, P>: Clone + Eq,
@@ -603,7 +609,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use insta::assert_snapshot;
     use rstest::{fixture, rstest};
     use tests::modify::tests::{constraints, root_child, root_grandchildren};
@@ -641,22 +647,31 @@ mod tests {
         }
     }
 
-    impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
-        fn wrap_builder(self, with_builder: impl Fn(&mut AutomatonBuilder<K, P, I>)) -> Self {
-            let mut builder = AutomatonBuilder {
-                matcher: self,
-                patterns_ids: Vec::new(),
-                recently_added: HashSet::default(),
-            };
+    impl<K: IndexKey, P: 'static, I: Default> AutomatonBuilder<K, P, I> {
+        pub(crate) fn into_matcher(self) -> ConstraintAutomaton<K, P, I> {
+            ConstraintAutomaton {
+                graph: self.graph.into_inner(),
+                root: self.root,
+                host_indexing: self.host_indexing,
+            }
+        }
+    }
+
+    impl<K: IndexKey, P: 'static, I: Default> ConstraintAutomaton<K, P, I> {
+        pub(crate) fn wrap_builder(
+            self,
+            with_builder: impl Fn(&mut AutomatonBuilder<K, P, I>),
+        ) -> Self {
+            let mut builder = AutomatonBuilder::from_matcher(self);
             with_builder(&mut builder);
-            builder.matcher
+            builder.into_matcher()
         }
     }
 
     #[test]
     fn test_add_constraint_tree() {
         let mut builder = AutomatonBuilder::<_, _, TestIndexingScheme>::default();
-        let n2 = builder.matcher.add_non_det_node();
+        let n2 = builder.add_non_det_node();
         let constraint_tree = {
             let mut tree = ConstraintTree::new();
             let tree_child = tree.get_or_add_child(tree.root(), TestConstraint::new(vec![1]));
@@ -665,8 +680,8 @@ mod tests {
             tree.add_constraint_index(tree_gchild, 1);
             tree
         };
-        builder.add_constraint_tree(constraint_tree, builder.matcher.root(), &[n2, n2]);
-        assert_snapshot!(builder.matcher.dot_string());
+        builder.add_constraint_tree(constraint_tree, builder.root, &[n2, n2]);
+        assert_snapshot!(builder.into_matcher().dot_string());
     }
 
     pub(crate) type TestBuilder = AutomatonBuilder<usize, TestPredicate, TestIndexingScheme>;
@@ -798,22 +813,18 @@ mod tests {
 
     #[fixture]
     fn automaton3() -> TestAutomaton {
-        let mut automaton = TestAutomaton::default();
-        let n1 = automaton.add_constraint(automaton.root(), TestConstraint::new(vec![0]));
-        let n2 = automaton.add_constraint(automaton.root(), TestConstraint::new(vec![1]));
-        let f = automaton.add_fail(n1);
-        automaton.append_edge(n2, f, None);
-        automaton
+        let mut builder = TestBuilder::default();
+        let n1 = builder.add_constraint(builder.root, TestConstraint::new(vec![0]));
+        let n2 = builder.add_constraint(builder.root, TestConstraint::new(vec![1]));
+        let f = builder.add_fail(n1);
+        builder.append_edge(n2, f, None);
+        builder.into_matcher()
     }
 
     #[rstest]
     fn test_mergeable_nodes(automaton3: TestAutomaton) {
-        let node_depths = NodeDepthCache::with_graph(&automaton3.graph).unwrap();
-        let builder = AutomatonBuilder {
-            matcher: automaton3,
-            ..Default::default()
-        };
-        let merge_nodes = builder.find_mergeable_nodes(NodeIndex::new(1), &node_depths);
+        let builder = AutomatonBuilder::from_matcher(automaton3);
+        let merge_nodes = builder.find_mergeable_states(NodeIndex::new(1).into());
         assert_eq!(
             merge_nodes,
             vec![NodeIndex::new(1).into(), NodeIndex::new(2).into()]

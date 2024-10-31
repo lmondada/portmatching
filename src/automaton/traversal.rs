@@ -2,18 +2,18 @@ use std::hash::{Hash, Hasher};
 use std::{borrow::Borrow, collections::VecDeque};
 
 use itertools::Itertools;
-use petgraph::graph::NodeIndex;
 use rustc_hash::FxHasher;
 
 use crate::indexing::{DataBindMap, IndexedData};
 use crate::{
     indexing::{IndexKey, Key},
-    utils, BindMap, HashMap, HashSet, IndexingScheme, PatternID, Predicate,
+    BindMap, HashMap, HashSet, IndexingScheme, PatternID, Predicate,
 };
 
+use super::view::GraphView;
 use super::{ConstraintAutomaton, StateID};
 
-impl<P, I: IndexingScheme> ConstraintAutomaton<Key<I>, P, I> {
+impl<P: 'static, I: IndexingScheme> ConstraintAutomaton<Key<I>, P, I> {
     /// Run the automaton on the `host` input data.
     pub fn run<'a, 'd, D>(&'a self, host: &'d D) -> AutomatonTraverser<'a, 'd, Key<I>, P, I, D>
     where
@@ -131,7 +131,7 @@ impl<'a, 'd, K: IndexKey, P, I: IndexingScheme, D> AutomatonTraverser<'a, 'd, K,
     }
 }
 
-impl<'a, 'd, P, I: IndexingScheme, D> AutomatonTraverser<'a, 'd, Key<I>, P, I, D> {
+impl<'a, 'd, P: 'static, I: IndexingScheme, D> AutomatonTraverser<'a, 'd, Key<I>, P, I, D> {
     /// Mark a state as visited if it wasn't visited already.
     ///
     /// Return whether the visit was successful, i.e. the state had not been
@@ -166,7 +166,7 @@ fn bindings_hash<S: BindMap>(bindings: &S, scope: impl IntoIterator<Item = S::Ke
 impl<'a, 'd, P, D> Iterator
     for AutomatonTraverser<'a, 'd, Key<D::IndexingScheme>, P, D::IndexingScheme, D>
 where
-    P: Predicate<D>,
+    P: Predicate<D> + 'static,
     D: IndexedData,
 {
     type Item = (PatternID, DataBindMap<D>);
@@ -209,35 +209,10 @@ where
     }
 }
 
-pub(crate) struct OnlineToposort {
-    traverser: utils::OnlineToposort<NodeIndex>,
-}
-
-impl OnlineToposort {
-    fn new(root: StateID) -> Self {
-        Self {
-            traverser: utils::online_toposort(root.0),
-        }
-    }
-
-    pub(super) fn next<K: IndexKey, P, I>(
-        &mut self,
-        automaton: &ConstraintAutomaton<K, P, I>,
-    ) -> Option<StateID> {
-        self.traverser.next(&automaton.graph).map(StateID)
-    }
-}
-
-impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
-    pub(crate) fn toposort(&self) -> OnlineToposort {
-        OnlineToposort::new(self.root())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
-        automaton::tests::TestAutomaton, constraint::tests::TestConstraint,
+        automaton::tests::TestBuilder, constraint::tests::TestConstraint,
         indexing::tests::TestData, HashMap, HashSet,
     };
 
@@ -253,11 +228,12 @@ mod tests {
 
     #[test]
     fn legal_transitions() {
-        let mut automaton = TestAutomaton::new();
+        let mut builder = TestBuilder::new();
         // Add a True, False and None constraint
-        let true_child = automaton.add_constraint(automaton.root(), true_constraint());
-        automaton.add_constraint(automaton.root(), false_constraint());
-        let fail_child = automaton.add_fail(automaton.root());
+        let true_child = builder.add_constraint(builder.root(), true_constraint());
+        builder.add_constraint(builder.root(), false_constraint());
+        let fail_child = builder.add_fail(builder.root());
+        let mut automaton = builder.into_matcher();
         let ass = HashMap::default();
         let transitions = HashSet::from_iter(
             automaton
@@ -292,8 +268,9 @@ mod tests {
 
     #[test]
     fn legal_transitions_all_false() {
-        let mut automaton = TestAutomaton::new();
-        automaton.add_constraint(automaton.root(), false_constraint());
+        let mut builder = TestBuilder::new();
+        builder.add_constraint(builder.root(), false_constraint());
+        let automaton = builder.into_matcher();
         let ass = HashMap::default();
         // Only a False transition, so no legal moves
         assert_eq!(
@@ -310,7 +287,10 @@ mod tests {
         );
 
         // Add an epsilon transition
-        automaton.add_fail(automaton.root());
+        let mut automaton = automaton.wrap_builder(|b| {
+            b.add_fail(b.root());
+        });
+
         // Now there is a valid move
         assert_eq!(
             automaton
@@ -343,29 +323,30 @@ mod tests {
 
     #[test]
     fn run_automaton() {
-        let mut automaton = TestAutomaton::new();
-        automaton.add_pattern(
+        let mut builder = TestBuilder::new();
+        builder.add_pattern(
             vec![true_constraint(), false_constraint()],
             PatternID(0),
             None,
         );
         let match_pattern1 = PatternID(1);
-        automaton.add_pattern(
+        builder.add_pattern(
             vec![true_constraint(), true_constraint()],
             match_pattern1,
             None,
         );
         let match_pattern2 = PatternID(2);
-        automaton.add_pattern(
+        builder.add_pattern(
             vec![true_constraint(), true_constraint(), true_constraint()],
             match_pattern2,
             None,
         );
-        automaton.add_pattern(
+        builder.add_pattern(
             vec![true_constraint(), true_constraint(), false_constraint()],
             PatternID(3),
             None,
         );
+        let automaton = builder.into_matcher();
         let matches: HashSet<_> = automaton.run(&TestData).map(|(id, _)| id).collect();
         assert_eq!(
             matches,

@@ -83,5 +83,5 @@ ConstraintTree {
             children: [],
         },
     ],
-    make_det: false,
+    make_det: true,
 }

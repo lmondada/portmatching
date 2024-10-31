@@ -1,13 +1,25 @@
 use itertools::Itertools;
+use petgraph::data::{Build, DataMapMut};
 
-use crate::automaton::{ConstraintAutomaton, State, StateID, Transition, TransitionID};
+use crate::automaton::view::GraphView;
+use crate::automaton::{State, StateID, Transition, TransitionGraph, TransitionID};
 use crate::indexing::IndexKey;
 use crate::{BindMap, Constraint, IndexingScheme, PatternID};
 
+use super::AutomatonBuilder;
+
+impl<K: IndexKey, P: 'static, I> GraphView<K, P> for AutomatonBuilder<K, P, I> {
+    fn underlying_graph(&self) -> &TransitionGraph<K, P> {
+        self.graph.inner()
+    }
+}
+
 /// Methods for modifying the automaton
-impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
+impl<K: IndexKey, P, I> AutomatonBuilder<K, P, I>
 where
     Constraint<K, P>: Eq + Clone,
+    K: 'static,
+    P: 'static,
 {
     /// Add a new disconnected non-deterministic state
     pub(super) fn add_non_det_node(&mut self) -> StateID {
@@ -47,7 +59,8 @@ where
         let is_fail_transition = constraint.is_none();
         let new_edge = self
             .graph
-            .add_edge(parent, child, Transition { constraint });
+            .try_add_edge(parent, child, Transition { constraint })
+            .unwrap();
         if is_fail_transition {
             self.node_weight_mut(StateID(parent))
                 .epsilon_order
@@ -75,11 +88,11 @@ where
     ) -> StateID {
         let child = self.add_non_det_node();
         self.append_edge(parent, child, constraint);
+        self.recently_added.insert(child);
         child
     }
 
     /// Add an epsilon transition from `parent`.
-    #[cfg(test)]
     pub(in crate::automaton) fn add_fail(&mut self, parent: StateID) -> StateID {
         self.add_transition(parent, None)
     }
@@ -103,13 +116,15 @@ where
     pub(crate) fn add_pattern<M>(
         &mut self,
         constraints: impl IntoIterator<Item = Constraint<K, P>>,
-        id: PatternID,
+        id: impl Into<PatternID>,
         required_bindings: impl IntoIterator<Item = K>,
     ) where
         // A complicated way of saying Key<I> == K
         I: IndexingScheme<BindMap = M>,
         M: BindMap<Key = K>,
     {
+        let id = id.into();
+        self.patterns_ids.push(id);
         let mut state = self.root();
         let mut required_bindings = self
             .host_indexing
@@ -161,7 +176,11 @@ where
     fn rewire_target(&mut self, transition: TransitionID, new_target: StateID) -> TransitionID {
         let source = self.parent(transition);
         let weight = self.graph.remove_edge(transition.0).unwrap();
-        let new_transition = TransitionID(self.graph.add_edge(source.0, new_target.0, weight));
+        let new_transition = TransitionID(
+            self.graph
+                .try_add_edge(source.0, new_target.0, weight)
+                .unwrap(),
+        );
         self.node_weight_mut(source)
             .replace_order(transition, new_transition);
         new_transition
@@ -191,6 +210,7 @@ where
 
     pub(super) fn remove_state(&mut self, state: StateID) {
         self.graph.remove_node(state.0);
+        self.recently_added.remove(&state);
     }
 
     /// Clone all outgoing transitions from `other_state` to `state`
@@ -215,7 +235,7 @@ where
 }
 
 // Small, private utils functions
-impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I>
+impl<K: IndexKey, P: 'static, I> AutomatonBuilder<K, P, I>
 where
     Constraint<K, P>: Eq + Clone,
 {
@@ -279,20 +299,22 @@ pub mod tests {
 
     #[fixture]
     pub fn automaton2() -> TestAutomaton {
-        let mut automaton = automaton();
+        let automaton = automaton();
         let x_child = root_child(&automaton);
         let [a_child, _, _, _] = root_grandchildren(&automaton);
 
+        let mut builder = AutomatonBuilder::from_matcher(automaton);
+
         // Add a FAIL transition from x_child to a new state
-        let fail_child = automaton.add_fail(x_child);
+        let fail_child = builder.add_fail(x_child);
         // Add a common constraint to the fail child and a_child
         let common_constraint = TestConstraint::new(vec![7, 8]);
-        let post_fail = automaton.add_constraint(fail_child, common_constraint.clone());
-        automaton.add_constraint(a_child, common_constraint.clone());
+        let post_fail = builder.add_constraint(fail_child, common_constraint.clone());
+        builder.add_constraint(a_child, common_constraint.clone());
         // Add a second common constraint to post_fail
         let common_constraint2 = TestConstraint::new(vec![77, 8]);
-        automaton.add_constraint(post_fail, common_constraint2.clone());
-        automaton
+        builder.add_constraint(post_fail, common_constraint2.clone());
+        builder.finish().0
     }
 
     pub fn constraints() -> [TestConstraint; 5] {
@@ -328,11 +350,12 @@ pub mod tests {
     }
 
     #[rstest]
-    fn test_drain_constraints(mut automaton: TestAutomaton) {
+    fn test_drain_constraints(automaton: TestAutomaton) {
         let [_, constraint_a, constraint_b, constraint_c, constraint_d] = constraints();
         let [child_a, child_b, child_c, child_d] = root_grandchildren(&automaton);
-        let drained: HashSet<_> = automaton
-            .drain_constraints(root_child(&automaton))
+        let root_child = root_child(&automaton);
+        let drained: HashSet<_> = AutomatonBuilder::from_matcher(automaton)
+            .drain_constraints(root_child)
             .collect();
         assert_eq!(
             drained,
