@@ -200,4 +200,6 @@ mod tests {
     use super::ConstraintAutomaton;
 
     pub(crate) type TestAutomaton = ConstraintAutomaton<usize, TestPredicate, TestIndexingScheme>;
+
+    pub(crate) use super::builder::tests::TestBuilder;
 }

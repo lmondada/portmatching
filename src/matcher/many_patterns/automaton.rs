@@ -25,7 +25,7 @@ pub struct ManyMatcher<PT, K: IndexKey, P, I> {
 
 impl<PT, P, D> PortMatcher<D> for ManyMatcher<PT, DataKey<D>, P, D::IndexingScheme>
 where
-    P: Predicate<D>,
+    P: Predicate<D> + 'static,
     PT: Pattern<Key = DataKey<D>, Predicate = P>,
     D: IndexedData,
 {
@@ -67,6 +67,8 @@ where
     where
         I: IndexingScheme<BindMap = M>,
         M: BindMap<Key = K>,
+        K: 'static,
+        P: 'static,
     {
         Self::try_from_patterns_with_det_heuristic(patterns, fallback, Default::default())
     }
@@ -81,6 +83,8 @@ where
     where
         I: IndexingScheme<BindMap = M>,
         M: BindMap<Key = K>,
+        K: 'static,
+        P: 'static,
     {
         let mut builder = AutomatonBuilder::new();
         for (id, pattern) in patterns.iter().enumerate() {

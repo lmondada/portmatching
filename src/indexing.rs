@@ -229,7 +229,7 @@ pub enum BindVariableError {
 ///
 /// This is implemented for all types that implement [`Eq`], [`Hash`], [`Copy`]
 /// and [`Debug`].
-pub trait IndexKey: Eq + Copy + Hash + Debug {}
+pub trait IndexKey: Eq + Copy + Hash + Debug + 'static {}
 
 /// A shortcut for types that can be used as index values.
 ///
@@ -237,7 +237,7 @@ pub trait IndexKey: Eq + Copy + Hash + Debug {}
 /// and [`Debug`].
 pub trait IndexValue: Clone + PartialEq + Debug + Hash + Borrow<Self> {}
 
-impl<T: Eq + Copy + Debug + Hash> IndexKey for T {}
+impl<T: Eq + Copy + Debug + Hash + 'static> IndexKey for T {}
 impl<T: Clone + PartialEq + Debug + Hash + Borrow<Self>> IndexValue for T {}
 
 impl<K: IndexKey + 'static, V: IndexValue + 'static> BindMap for HashMap<K, V> {
