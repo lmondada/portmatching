@@ -53,14 +53,20 @@ pub type MatrixNaiveManyMatcher =
     NaiveManyMatcher<MatrixPatternPosition, CharacterPredicate, MatrixIndexingScheme>;
 
 impl Predicate<MatrixString> for CharacterPredicate {
-    fn check(&self, data: &MatrixString, args: &[impl Borrow<MatrixSubjectPosition>]) -> bool {
+    type InvalidPredicateError = String;
+
+    fn check(
+        &self,
+        data: &MatrixString,
+        args: &[impl Borrow<MatrixSubjectPosition>],
+    ) -> Result<bool, String> {
         match self {
             CharacterPredicate::BindingEq => {
                 let (MatrixSubjectPosition(row1, col1), MatrixSubjectPosition(row2, col2)) =
                     args.iter().map(|pos| pos.borrow()).collect_tuple().unwrap();
                 let char1 = data.rows.get(*row1).and_then(|row| row.get(*col1));
                 let char2 = data.rows.get(*row2).and_then(|row| row.get(*col2));
-                char1.is_some() && char1 == char2
+                Ok(char1.is_some() && char1 == char2)
             }
             CharacterPredicate::ConstVal(c) => {
                 let MatrixSubjectPosition(row, col) = args
@@ -69,7 +75,7 @@ impl Predicate<MatrixString> for CharacterPredicate {
                     .exactly_one()
                     .ok()
                     .unwrap();
-                data.rows.get(*row).and_then(|row| row.get(*col)) == Some(c)
+                Ok(data.rows.get(*row).and_then(|row| row.get(*col)) == Some(c))
             }
         }
     }

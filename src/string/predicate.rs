@@ -28,19 +28,25 @@ impl ArityPredicate for CharacterPredicate {
 }
 
 impl Predicate<String> for CharacterPredicate {
-    fn check(&self, data: &String, args: &[impl Borrow<StringSubjectPosition>]) -> bool {
+    type InvalidPredicateError = String;
+
+    fn check(
+        &self,
+        data: &String,
+        args: &[impl Borrow<StringSubjectPosition>],
+    ) -> Result<bool, String> {
         match self {
             CharacterPredicate::BindingEq => {
                 let (StringSubjectPosition(pos1), StringSubjectPosition(pos2)) =
                     args.iter().map(|a| a.borrow()).collect_tuple().unwrap();
                 let char1 = data.chars().nth(*pos1);
                 let char2 = data.chars().nth(*pos2);
-                char1.is_some() && char1 == char2
+                Ok(char1.is_some() && char1 == char2)
             }
             CharacterPredicate::ConstVal(c) => {
                 let StringSubjectPosition(pos) =
                     args.iter().map(|a| a.borrow()).exactly_one().ok().unwrap();
-                data.chars().nth(*pos) == Some(*c)
+                Ok(data.chars().nth(*pos) == Some(*c))
             }
         }
     }
