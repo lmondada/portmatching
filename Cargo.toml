@@ -37,7 +37,9 @@ glob = { version = "0.3.1", optional = true }
 csv = { version = "1.2.2", optional = true }
 derive_more = "0.99.17"
 rustc-hash = "1.1.0"
-petgraph = { version = "0.6.5", features = ["serde-1"] }
+petgraph = { git = "https://github.com/lmondada/petgraph", rev = "10cf0f2", features = [
+    "serde-1",
+] }
 thiserror = "1.0.61"
 union-find = "0.4.2"
 delegate = "0.12.0"
@@ -103,4 +105,6 @@ required-features = ["serde", "portgraph"]
 # required-features = ["datagen", "serde"]
 
 [patch.crates-io]
-petgraph = { git = "https://github.com/lmondada/petgraph", branch = "master" }
+petgraph = { git = "https://github.com/lmondada/petgraph", rev = "10cf0f2", features = [
+    "serde-1",
+] }
