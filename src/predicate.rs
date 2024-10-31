@@ -36,10 +36,17 @@ pub trait ArityPredicate: Eq + Clone {
 /// ## Parameter types
 /// - `Data`: The subject data type on which predicates are evaluated.
 pub trait Predicate<Data: IndexedData>: ArityPredicate {
+    /// The error type for malformed predicates.
+    type InvalidPredicateError: std::fmt::Display;
+
     /// Check if the predicate is satisfied by the given data and values.
     ///
     /// `values` must be of length [Predicate::arity].
-    fn check(&self, data: &Data, args: &[impl Borrow<DataValue<Data>>]) -> bool;
+    fn check(
+        &self,
+        data: &Data,
+        args: &[impl Borrow<DataValue<Data>>],
+    ) -> Result<bool, Self::InvalidPredicateError>;
 }
 
 #[cfg(test)]
@@ -68,13 +75,21 @@ pub(crate) mod tests {
     }
 
     impl Predicate<TestData> for TestPredicate {
-        fn check(&self, _: &TestData, args: &[impl Borrow<DataValue<TestData>>]) -> bool {
+        type InvalidPredicateError = String;
+
+        fn check(
+            &self,
+            _: &TestData,
+            args: &[impl Borrow<DataValue<TestData>>],
+        ) -> Result<bool, String> {
             if args.len() != self.arity {
-                panic!("Invalid constraint: arity mismatch");
+                Err("Invalid constraint: arity mismatch".to_string())
+            } else {
+                Ok(args
+                    .iter()
+                    .tuple_windows()
+                    .all(|(a, b)| a.borrow() == b.borrow()))
             }
-            args.iter()
-                .tuple_windows()
-                .all(|(a, b)| a.borrow() == b.borrow())
         }
     }
 
@@ -96,14 +111,13 @@ pub(crate) mod tests {
     fn test_arity_match(#[case] arity: usize) {
         let p = TestPredicate { arity };
         let args = vec![&3; p.arity()];
-        assert!(p.check(&TestData, &args));
+        assert!(p.check(&TestData, &args).unwrap());
     }
 
     #[test]
-    #[should_panic]
     fn test_arity_mismatch() {
         let p = TestPredicate { arity: 2 };
         let args = vec![&3];
-        p.check(&TestData, &args);
+        assert!(p.check(&TestData, &args).is_err());
     }
 }

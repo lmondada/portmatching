@@ -105,6 +105,10 @@ pub enum InvalidConstraint {
     /// Bind a value to an unrecognised variable name
     #[error("Cannot bind to variable name: {0}")]
     InvalidVariableName(String),
+
+    /// The predicate check failed, probably a malformed predicate
+    #[error("Predicate check failed: {0}")]
+    PredicateCheckFailed(String),
 }
 
 impl From<BindVariableError> for InvalidConstraint {
@@ -203,7 +207,9 @@ impl<K, P> Constraint<K, P> {
                     .ok_or(InvalidConstraint::UnboundVariable(format!("{key:?}")))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(self.predicate.check(data, &args))
+        self.predicate
+            .check(data, &args)
+            .map_err(|e| InvalidConstraint::PredicateCheckFailed(format!("{e}")))
     }
 }
 

@@ -33,35 +33,38 @@ impl<W: Eq + Debug> PGPredicate<W> {
         graph: &PortGraph,
         node_weights: &impl SecondaryMap<NodeIndex, W>,
         args: &[impl Borrow<NodeIndex>],
-    ) -> bool {
+    ) -> Result<bool, String> {
         match self {
             PGPredicate::HasNodeWeight(weight) => {
-                let [node] = args else {
-                    panic!("expected args of length 1 (arity 1)")
-                };
-                node_weights.get(*node.borrow()) == weight
+                if let [node] = args {
+                    Ok(node_weights.get(*node.borrow()) == weight)
+                } else {
+                    Err("expected args of length 1 (arity 1)".to_string())
+                }
             }
             &PGPredicate::IsConnected {
                 left_port,
                 right_port,
             } => {
-                let [left, right] = args else {
-                    panic!("expected args of length 2 (arity 2)")
-                };
-                has_edge(
-                    graph,
-                    *left.borrow(),
-                    left_port,
-                    *right.borrow(),
-                    right_port,
-                )
+                if let [left, right] = args {
+                    Ok(has_edge(
+                        graph,
+                        *left.borrow(),
+                        left_port,
+                        *right.borrow(),
+                        right_port,
+                    ))
+                } else {
+                    Err("expected args of length 2 (arity 2)".to_string())
+                }
             }
             &PGPredicate::IsNotEqual { n_other } => {
-                let [node, other @ ..] = args else {
-                    panic!("expected args of length {}", n_other + 1)
-                };
-                let other = other.iter().map(|n| *n.borrow()).collect_vec();
-                !other.contains(node.borrow())
+                if let [node, other @ ..] = args {
+                    let other = other.iter().map(|n| *n.borrow()).collect_vec();
+                    Ok(!other.contains(node.borrow()))
+                } else {
+                    Err(format!("expected args of length {}", n_other + 1))
+                }
             }
         }
     }
@@ -78,7 +81,9 @@ impl<W: Clone + Eq> ArityPredicate for PGPredicate<W> {
 }
 
 impl Predicate<PortGraph> for PGPredicate {
-    fn check(&self, data: &PortGraph, args: &[impl Borrow<NodeIndex>]) -> bool {
+    type InvalidPredicateError = String;
+
+    fn check(&self, data: &PortGraph, args: &[impl Borrow<NodeIndex>]) -> Result<bool, String> {
         self.is_satisfied(data, &UnmanagedDenseMap::default(), args)
     }
 }
@@ -88,7 +93,13 @@ where
     M: SecondaryMap<NodeIndex, W>,
     W: Clone + Eq + Debug,
 {
-    fn check(&self, data: &(&PortGraph, &M), args: &[impl Borrow<NodeIndex>]) -> bool {
+    type InvalidPredicateError = String;
+
+    fn check(
+        &self,
+        data: &(&PortGraph, &M),
+        args: &[impl Borrow<NodeIndex>],
+    ) -> Result<bool, String> {
         let &(graph, weights) = data;
         self.is_satisfied(graph, weights, args)
     }
