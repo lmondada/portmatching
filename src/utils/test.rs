@@ -7,7 +7,7 @@ use itertools::Itertools;
 use portgraph::{LinkView, MultiPortGraph, NodeIndex, PortGraph, PortMut, PortView};
 use serde::{Deserialize, Serialize};
 
-use crate::portgraph::indexing::PGIndexKey;
+use crate::concrete::portgraph::indexing::PGIndexKey;
 use crate::{BindMap, PatternID, PatternMatch};
 
 use super::portgraph::connected_components;

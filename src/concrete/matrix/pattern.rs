@@ -1,6 +1,6 @@
 use std::{fmt, iter};
 
-use crate::string::CharVar;
+use crate::concrete::string::CharVar;
 use crate::{Constraint, HashMap, Pattern};
 
 use super::{CharacterPredicate, MatrixPatternPosition};

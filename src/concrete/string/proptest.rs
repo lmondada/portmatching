@@ -24,7 +24,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::string::tests::apply_all_matchers;
+    use crate::concrete::string::tests::apply_all_matchers;
 
     use super::*;
 

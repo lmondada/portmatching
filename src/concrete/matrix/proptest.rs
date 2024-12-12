@@ -24,7 +24,7 @@ mod tests {
     use itertools::Itertools;
 
     use crate::{
-        matrix::{
+        concrete::matrix::{
             tests::{apply_all_matchers, clean_match_data},
             MatrixNaiveManyMatcher, MatrixString,
         },

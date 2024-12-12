@@ -4,15 +4,14 @@ use std::{borrow::Borrow, fmt::Debug};
 
 use itertools::Itertools;
 use portgraph::{render::DotFormat, LinkMut, PortGraph, PortMut};
-use portmatching::indexing::IndexKey;
-use portmatching::matrix::MatrixPatternPosition;
-use portmatching::string::StringPatternPosition;
-use portmatching::{
+use portmatching::concrete::{matrix::MatrixPatternPosition, string::StringPatternPosition};
+use portmatching::concrete::{
     matrix::{MatrixManyMatcher, MatrixPattern, MatrixString},
     portgraph::{indexing::PGIndexKey, PGManyPatternMatcher, PGPattern},
     string::{StringManyMatcher, StringPattern},
-    BindMap, ManyMatcher, PatternMatch, PortMatcher,
 };
+use portmatching::indexing::IndexKey;
+use portmatching::{BindMap, ManyMatcher, PatternMatch, PortMatcher};
 
 fn main() {
     string_matching();

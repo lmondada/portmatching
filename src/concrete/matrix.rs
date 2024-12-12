@@ -12,8 +12,8 @@ use derive_more::{From, Into};
 use itertools::Itertools;
 
 use crate::{
+    concrete::string::{CharacterPredicate, StringConstraint},
     indexing::{BindVariableError, IndexedData, Key},
-    string::{CharacterPredicate, StringConstraint},
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
 };
 
@@ -278,7 +278,7 @@ impl Debug for MatrixString {
 
 #[cfg(test)]
 mod tests {
-    use crate::{string::tests::define_matcher_factories, PatternMatch, PortMatcher};
+    use crate::{concrete::string::tests::define_matcher_factories, PatternMatch, PortMatcher};
 
     use super::*;
     use rstest::rstest;
