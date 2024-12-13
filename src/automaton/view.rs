@@ -1,19 +1,15 @@
-use petgraph::{visit::EdgeRef, Direction};
+use std::{collections::BTreeSet, hash::Hash};
 
-use crate::{indexing::IndexKey, Constraint, HashMap, PatternID};
+use petgraph::{algo::toposort, visit::EdgeRef, Direction};
+
+use crate::{indexing::IndexKey, HashMap, PatternID};
 
 use super::{ConstraintAutomaton, State, StateID, TransitionGraph, TransitionID};
 
-/// Methods for viewing the automaton
-///
-/// Exposed as a trait so that the automaton builder can reuse the default
-/// implementation but trace calls where useful.
-impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> where Constraint<K, P>: Eq {}
-
 /// A simple internal trait for accessing the underlying graph
-pub(super) trait GraphView<K: IndexKey, P: 'static> {
+pub(super) trait GraphView<K: IndexKey, B> {
     /// A reference to the underlying graph
-    fn underlying_graph(&self) -> &TransitionGraph<K, P>;
+    fn underlying_graph(&self) -> &TransitionGraph<K, B>;
 
     /// Get the next state obtained from following a transition
     fn next_state(&self, transition: TransitionID) -> StateID {
@@ -28,21 +24,22 @@ pub(super) trait GraphView<K: IndexKey, P: 'static> {
         self.incoming_transitions(state).next().is_none()
     }
 
-    /// Get the constraint corresponding to a transition
-    fn constraint(&self, transition: TransitionID) -> Option<&Constraint<K, P>> {
-        self.underlying_graph()[transition.0].constraint.as_ref()
-    }
-
-    fn incoming_transitions(
-        &self,
+    fn incoming_transitions<'a>(
+        &'a self,
         StateID(state): StateID,
-    ) -> impl Iterator<Item = TransitionID> + '_ {
+    ) -> impl Iterator<Item = TransitionID> + 'a
+    where
+        B: 'a,
+    {
         self.underlying_graph()
             .edges_directed(state, Direction::Incoming)
             .map(|e| e.id().into())
     }
 
-    fn matches(&self, state: StateID) -> &HashMap<PatternID, Vec<K>> {
+    fn matches<'a>(&'a self, state: StateID) -> &'a HashMap<PatternID, Vec<K>>
+    where
+        B: 'a,
+    {
         &self.node_weight(state).matches
     }
 
@@ -59,96 +56,111 @@ pub(super) trait GraphView<K: IndexKey, P: 'static> {
             .into()
     }
 
-    fn required_bindings(&self, state: StateID) -> &[K] {
-        &self.node_weight(state).required_bindings
+    fn parents<'a>(&'a self, state: StateID) -> impl Iterator<Item = StateID> + 'a
+    where
+        B: 'a,
+    {
+        self.incoming_transitions(state)
+            .map(|transition| self.parent(transition))
     }
 
-    fn node_weight(&self, state: StateID) -> &State<K> {
+    fn branch_selector(&self, state: StateID) -> Option<&B> {
+        self.node_weight(state).branch_selector.as_ref()
+    }
+
+    fn all_states(&self) -> impl Iterator<Item = StateID> {
+        let nodes = toposort(self.underlying_graph(), Default::default()).unwrap();
+        nodes.into_iter().map(StateID)
+    }
+
+    fn min_scope<'a>(&'a self, state: StateID) -> &'a [K]
+    where
+        B: 'a,
+    {
+        &self.node_weight(state).min_scope
+    }
+
+    fn max_scope<'a>(&'a self, state: StateID) -> &'a BTreeSet<K>
+    where
+        B: 'a,
+    {
+        &self.node_weight(state).max_scope
+    }
+
+    fn node_weight<'a>(&'a self, state: StateID) -> &'a State<K, B>
+    where
+        B: 'a,
+    {
         self.underlying_graph()
             .node_weight(state.0)
             .expect("unknown state")
     }
 
-    /// All non-None constraints at `state`.
-    fn all_constraint_transitions(
-        &self,
+    /// All non-Fail constraints at `state`.
+    fn all_constraint_transitions<'a>(
+        &'a self,
         state: StateID,
-    ) -> impl Iterator<Item = TransitionID> + '_ {
-        self.node_weight(state).constraint_order.iter().copied()
+    ) -> impl Iterator<Item = TransitionID> + 'a
+    where
+        B: 'a,
+    {
+        self.node_weight(state).edge_order.iter().copied()
     }
 
-    /// All None constraints at `state`.
-    fn all_epsilon_transitions(
-        &self,
-        state: StateID,
-    ) -> impl ExactSizeIterator<Item = TransitionID> + '_ {
-        self.node_weight(state).epsilon_order.iter().copied()
+    /// The fail transition at `state`, if it exists
+    fn epsilon_transition(&self, state: StateID) -> Option<TransitionID> {
+        self.node_weight(state).epsilon
     }
 
     /// The state reached by the fail transition at `state`, if any.
-    ///
-    /// Expects at most one epsilon transition, otherwise panics.
-    fn fail_next_state(&self, state: StateID) -> Option<StateID> {
-        assert!(self.all_epsilon_transitions(state).len() <= 1);
-        self.all_epsilon_transitions(state)
-            .next()
+    fn fail_child(&self, state: StateID) -> Option<StateID> {
+        self.epsilon_transition(state)
             .map(|transition| self.next_state(transition))
     }
 
-    /// The state reached by the `constraint` transition at `state`, if any.
-    ///
-    /// Expects at most one transition, otherwise panics.
-    #[allow(dead_code)]
-    fn constraint_next_state(
-        &self,
-        state: StateID,
-        constraint: &Constraint<K, P>,
-    ) -> Option<StateID>
-    where
-        Constraint<K, P>: Eq,
-    {
-        self.all_constraint_transitions(state)
-            .find(|&t| self.constraint(t) == Some(constraint))
-            .map(|t| self.next_state(t))
+    fn nth_child(&self, state: StateID, n: usize) -> StateID {
+        let transition = self.node_weight(state).edge_order[n];
+        self.next_state(transition)
     }
 
     /// Iterate over all transitions of a state, in order.
-    fn all_transitions(&self, state: StateID) -> impl Iterator<Item = TransitionID> + '_ {
+    fn all_transitions<'a>(&'a self, state: StateID) -> impl Iterator<Item = TransitionID> + 'a
+    where
+        B: 'a,
+    {
         self.all_constraint_transitions(state)
-            .chain(self.all_epsilon_transitions(state))
-    }
-
-    fn constraints(&self, state: StateID) -> impl Iterator<Item = &Constraint<K, P>> + '_ {
-        self.all_constraint_transitions(state)
-            .map(|transition| self.constraint(transition).unwrap())
+            .chain(self.epsilon_transition(state))
     }
 
     /// The states reached by a single transition from `state`
     #[allow(dead_code)]
-    fn children(&self, state: StateID) -> impl Iterator<Item = StateID> + '_ {
+    fn children<'a>(&'a self, state: StateID) -> impl Iterator<Item = StateID> + 'a
+    where
+        B: 'a,
+    {
         self.all_transitions(state)
             .map(|transition| self.next_state(transition))
     }
 
-    /// Get a tuple of data that fully specifies the action of a `state`.
-    ///
-    /// Two states with the same tuple ID may be merged into one without
-    /// changing the behavior of the matcher.
-    fn state_tuple(&self, state: StateID) -> StateTuple<Constraint<K, P>> {
-        let transitions = self
-            .all_transitions(state)
-            .map(|transition| (self.constraint(transition), self.next_state(transition)))
-            .collect();
-        StateTuple {
-            deterministic: self.is_deterministic(state),
-            matches: self.matches(state).keys().copied().collect(),
-            transitions,
-        }
-    }
+    // /// Get a tuple of data that fully specifies the action of a `state`.
+    // ///
+    // /// Two states with the same tuple ID may be merged into one without
+    // /// changing the behavior of the matcher.
+    // fn state_tuple(&self, state: StateID) -> StateTuple<Constraint<K, B>> {
+    //     let transitions = self
+    //         .all_transitions(state)
+    //         .map(|transition| (self.constraint(transition), self.next_state(transition)))
+    //         .collect();
+    //     StateTuple {
+    //         deterministic: self.is_deterministic(state),
+    //         matches: self.matches(state).keys().copied().collect(),
+    //         transitions,
+    //     }
+    // }
 }
 
-impl<K: IndexKey, P: 'static, I> GraphView<K, P> for ConstraintAutomaton<K, P, I> {
-    fn underlying_graph(&self) -> &TransitionGraph<K, P> {
+impl<K: IndexKey, B> GraphView<K, B> for ConstraintAutomaton<K, B> {
+    fn underlying_graph(&self) -> &TransitionGraph<K, B> {
         &self.graph
     }
 }
@@ -160,6 +172,3 @@ pub(super) struct StateTuple<'a, C> {
     matches: Vec<PatternID>,
     transitions: Vec<(Option<&'a C>, StateID)>,
 }
-
-// Small, private utils functions
-impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {}

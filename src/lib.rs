@@ -2,6 +2,7 @@
 #![warn(missing_docs)]
 
 pub mod automaton;
+pub mod branch_selector;
 pub mod concrete;
 pub mod constraint;
 pub mod constraint_tree;
@@ -13,14 +14,12 @@ pub mod utils;
 
 pub use constraint::{Constraint, DetHeuristic};
 pub use constraint_tree::{ConditionedPredicate, ConstraintTree, ToConstraintsTree};
-pub use indexing::{
-    BindMap, DataBindMap, DataKey, DataValue, IndexedData, IndexingScheme, Key, Value,
-};
+pub use indexing::{BindMap, IndexedData, IndexingScheme, Key, Value};
 pub use matcher::{
     ManyMatcher, NaiveManyMatcher, PatternFallback, PatternID, PatternMatch, PortMatcher,
     SinglePatternMatcher,
 };
-pub use pattern::Pattern;
+pub use pattern::PatternLogic;
 pub use predicate::{ArityPredicate, Predicate};
 
 use rustc_hash::{FxHashMap, FxHashSet};

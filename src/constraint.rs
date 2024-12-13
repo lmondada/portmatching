@@ -5,7 +5,7 @@
 //! The predicate is either an AssignPredicate or a FilterPredicate.
 
 use crate::{
-    indexing::{DataBindMap, IndexedData},
+    indexing::{Binding, IndexedData},
     predicate::ArityPredicate,
 };
 
@@ -14,8 +14,10 @@ use super::{
     predicate::Predicate,
 };
 use itertools::Itertools;
-use std::{cell::RefCell, fmt::Debug};
+use std::{borrow::Borrow, cell::RefCell, collections::BTreeSet, fmt::Debug};
 use thiserror::Error;
+
+pub type ConstraintSet<K, P> = BTreeSet<Constraint<K, P>>;
 
 /// A constraint for pattern matching.
 ///
@@ -28,7 +30,7 @@ use thiserror::Error;
 /// ## Generic Parameters
 /// - `K`: The index key type
 /// - `P`: The predicate type
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Constraint<K, P> {
     predicate: P,
@@ -188,28 +190,26 @@ impl<K, P> Constraint<K, P> {
     ///
     /// `Result<bool, InvalidConstraint>` - Ok(true) if the constraint is satisfied,
     /// Ok(false) if it's not, or an Err if there's an invalid constraint.
-    pub fn is_satisfied<D: IndexedData>(
+    pub fn is_satisfied<D: IndexedData<Key = K>>(
         &self,
         data: &D,
-        known_bindings: &DataBindMap<D>,
+        known_bindings: &D::BindMap,
     ) -> Result<bool, InvalidConstraint>
     where
-        P: Predicate<D>,
-        DataBindMap<D>: BindMap<Key = K>,
+        P: Predicate<D, D::Value>,
         K: Debug,
     {
         let args = self
             .args
             .iter()
             .map(|key| {
-                known_bindings
-                    .get(key)
-                    .ok_or(InvalidConstraint::UnboundVariable(format!("{key:?}")))
+                let Binding::Bound(value) = known_bindings.get(key) else {
+                    return Err(InvalidConstraint::UnboundVariable(format!("{key:?}")));
+                };
+                Ok(value.borrow().clone())
             })
             .collect::<Result<Vec<_>, _>>()?;
-        self.predicate
-            .check(data, &args)
-            .map_err(|e| InvalidConstraint::PredicateCheckFailed(format!("{e}")))
+        Ok(self.predicate.check(&args, data))
     }
 }
 
@@ -228,41 +228,41 @@ impl<K: Debug, P: Debug> Debug for Constraint<K, P> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::cmp;
-
-    use crate::{indexing::tests::TestData, predicate::tests::TestPredicate, HashMap};
+    use crate::{
+        indexing::tests::TestData,
+        predicate::tests::{TestKey, TestPredicate},
+        HashMap,
+    };
 
     use super::*;
-    pub(crate) type TestConstraint = Constraint<usize, TestPredicate>;
+    pub(crate) type TestConstraint = Constraint<TestKey, TestPredicate>;
 
     impl TestConstraint {
-        pub(crate) fn new(args: Vec<usize>) -> TestConstraint {
-            TestConstraint::try_new(TestPredicate { arity: args.len() }, args).unwrap()
-        }
-    }
-
-    impl PartialOrd for TestConstraint {
-        fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-
-    impl Ord for TestConstraint {
-        fn cmp(&self, other: &Self) -> cmp::Ordering {
-            let key = |c: &TestConstraint| (c.predicate.clone(), c.args.clone());
-            key(self).cmp(&key(other))
+        pub(crate) fn new(pred: TestPredicate) -> TestConstraint {
+            let key1 = "key1";
+            let key2 = "key2";
+            match pred {
+                TestPredicate::AreEqual => {
+                    TestConstraint::try_binary_from_triple(key1, pred, key2).unwrap()
+                }
+                TestPredicate::NotEqual => {
+                    TestConstraint::try_binary_from_triple(key1, pred, key2).unwrap()
+                }
+                TestPredicate::PredTwo => TestConstraint::try_new(pred, vec![]).unwrap(),
+            }
         }
     }
 
     #[test]
     fn test_construct_constraint_arity() {
-        let c = TestConstraint::new(vec![0, 1]);
+        let c = TestConstraint::new(TestPredicate::AreEqual);
         assert_eq!(c.arity(), 2);
 
         assert_eq!(
-            TestConstraint::try_binary_from_triple(0, TestPredicate { arity: 4 }, 1,).unwrap_err(),
+            TestConstraint::try_binary_from_triple("yo", TestPredicate::PredTwo, "lo",)
+                .unwrap_err(),
             InvalidConstraint::InvalidArity {
-                predicate_arity: 4,
+                predicate_arity: 0,
                 arguments_arity: 2,
             }
         );
@@ -272,7 +272,7 @@ pub(crate) mod tests {
     #[should_panic]
     fn test_invalid_constraint() {
         let c = Constraint {
-            predicate: TestPredicate { arity: 2 },
+            predicate: TestPredicate::AreEqual,
             args: vec!["x".to_string()],
         };
         c.arity();
@@ -280,25 +280,28 @@ pub(crate) mod tests {
 
     #[test]
     fn test_is_satisfied() {
-        let c = TestConstraint::new(vec![0, 1]);
-        let assmap = HashMap::from_iter([(0, 1), (1, 1)]);
+        let c = TestConstraint::new(TestPredicate::AreEqual);
+        let assmap = HashMap::from_iter([("key1", Some(1)), ("key2", Some(1)), ("key3", Some(3))]);
         let result = c.is_satisfied(&TestData, &assmap).unwrap();
         assert!(result);
     }
 
     #[test]
     fn test_not_is_satisfied() {
-        let c = TestConstraint::new(vec![0, 1]);
-        let assmap = HashMap::from_iter([(0, 1), (1, 2)]);
+        let c = TestConstraint::new(TestPredicate::NotEqual);
+        let assmap = HashMap::from_iter([("key1", 1), ("key2", 1)]);
         let result = c.is_satisfied(&TestData, &assmap).unwrap();
         assert!(!result);
     }
 
     #[test]
     fn test_not_bound() {
-        let c = TestConstraint::new(vec![0, 2]);
-        let assmap = HashMap::from_iter([(0, 1), (1, 2)]);
+        let c = TestConstraint::new(TestPredicate::AreEqual);
+        let assmap = HashMap::from_iter([("key1", 1), ("key3", 2)]);
         let err_msg = c.is_satisfied(&TestData, &assmap).unwrap_err();
-        assert_eq!(err_msg, InvalidConstraint::UnboundVariable("2".to_string()));
+        assert_eq!(
+            err_msg,
+            InvalidConstraint::UnboundVariable("key2".to_string())
+        );
     }
 }

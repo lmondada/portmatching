@@ -1,8 +1,11 @@
+use itertools::Itertools;
+
 use crate::{
-    indexing::{DataBindMap, DataKey, IndexKey, IndexedData, Key},
+    branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector},
+    indexing::{IndexKey, IndexedData},
     matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
-    pattern::Pattern,
-    IndexingScheme, Predicate,
+    pattern::{Pattern, PatternLogic},
+    BindMap, IndexingScheme, Predicate,
 };
 
 /// A simple matcher for matching multiple patterns.
@@ -11,45 +14,47 @@ use crate::{
 ///
 /// You probably do not want to use this matcher for anything other than as a
 /// baseline in benchmarking.
-pub struct NaiveManyMatcher<K, P, I> {
-    matchers: Vec<SinglePatternMatcher<K, P, I>>,
+pub struct NaiveManyMatcher<K, B> {
+    matchers: Vec<SinglePatternMatcher<K, B>>,
 }
 
-impl<P, I: IndexingScheme + Default> NaiveManyMatcher<Key<I>, P, I> {
+impl<K, B> NaiveManyMatcher<K, B> {
     /// Create a new naive matcher from patterns.
     ///
     /// Use [`IndexingScheme::default`] as the indexing scheme.
-    pub fn try_from_patterns<'p, PT>(
-        patterns: impl IntoIterator<Item = &'p PT>,
-    ) -> Result<Self, PT::Error>
+    pub fn from_patterns<I, PT>(patterns: impl IntoIterator<Item = PT>) -> Self
     where
-        PT: Pattern<Key = Key<I>, Predicate = P> + 'p,
+        PT: Pattern<Key = K>,
+        B: CreateBranchSelector<PT::Constraint, Key = K>,
+        K: IndexKey,
+        I: IndexingScheme<Key = K> + Default,
     {
         let matchers = patterns
             .into_iter()
-            .map(|p| SinglePatternMatcher::try_from_pattern(p))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { matchers })
+            .map(|p| SinglePatternMatcher::from_pattern::<I, PT>(p))
+            .collect();
+        Self { matchers }
     }
 
     /// Create a new naive matcher from patterns, using a custom indexing scheme.
-    pub fn try_from_patterns_with_indexing<'p, PT>(
-        patterns: impl IntoIterator<Item = &'p PT>,
-        host_indexing: I,
-    ) -> Result<Self, PT::Error>
+    pub fn from_patterns_with_indexing<PT>(
+        patterns: impl IntoIterator<Item = PT>,
+        host_indexing: &impl IndexingScheme<Key = K>,
+    ) -> Self
     where
-        I: Clone,
-        PT: Pattern<Key = Key<I>, Predicate = P> + 'p,
+        PT: Pattern<Key = K>,
+        B: CreateBranchSelector<PT::Constraint, Key = K>,
+        K: IndexKey,
     {
         let matchers = patterns
             .into_iter()
-            .map(|p| SinglePatternMatcher::try_from_pattern_with_indexing(p, host_indexing.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { matchers })
+            .map(|p| SinglePatternMatcher::from_pattern_with_indexing(p, host_indexing))
+            .collect();
+        Self { matchers }
     }
 }
 
-impl<K: IndexKey, P, I> Default for NaiveManyMatcher<K, P, I> {
+impl<K, B> Default for NaiveManyMatcher<K, B> {
     fn default() -> Self {
         Self {
             matchers: Default::default(),
@@ -57,12 +62,12 @@ impl<K: IndexKey, P, I> Default for NaiveManyMatcher<K, P, I> {
     }
 }
 
-impl<P, D> PortMatcher<D> for NaiveManyMatcher<DataKey<D>, P, <D as IndexedData>::IndexingScheme>
+impl<B, D> PortMatcher<D> for NaiveManyMatcher<D::Key, B>
 where
     D: IndexedData,
-    P: Predicate<D>,
+    B: EvaluateBranchSelector<D, D::Value, Key = D::Key>,
 {
-    type Match = DataBindMap<D>;
+    type Match = D::BindMap;
 
     fn find_matches<'a>(
         &'a self,
@@ -78,8 +83,8 @@ where
     }
 }
 
-impl<K: IndexKey, P, I> FromIterator<SinglePatternMatcher<K, P, I>> for NaiveManyMatcher<K, P, I> {
-    fn from_iter<T: IntoIterator<Item = SinglePatternMatcher<K, P, I>>>(iter: T) -> Self {
+impl<K, B> FromIterator<SinglePatternMatcher<K, B>> for NaiveManyMatcher<K, B> {
+    fn from_iter<T: IntoIterator<Item = SinglePatternMatcher<K, B>>>(iter: T) -> Self {
         Self {
             matchers: iter.into_iter().collect(),
         }

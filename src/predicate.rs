@@ -18,13 +18,14 @@
 //! `FilterPredicate` by calling `assign_check` and then checking that the binding
 //! for <var2> is in the returned set.
 
+mod pattern;
+pub use pattern::{PredicatePattern, PredicatePatternDefaultSelector};
+
 use std::borrow::Borrow;
 
-use crate::indexing::{DataValue, IndexedData};
+use crate::{constraint::InvalidConstraint, pattern::Satisfiable, Constraint};
 
-/// A predicate with a fixed arity.
-pub trait ArityPredicate: Eq + Clone {
-    /// Get predicate arity
+pub trait ArityPredicate: Clone + Ord {
     fn arity(&self) -> usize;
 }
 
@@ -35,89 +36,139 @@ pub trait ArityPredicate: Eq + Clone {
 ///
 /// ## Parameter types
 /// - `Data`: The subject data type on which predicates are evaluated.
-pub trait Predicate<Data: IndexedData>: ArityPredicate {
-    /// The error type for malformed predicates.
-    type InvalidPredicateError: std::fmt::Display;
-
-    /// Check if the predicate is satisfied by the given data and values.
-    ///
-    /// `values` must be of length [Predicate::arity].
-    fn check(
-        &self,
-        data: &Data,
-        args: &[impl Borrow<DataValue<Data>>],
-    ) -> Result<bool, Self::InvalidPredicateError>;
+pub trait Predicate<Data, Value>: ArityPredicate {
+    fn check(&self, bindings: &[impl Borrow<Value>], data: &Data) -> bool;
 }
 
+pub trait ConstraintLogic<K>: Clone + Ord + Sized {
+    type BranchClass: Ord;
+
+    fn get_class(&self, keys: &[K]) -> Self::BranchClass;
+
+    /// Compute equivalent constraint when conditioned on an other constraint
+    /// of the same class.
+    fn condition_on(
+        &self,
+        keys: &[K],
+        condition: &Constraint<K, Self>,
+    ) -> Satisfiable<Constraint<K, Self>>;
+
+    fn try_into_constraint(self, keys: Vec<K>) -> Result<Constraint<K, Self>, InvalidConstraint>
+    where
+        Self: ArityPredicate,
+    {
+        Constraint::try_new(self, keys)
+    }
+}
+
+impl<K, P> Constraint<K, P> {
+    pub fn get_class(&self) -> P::BranchClass
+    where
+        P: ConstraintLogic<K>,
+    {
+        self.predicate().get_class(self.required_bindings())
+    }
+
+    pub fn condition_on(&self, condition: &Constraint<K, P>) -> Satisfiable<Constraint<K, P>>
+    where
+        P: ConstraintLogic<K>,
+    {
+        let keys = self.required_bindings();
+        self.predicate().condition_on(keys, condition)
+    }
+}
 #[cfg(test)]
 pub(crate) mod tests {
     use std::borrow::Borrow;
-    use std::cmp;
 
     use itertools::Itertools;
     use rstest::rstest;
 
     use crate::indexing::tests::TestData;
-    use crate::indexing::DataValue;
+    use crate::pattern::Satisfiable;
     use crate::predicate::Predicate;
+    use crate::Constraint;
 
-    use super::ArityPredicate;
+    use super::{ArityPredicate, ConstraintLogic};
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    pub(crate) struct TestPredicate {
-        pub(crate) arity: usize,
+    pub type TestKey = &'static str;
+    pub type TestPattern = super::PredicatePattern<TestKey, TestPredicate>;
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub(crate) enum TestPredicate {
+        AreEqual,
+        NotEqual,
+        PredTwo,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    pub(crate) enum TestBranchClass {
+        One(TestKey, TestKey),
+        Two,
     }
 
     impl ArityPredicate for TestPredicate {
         fn arity(&self) -> usize {
-            self.arity
-        }
-    }
-
-    impl Predicate<TestData> for TestPredicate {
-        type InvalidPredicateError = String;
-
-        fn check(
-            &self,
-            _: &TestData,
-            args: &[impl Borrow<DataValue<TestData>>],
-        ) -> Result<bool, String> {
-            if args.len() != self.arity {
-                Err("Invalid constraint: arity mismatch".to_string())
-            } else {
-                Ok(args
-                    .iter()
-                    .tuple_windows()
-                    .all(|(a, b)| a.borrow() == b.borrow()))
+            match self {
+                TestPredicate::AreEqual => 2,
+                TestPredicate::NotEqual => 2,
+                TestPredicate::PredTwo => 0,
             }
         }
     }
 
-    impl PartialOrd for TestPredicate {
-        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            Some(self.cmp(other))
+    impl Predicate<TestData, usize> for TestPredicate {
+        fn check(&self, bindings: &[impl Borrow<usize>], TestData: &TestData) -> bool {
+            let (a, b) = bindings.into_iter().collect_tuple().unwrap();
+            match self {
+                TestPredicate::AreEqual => a.borrow() == b.borrow(),
+                TestPredicate::NotEqual => a.borrow() != b.borrow(),
+                TestPredicate::PredTwo => true,
+            }
         }
     }
 
-    impl Ord for TestPredicate {
-        fn cmp(&self, other: &Self) -> cmp::Ordering {
-            cmp::Reverse(self.arity).cmp(&cmp::Reverse(other.arity))
+    impl ConstraintLogic<TestKey> for TestPredicate {
+        type BranchClass = TestBranchClass;
+
+        fn get_class(&self, keys: &[TestKey]) -> Self::BranchClass {
+            let (a, b) = keys.into_iter().cloned().collect_tuple().unwrap();
+            match self {
+                Self::AreEqual => TestBranchClass::One(a, b),
+                Self::NotEqual => TestBranchClass::One(a, b),
+                Self::PredTwo => TestBranchClass::Two,
+            }
+        }
+
+        fn condition_on(
+            &self,
+            keys: &[TestKey],
+            condition: &Constraint<TestKey, Self>,
+        ) -> Satisfiable<Constraint<TestKey, Self>> {
+            assert_eq!(
+                self.get_class(keys),
+                condition.get_class(),
+                "class mismatch in TestPredicate::condition_on"
+            );
+            assert_eq!(
+                keys,
+                condition.required_bindings(),
+                "Cannot be in same class if keys are not the same"
+            );
+
+            if self == condition.predicate() {
+                Satisfiable::Tautology
+            } else {
+                Satisfiable::No
+            }
         }
     }
 
     #[rstest]
-    #[case(2)]
-    #[case(3)]
-    fn test_arity_match(#[case] arity: usize) {
-        let p = TestPredicate { arity };
-        let args = vec![&3; p.arity()];
-        assert!(p.check(&TestData, &args).unwrap());
+    #[case(TestPredicate::AreEqual, vec![2, 2])]
+    fn test_arity_match(#[case] predicate: TestPredicate, #[case] args: Vec<usize>) {
+        assert!(predicate.check(&args, &TestData));
     }
 
-    #[test]
-    fn test_arity_mismatch() {
-        let p = TestPredicate { arity: 2 };
-        let args = vec![&3];
-        assert!(p.check(&TestData, &args).is_err());
-    }
+    // TODO: more tests
 }
