@@ -22,7 +22,11 @@ pub struct SerialPatternMatch {
 impl<S: BindMap<Key = PGIndexKey, Value = NodeIndex>> From<PatternMatch<S>> for SerialPatternMatch {
     fn from(value: PatternMatch<S>) -> Self {
         let pattern = value.pattern;
-        let &root = value.match_data.get(&PGIndexKey::root(0)).unwrap().borrow();
+        let &root = value
+            .match_data
+            .get_binding(&PGIndexKey::root(0))
+            .unwrap()
+            .borrow();
         Self { pattern, root }
     }
 }

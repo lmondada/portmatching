@@ -1,11 +1,9 @@
-use itertools::Itertools;
 
 use crate::{
-    branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector},
+    branch_selector::{CreateBranchSelector, EvaluateBranchSelector},
     indexing::{IndexKey, IndexedData},
     matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
-    pattern::{Pattern, PatternLogic},
-    BindMap, IndexingScheme, Predicate,
+    pattern::Pattern, IndexingScheme,
 };
 
 /// A simple matcher for matching multiple patterns.
@@ -62,10 +60,11 @@ impl<K, B> Default for NaiveManyMatcher<K, B> {
     }
 }
 
-impl<B, D> PortMatcher<D> for NaiveManyMatcher<D::Key, B>
+impl<B, D, K> PortMatcher<D> for NaiveManyMatcher<K, B>
 where
-    D: IndexedData,
-    B: EvaluateBranchSelector<D, D::Value, Key = D::Key>,
+    K: IndexKey,
+    D: IndexedData<K>,
+    B: EvaluateBranchSelector<D, D::Value, Key = K>,
 {
     type Match = D::BindMap;
 

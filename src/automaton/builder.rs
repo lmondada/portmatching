@@ -7,8 +7,7 @@ use crate::{
     automaton::{ConstraintAutomaton, StateID},
     branch_selector::{BranchSelector, CreateBranchSelector},
     indexing::IndexKey,
-    pattern::{Pattern, Satisfiable},
-    BindMap, HashSet, IndexingScheme, PatternID, PatternLogic,
+    pattern::{Pattern, Satisfiable}, HashSet, IndexingScheme, PatternID, PatternLogic,
 };
 
 mod modify;
@@ -129,13 +128,10 @@ where
     /// The `make_det` predicate specifies the heuristic used to determine whether
     /// to turn a state into a deterministic one. To reduce the automaton size,
     /// states are merged whenever possible.
-    pub fn build<M>(
+    pub fn build(
         mut self,
-        config: BuildConfig<impl IndexingScheme<BindMap = M>>,
-    ) -> (ConstraintAutomaton<K, B>, Vec<PatternID>)
-    where
-        M: BindMap<Key = K>,
-    {
+        config: BuildConfig<impl IndexingScheme<Key = K>>,
+    ) -> (ConstraintAutomaton<K, B>, Vec<PatternID>) {
         // Turn patterns into a transition graph
         let pattern_ids = self.construct_graph();
 
@@ -238,10 +234,7 @@ where
     ///  - are in all paths from root to `state`, and
     ///  - appear in at least one pattern match in the future of `state`, or
     ///  - are required to evaluate outgoing constraints at `state`.
-    fn populate_min_scopes<M>(&mut self, indexing: impl IndexingScheme<BindMap = M>)
-    where
-        M: BindMap<Key = K>,
-    {
+    fn populate_min_scopes(&mut self, indexing: impl IndexingScheme<Key = K>) {
         for state in self.all_states().collect_vec() {
             let Some(br) = self.branch_selector(state) else {
                 continue;
@@ -326,14 +319,13 @@ impl<PT: Pattern, B> FromIterator<PT> for AutomatonBuilder<PT::Logic, PT::Key, B
 
 #[cfg(test)]
 pub(super) mod tests {
-    use rstest::{fixture, rstest};
+    use rstest::rstest;
     use tests::modify::tests::{constraints, root_child, root_grandchildren};
 
     use super::modify::tests::{automaton, automaton2};
     use crate::{
         automaton::tests::TestAutomaton,
         branch_selector::tests::TestBranchSelector,
-        constraint::tests::TestConstraint,
         indexing::tests::TestStrIndexingScheme,
         predicate::{
             tests::{TestKey, TestPattern},

@@ -5,7 +5,7 @@
 //! The predicate is either an AssignPredicate or a FilterPredicate.
 
 use crate::{
-    indexing::{Binding, IndexedData},
+    indexing::{Binding, IndexKey, IndexedData},
     predicate::ArityPredicate,
 };
 
@@ -190,20 +190,20 @@ impl<K, P> Constraint<K, P> {
     ///
     /// `Result<bool, InvalidConstraint>` - Ok(true) if the constraint is satisfied,
     /// Ok(false) if it's not, or an Err if there's an invalid constraint.
-    pub fn is_satisfied<D: IndexedData<Key = K>>(
+    pub fn is_satisfied<D: IndexedData<K>>(
         &self,
         data: &D,
         known_bindings: &D::BindMap,
     ) -> Result<bool, InvalidConstraint>
     where
         P: Predicate<D, D::Value>,
-        K: Debug,
+        K: IndexKey,
     {
         let args = self
             .args
             .iter()
             .map(|key| {
-                let Binding::Bound(value) = known_bindings.get(key) else {
+                let Binding::Bound(value) = known_bindings.get_binding(key) else {
                     return Err(InvalidConstraint::UnboundVariable(format!("{key:?}")));
                 };
                 Ok(value.borrow().clone())
@@ -271,9 +271,9 @@ pub(crate) mod tests {
     #[test]
     #[should_panic]
     fn test_invalid_constraint() {
-        let c = Constraint {
+        let c = TestConstraint {
             predicate: TestPredicate::AreEqual,
-            args: vec!["x".to_string()],
+            args: vec!["x"],
         };
         c.arity();
     }
@@ -289,7 +289,7 @@ pub(crate) mod tests {
     #[test]
     fn test_not_is_satisfied() {
         let c = TestConstraint::new(TestPredicate::NotEqual);
-        let assmap = HashMap::from_iter([("key1", 1), ("key2", 1)]);
+        let assmap = HashMap::from_iter([("key1", Some(1)), ("key2", Some(1))]);
         let result = c.is_satisfied(&TestData, &assmap).unwrap();
         assert!(!result);
     }
@@ -297,7 +297,7 @@ pub(crate) mod tests {
     #[test]
     fn test_not_bound() {
         let c = TestConstraint::new(TestPredicate::AreEqual);
-        let assmap = HashMap::from_iter([("key1", 1), ("key3", 2)]);
+        let assmap = HashMap::from_iter([("key1", Some(1)), ("key3", Some(2))]);
         let err_msg = c.is_satisfied(&TestData, &assmap).unwrap_err();
         assert_eq!(
             err_msg,

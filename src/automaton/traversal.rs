@@ -20,7 +20,7 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
         AutomatonTraverser::new(self, host)
     }
 
-    fn update_bindings<D: IndexedData<Key = K>>(
+    fn update_bindings<D: IndexedData<K>>(
         &self,
         state: StateID,
         bindings: D::BindMap,
@@ -45,7 +45,7 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
         host: &'a D,
     ) -> impl Iterator<Item = TraversalState<D::BindMap>> + 'a
     where
-        D: IndexedData<Key = K>,
+        D: IndexedData<K>,
         B: EvaluateBranchSelector<D, D::Value, Key = K>,
     {
         let Some(br) = self.branch_selector(state.state_id) else {
@@ -59,7 +59,7 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
             // Evaluate the predicates to find the allowed transitions
             let reqs_bindings = reqs
                 .iter()
-                .map(|k| match bindings.get(k) {
+                .map(|k| match bindings.get_binding(k) {
                     Binding::Bound(v) => Some(v.borrow().clone()),
                     Binding::Failed => None,
                     Binding::Unbound => panic!("tried to use unbound key {k:?}"),
@@ -165,9 +165,9 @@ impl<'a, 'd, K: IndexKey, B, M: Default, D> AutomatonTraverser<'a, 'd, K, B, M, 
 
     fn complete_bindings(&self, bindings: D::BindMap, reqs: &[K]) -> Vec<D::BindMap>
     where
-        D: IndexedData<Key = K>,
+        D: IndexedData<K>,
     {
-        if reqs.iter().any(|k| bindings.get(k).is_failed()) {
+        if reqs.iter().any(|k| bindings.get_binding(k).is_failed()) {
             // Some of the required bindings could not be matched
             return vec![];
         }
@@ -175,7 +175,7 @@ impl<'a, 'd, K: IndexKey, B, M: Default, D> AutomatonTraverser<'a, 'd, K, B, M, 
         // Find keys that must still be bound
         let missing_keys = reqs
             .iter()
-            .filter(|k| bindings.get(k).is_unbound())
+            .filter(|k| bindings.get_binding(k).is_unbound())
             .copied()
             .collect_vec();
 
@@ -187,7 +187,7 @@ impl<'a, 'd, K: IndexKey, B, M: Default, D> AutomatonTraverser<'a, 'd, K, B, M, 
         };
 
         // Remove bindings that could not bind all required keys
-        all_bindings.retain(|new_bindings| !reqs.iter().any(|k| new_bindings.get(k).is_failed()));
+        all_bindings.retain(|new_bindings| !reqs.iter().any(|k| new_bindings.get_binding(k).is_failed()));
 
         for new_bindings in all_bindings.iter_mut() {
             // Retain only the required bindings
@@ -201,17 +201,17 @@ impl<'a, 'd, K: IndexKey, B, M: Default, D> AutomatonTraverser<'a, 'd, K, B, M, 
 fn bindings_hash<S: BindMap>(bindings: &S, scope: impl IntoIterator<Item = S::Key>) -> u64 {
     let mut hasher = FxHasher::default();
     for key in scope {
-        let value = bindings.get(&key);
+        let value = bindings.get_binding(&key);
         value.as_ref().map(|v| v.borrow()).hash(&mut hasher);
     }
     hasher.finish()
 }
 
-impl<B, D> Iterator for AutomatonTraverser<'_, '_, B::Key, B, D::BindMap, D>
+impl<B, D, K> Iterator for AutomatonTraverser<'_, '_, K, B, D::BindMap, D>
 where
-    D: IndexedData,
-    D::BindMap: BindMap<Key = B::Key>,
-    B: EvaluateBranchSelector<D, D::Value, Key = D::Key>,
+    K: IndexKey,
+    D: IndexedData<K>,
+    B: EvaluateBranchSelector<D, D::Value, Key = K>,
 {
     type Item = (PatternID, D::BindMap);
 
@@ -245,11 +245,10 @@ mod tests {
         automaton::{builder::tests::TestBuildConfig, tests::TestBuilder},
         constraint::tests::TestConstraint,
         indexing::tests::TestData,
-        predicate::tests::{TestPattern, TestPredicate},
-        HashMap, HashSet,
+        predicate::tests::{TestPattern, TestPredicate}, HashSet,
     };
 
-    use super::*;
+    
 
     fn true_constraint() -> TestConstraint {
         TestConstraint::new(TestPredicate::NotEqual)
@@ -277,7 +276,7 @@ mod tests {
             false_constraint(),
         ]);
 
-        let mut builder = TestBuilder::from_patterns([p1, p2, p3, p4]);
+        let builder = TestBuilder::from_patterns([p1, p2, p3, p4]);
         let (automaton, ids) = builder.build(TestBuildConfig::default());
         let matches: HashSet<_> = automaton.run(&TestData).map(|(id, _)| id).collect();
         assert_eq!(matches, HashSet::from_iter([ids[1], ids[2]]));

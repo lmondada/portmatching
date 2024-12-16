@@ -119,7 +119,7 @@ fn print_matches<K, V: Debug, M: BindMap<Key = K, Value = V>>(
         println!(
             "Pattern {} matches at {:?}",
             m.pattern.0,
-            m.match_data.get(root_pos).unwrap().borrow()
+            m.match_data.get_binding(root_pos).unwrap().borrow()
         );
     }
 }

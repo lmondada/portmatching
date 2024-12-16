@@ -12,7 +12,7 @@ use crate::{
     matcher::PatternMatch,
     HashMap, PatternID, PortMatcher,
 };
-use crate::{BindMap, IndexingScheme};
+use crate::IndexingScheme;
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
@@ -22,11 +22,11 @@ pub struct ManyMatcher<PT, K: IndexKey, B> {
     patterns: HashMap<PatternID, PT>,
 }
 
-impl<PT, D, B> PortMatcher<D> for ManyMatcher<PT, D::Key, B>
+impl<PT, D, B, K> PortMatcher<D> for ManyMatcher<PT, K, B>
 where
-    D: IndexedData,
-    B: EvaluateBranchSelector<D, D::Value, Key = D::Key>,
-    D::BindMap: BindMap<Key = B::Key>,
+    K: IndexKey,
+    D: IndexedData<K>,
+    B: EvaluateBranchSelector<D, D::Value, Key = K>,
 {
     type Match = D::BindMap;
 

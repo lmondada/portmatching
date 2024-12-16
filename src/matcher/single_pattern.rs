@@ -28,10 +28,11 @@ pub struct SinglePatternMatcher<K, B> {
     required_bindings: Vec<K>,
 }
 
-impl<B, D> PortMatcher<D> for SinglePatternMatcher<D::Key, B>
+impl<B, D, K> PortMatcher<D> for SinglePatternMatcher<K, B>
 where
-    D: IndexedData,
-    B: EvaluateBranchSelector<D, D::Value, Key = D::Key>,
+    K: IndexKey,
+    D: IndexedData<K>,
+    B: EvaluateBranchSelector<D, D::Value, Key = K>,
 {
     type Match = D::BindMap;
 
@@ -149,7 +150,7 @@ impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
     pub fn match_exists<D>(&self, host: &D) -> bool
     where
         B: EvaluateBranchSelector<D, D::Value, Key = K>,
-        D: IndexedData<Key = K>,
+        D: IndexedData<K>,
     {
         !self.get_all_bindings(host).is_empty()
     }
@@ -158,7 +159,7 @@ impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
     fn get_all_bindings<D>(&self, host: &D) -> Vec<D::BindMap>
     where
         B: EvaluateBranchSelector<D, D::Value, Key = K>,
-        D: IndexedData<Key = K>,
+        D: IndexedData<K>,
     {
         let mut all_bindings = vec![D::BindMap::default()];
 
@@ -174,7 +175,7 @@ impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
                 let reqs = br.required_bindings();
                 let bindings = reqs
                     .iter()
-                    .filter_map(|k| match bindings.get(k) {
+                    .filter_map(|k| match bindings.get_binding(k) {
                         Binding::Bound(v) => Some(Some(v.borrow().clone())),
                         Binding::Failed => Some(None),
                         Binding::Unbound => None,
@@ -204,22 +205,21 @@ mod tests {
     use itertools::Itertools;
 
     use crate::{
+        branch_selector::tests::TestBranchSelector,
         constraint::tests::TestConstraint,
         indexing::tests::{TestData, TestStrIndexingScheme},
-        pattern::tests::TestPattern,
-        predicate::tests::TestPredicate,
-        HashMap,
+        predicate::tests::{TestPattern, TestPredicate},
     };
 
     use super::*;
 
-    type TestMatcher = SinglePatternMatcher<usize, TestPredicate, TestStrIndexingScheme>;
+    type TestMatcher = SinglePatternMatcher<&'static str, TestBranchSelector>;
 
     #[test]
     fn test_single_pattern_matcher() {
-        let eq_2 = TestConstraint::new(vec![2, 2]);
-        let pattern: TestPattern<usize, TestPredicate> = vec![eq_2].into();
-        let matcher = TestMatcher::try_from_pattern(&pattern).unwrap();
+        let eq_2 = TestConstraint::new(TestPredicate::AreEqual);
+        let pattern = TestPattern::from_constraints(vec![eq_2]);
+        let matcher = TestMatcher::from_pattern::<TestStrIndexingScheme, _>(pattern);
 
         // Matching against itself works
         let matches = matcher.find_matches(&TestData).collect_vec();
@@ -228,7 +228,8 @@ mod tests {
             pattern,
             match_data,
         } = matches.first().unwrap();
-        assert_eq!(match_data, &HashMap::from_iter((0..3).map(|i| (i, i))));
-        assert_eq!(*pattern, PatternID::default());
+        todo!()
+        // assert_eq!(match_data, &HashMap::from_iter((0..3).map(|i| (i, i))));
+        // assert_eq!(*pattern, PatternID::default());
     }
 }

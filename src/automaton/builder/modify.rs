@@ -5,7 +5,7 @@ use petgraph::data::{Build, DataMapMut};
 use crate::automaton::view::GraphView;
 use crate::automaton::{State, StateID, TransitionGraph, TransitionID};
 use crate::indexing::IndexKey;
-use crate::{BindMap, PatternID};
+use crate::PatternID;
 
 use super::AutomatonBuilder;
 
@@ -160,7 +160,7 @@ pub mod tests {
         let x_child = root_child(&automaton);
         let [a_child, _, _, _] = root_grandchildren(&automaton);
 
-        let mut builder = AutomatonBuilder::from_matcher(automaton);
+        let builder = AutomatonBuilder::from_matcher(automaton);
 
         todo!();
         // // Add a FAIL transition from x_child to a new state

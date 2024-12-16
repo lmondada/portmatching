@@ -14,7 +14,7 @@ pub mod utils;
 
 pub use constraint::{Constraint, DetHeuristic};
 pub use constraint_tree::{ConditionedPredicate, ConstraintTree, ToConstraintsTree};
-pub use indexing::{BindMap, IndexedData, IndexingScheme, Key, Value};
+pub use indexing::{BindMap, IndexedData, IndexingScheme};
 pub use matcher::{
     ManyMatcher, NaiveManyMatcher, PatternFallback, PatternID, PatternMatch, PortMatcher,
     SinglePatternMatcher,

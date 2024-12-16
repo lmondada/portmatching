@@ -119,7 +119,7 @@ pub(crate) mod tests {
 
     impl Predicate<TestData, usize> for TestPredicate {
         fn check(&self, bindings: &[impl Borrow<usize>], TestData: &TestData) -> bool {
-            let (a, b) = bindings.into_iter().collect_tuple().unwrap();
+            let (a, b) = bindings.iter().collect_tuple().unwrap();
             match self {
                 TestPredicate::AreEqual => a.borrow() == b.borrow(),
                 TestPredicate::NotEqual => a.borrow() != b.borrow(),
@@ -132,7 +132,7 @@ pub(crate) mod tests {
         type BranchClass = TestBranchClass;
 
         fn get_class(&self, keys: &[TestKey]) -> Self::BranchClass {
-            let (a, b) = keys.into_iter().cloned().collect_tuple().unwrap();
+            let (a, b) = keys.iter().cloned().collect_tuple().unwrap();
             match self {
                 Self::AreEqual => TestBranchClass::One(a, b),
                 Self::NotEqual => TestBranchClass::One(a, b),
