@@ -19,13 +19,14 @@ use crate::{
 use super::{PatternMatch, PortMatcher};
 
 /// A simple matcher for a single pattern.
+#[derive(Debug, Clone)]
 pub struct SinglePatternMatcher<K, B> {
     /// The constraints forming the pattern
     branch_selectors: Vec<B>,
     /// For each branch selector, the keys that must be bound
     scopes: Vec<Vec<K>>,
     /// The bindings that must be present in the final matches
-    required_bindings: Vec<K>,
+    required_bindings: BTreeSet<K>,
 }
 
 impl<B, D, K> PortMatcher<D> for SinglePatternMatcher<K, B>
@@ -71,7 +72,7 @@ impl<K, B> SinglePatternMatcher<K, B> {
         K: IndexKey,
     {
         // The set of keys that must be bound
-        let required_bindings = pattern.required_bindings();
+        let required_bindings = BTreeSet::from_iter(pattern.required_bindings());
 
         // Break pattern into predicates
         let predicates = decompose_constraints(pattern.into_logic());
@@ -175,10 +176,10 @@ impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
                 let reqs = br.required_bindings();
                 let bindings = reqs
                     .iter()
-                    .filter_map(|k| match bindings.get_binding(k) {
-                        Binding::Bound(v) => Some(Some(v.borrow().clone())),
-                        Binding::Failed => Some(None),
-                        Binding::Unbound => None,
+                    .map(|k| match bindings.get_binding(k) {
+                        Binding::Bound(v) => Some(v.borrow().clone()),
+                        Binding::Failed => None,
+                        Binding::Unbound => panic!("tried to use unbound key {k:?}"),
                     })
                     .collect_vec();
                 !br.eval(&bindings, host).is_empty()
@@ -193,7 +194,7 @@ impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
             .collect_vec();
 
         for bindings in final_bindings.iter_mut() {
-            bindings.retain_keys(&last_scope);
+            bindings.retain_keys(&self.required_bindings);
         }
 
         final_bindings
@@ -217,19 +218,18 @@ mod tests {
 
     #[test]
     fn test_single_pattern_matcher() {
-        let eq_2 = TestConstraint::new(TestPredicate::AreEqual);
-        let pattern = TestPattern::from_constraints(vec![eq_2]);
+        let c1 = TestConstraint::try_binary_from_triple("key1", TestPredicate::AreEqualTwo, "key1")
+            .unwrap();
+        let c2 = TestConstraint::try_new(TestPredicate::AlwaysTrueThree, vec!["key100"]).unwrap();
+        let c3 = TestConstraint::try_binary_from_triple("key1", TestPredicate::NotEqualOne, "key2")
+            .unwrap();
+        let pattern = TestPattern::from_constraints(vec![c1, c2, c3]);
         let matcher = TestMatcher::from_pattern::<TestStrIndexingScheme, _>(pattern);
 
-        // Matching against itself works
+        dbg!(&matcher);
         let matches = matcher.find_matches(&TestData).collect_vec();
+
         assert_eq!(matches.len(), 1);
-        let PatternMatch {
-            pattern,
-            match_data,
-        } = matches.first().unwrap();
-        todo!()
-        // assert_eq!(match_data, &HashMap::from_iter((0..3).map(|i| (i, i))));
-        // assert_eq!(*pattern, PatternID::default());
+        insta::assert_debug_snapshot!(matches.first().unwrap())
     }
 }

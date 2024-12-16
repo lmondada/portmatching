@@ -23,12 +23,45 @@ pub trait CreateBranchSelector<C>: BranchSelector + Sized {
     fn create_branch_selector(constraints: Vec<C>) -> Self;
 }
 
+pub trait DisplayBranchSelector: BranchSelector {
+    /// A string representation of the selector's branch class
+    fn fmt_class(&self) -> String;
+
+    /// A string representation of the n-th constraint
+    fn fmt_nth_constraint(&self, n: usize) -> String;
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::predicate::{
-        tests::{TestKey, TestPredicate},
+        tests::{TestBranchClass, TestKey, TestPredicate},
         PredicatePatternDefaultSelector,
     };
 
     pub type TestBranchSelector = PredicatePatternDefaultSelector<TestKey, TestPredicate>;
+
+    impl super::DisplayBranchSelector for TestBranchSelector {
+        fn fmt_class(&self) -> String {
+            let Some(cls) = self.get_class() else {
+                return String::new();
+            };
+            match cls {
+                TestBranchClass::One(a, b) => format!("One({a}, {b})"),
+                TestBranchClass::Two(a, b) => format!("Two({a}, {b})"),
+                TestBranchClass::Three => "Three".to_string(),
+            }
+        }
+
+        fn fmt_nth_constraint(&self, n: usize) -> String {
+            let pred = &self.predicates()[n];
+            match pred {
+                TestPredicate::AreEqualOne => "==".to_string(),
+                TestPredicate::NotEqualOne => "!=".to_string(),
+                TestPredicate::AreEqualTwo => "==".to_string(),
+                TestPredicate::AlwaysTrueTwo => "TRUE".to_string(),
+                TestPredicate::NeverTrueThree => "FALSE".to_string(),
+                TestPredicate::AlwaysTrueThree => "TRUE".to_string(),
+            }
+        }
+    }
 }

@@ -239,30 +239,31 @@ pub(crate) mod tests {
 
     impl TestConstraint {
         pub(crate) fn new(pred: TestPredicate) -> TestConstraint {
+            use TestPredicate::*;
+
             let key1 = "key1";
             let key2 = "key2";
             match pred {
-                TestPredicate::AreEqual => {
+                AreEqualOne | NotEqualOne | AreEqualTwo | AlwaysTrueTwo => {
                     TestConstraint::try_binary_from_triple(key1, pred, key2).unwrap()
                 }
-                TestPredicate::NotEqual => {
-                    TestConstraint::try_binary_from_triple(key1, pred, key2).unwrap()
+                NeverTrueThree | AlwaysTrueThree => {
+                    TestConstraint::try_new(pred, vec![key1]).unwrap()
                 }
-                TestPredicate::PredTwo => TestConstraint::try_new(pred, vec![]).unwrap(),
             }
         }
     }
 
     #[test]
     fn test_construct_constraint_arity() {
-        let c = TestConstraint::new(TestPredicate::AreEqual);
+        let c = TestConstraint::new(TestPredicate::AreEqualOne);
         assert_eq!(c.arity(), 2);
 
         assert_eq!(
-            TestConstraint::try_binary_from_triple("yo", TestPredicate::PredTwo, "lo",)
+            TestConstraint::try_binary_from_triple("yo", TestPredicate::AlwaysTrueThree, "lo",)
                 .unwrap_err(),
             InvalidConstraint::InvalidArity {
-                predicate_arity: 0,
+                predicate_arity: 1,
                 arguments_arity: 2,
             }
         );
@@ -272,7 +273,7 @@ pub(crate) mod tests {
     #[should_panic]
     fn test_invalid_constraint() {
         let c = TestConstraint {
-            predicate: TestPredicate::AreEqual,
+            predicate: TestPredicate::AreEqualOne,
             args: vec!["x"],
         };
         c.arity();
@@ -280,7 +281,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_is_satisfied() {
-        let c = TestConstraint::new(TestPredicate::AreEqual);
+        let c = TestConstraint::new(TestPredicate::AreEqualOne);
         let assmap = HashMap::from_iter([("key1", Some(1)), ("key2", Some(1)), ("key3", Some(3))]);
         let result = c.is_satisfied(&TestData, &assmap).unwrap();
         assert!(result);
@@ -288,7 +289,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_not_is_satisfied() {
-        let c = TestConstraint::new(TestPredicate::NotEqual);
+        let c = TestConstraint::new(TestPredicate::NotEqualOne);
         let assmap = HashMap::from_iter([("key1", Some(1)), ("key2", Some(1))]);
         let result = c.is_satisfied(&TestData, &assmap).unwrap();
         assert!(!result);
@@ -296,12 +297,12 @@ pub(crate) mod tests {
 
     #[test]
     fn test_not_bound() {
-        let c = TestConstraint::new(TestPredicate::AreEqual);
+        let c = TestConstraint::new(TestPredicate::AreEqualOne);
         let assmap = HashMap::from_iter([("key1", Some(1)), ("key3", Some(2))]);
         let err_msg = c.is_satisfied(&TestData, &assmap).unwrap_err();
         assert_eq!(
             err_msg,
-            InvalidConstraint::UnboundVariable("key2".to_string())
+            InvalidConstraint::UnboundVariable(format!("{:?}", "key2".to_string()))
         );
     }
 }

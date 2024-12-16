@@ -187,7 +187,8 @@ impl<'a, 'd, K: IndexKey, B, M: Default, D> AutomatonTraverser<'a, 'd, K, B, M, 
         };
 
         // Remove bindings that could not bind all required keys
-        all_bindings.retain(|new_bindings| !reqs.iter().any(|k| new_bindings.get_binding(k).is_failed()));
+        all_bindings
+            .retain(|new_bindings| !reqs.iter().any(|k| new_bindings.get_binding(k).is_failed()));
 
         for new_bindings in all_bindings.iter_mut() {
             // Retain only the required bindings
@@ -245,35 +246,47 @@ mod tests {
         automaton::{builder::tests::TestBuildConfig, tests::TestBuilder},
         constraint::tests::TestConstraint,
         indexing::tests::TestData,
-        predicate::tests::{TestPattern, TestPredicate}, HashSet,
+        predicate::tests::{TestBranchClass, TestPattern, TestPredicate},
+        HashSet,
     };
 
-    
-
-    fn true_constraint() -> TestConstraint {
-        TestConstraint::new(TestPredicate::NotEqual)
+    fn true_constraint(cls: TestBranchClass) -> TestConstraint {
+        match cls {
+            TestBranchClass::One(_, _) => TestConstraint::new(TestPredicate::NotEqualOne),
+            TestBranchClass::Two(_, _) => TestConstraint::new(TestPredicate::AlwaysTrueTwo),
+            TestBranchClass::Three => TestConstraint::new(TestPredicate::AlwaysTrueThree),
+        }
     }
 
-    fn false_constraint() -> TestConstraint {
-        TestConstraint::new(TestPredicate::AreEqual)
+    fn false_constraint(cls: TestBranchClass) -> TestConstraint {
+        match cls {
+            TestBranchClass::One(_, _) => TestConstraint::new(TestPredicate::AreEqualOne),
+            TestBranchClass::Two(_, _) => panic!("no always false constraint for two"),
+            TestBranchClass::Three => TestConstraint::new(TestPredicate::NeverTrueThree),
+        }
     }
 
     #[test]
     fn run_automaton() {
-        let p1 = TestPattern::from_constraints(vec![true_constraint(), false_constraint()]);
+        use TestBranchClass::*;
+        let one = One("", "");
+        let two = Two("", "");
+        let three = Three;
 
-        let p2 = TestPattern::from_constraints(vec![true_constraint(), true_constraint()]);
+        let p1 = TestPattern::from_constraints(vec![true_constraint(one), false_constraint(three)]);
+
+        let p2 = TestPattern::from_constraints(vec![true_constraint(one), true_constraint(two)]);
 
         let p3 = TestPattern::from_constraints(vec![
-            true_constraint(),
-            true_constraint(),
-            true_constraint(),
+            true_constraint(one),
+            true_constraint(two),
+            true_constraint(three),
         ]);
 
         let p4 = TestPattern::from_constraints(vec![
-            true_constraint(),
-            true_constraint(),
-            false_constraint(),
+            true_constraint(one),
+            true_constraint(two),
+            false_constraint(three),
         ]);
 
         let builder = TestBuilder::from_patterns([p1, p2, p3, p4]);

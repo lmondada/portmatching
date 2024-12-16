@@ -84,10 +84,11 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use rstest::rstest;
 
-    use crate::indexing::tests::TestData;
+    use crate::branch_selector::tests::TestBranchSelector;
     use crate::pattern::Satisfiable;
     use crate::predicate::Predicate;
     use crate::Constraint;
+    use crate::{branch_selector::DisplayBranchSelector, indexing::tests::TestData};
 
     use super::{ArityPredicate, ConstraintLogic};
 
@@ -96,34 +97,51 @@ pub(crate) mod tests {
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub(crate) enum TestPredicate {
-        AreEqual,
-        NotEqual,
-        PredTwo,
+        // BranchClass One
+        AreEqualOne,
+        NotEqualOne,
+        // BranchClass Two
+        AreEqualTwo,
+        AlwaysTrueTwo,
+        // BranchClass Three
+        NeverTrueThree,  // take one arg
+        AlwaysTrueThree, // take one arg
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
     pub(crate) enum TestBranchClass {
         One(TestKey, TestKey),
-        Two,
+        Two(TestKey, TestKey),
+        Three,
     }
 
     impl ArityPredicate for TestPredicate {
         fn arity(&self) -> usize {
+            use TestPredicate::*;
+
             match self {
-                TestPredicate::AreEqual => 2,
-                TestPredicate::NotEqual => 2,
-                TestPredicate::PredTwo => 0,
+                AlwaysTrueThree | NeverTrueThree => 1,
+                AreEqualOne | NotEqualOne | AreEqualTwo | AlwaysTrueTwo => 2,
             }
         }
     }
 
     impl Predicate<TestData, usize> for TestPredicate {
         fn check(&self, bindings: &[impl Borrow<usize>], TestData: &TestData) -> bool {
-            let (a, b) = bindings.iter().collect_tuple().unwrap();
+            use TestPredicate::*;
+
+            let args = bindings.iter().collect_tuple();
             match self {
-                TestPredicate::AreEqual => a.borrow() == b.borrow(),
-                TestPredicate::NotEqual => a.borrow() != b.borrow(),
-                TestPredicate::PredTwo => true,
+                AreEqualOne | AreEqualTwo => {
+                    let (a, b) = args.unwrap();
+                    a.borrow() == b.borrow()
+                }
+                NotEqualOne => {
+                    let (a, b) = args.unwrap();
+                    a.borrow() != b.borrow()
+                }
+                AlwaysTrueThree | AlwaysTrueTwo => true,
+                NeverTrueThree => false,
             }
         }
     }
@@ -132,11 +150,21 @@ pub(crate) mod tests {
         type BranchClass = TestBranchClass;
 
         fn get_class(&self, keys: &[TestKey]) -> Self::BranchClass {
-            let (a, b) = keys.iter().cloned().collect_tuple().unwrap();
+            assert_eq!(self.arity(), keys.len());
+
+            let args = keys.iter().cloned().collect_tuple();
+
+            use TestPredicate::*;
             match self {
-                Self::AreEqual => TestBranchClass::One(a, b),
-                Self::NotEqual => TestBranchClass::One(a, b),
-                Self::PredTwo => TestBranchClass::Two,
+                AreEqualOne | NotEqualOne => {
+                    let (a, b) = args.unwrap();
+                    TestBranchClass::One(a, b)
+                }
+                AreEqualTwo | AlwaysTrueTwo => {
+                    let (a, b) = args.unwrap();
+                    TestBranchClass::Two(a, b)
+                }
+                NeverTrueThree | AlwaysTrueThree => TestBranchClass::Three,
             }
         }
 
@@ -157,15 +185,35 @@ pub(crate) mod tests {
             );
 
             if self == condition.predicate() {
-                Satisfiable::Tautology
-            } else {
-                Satisfiable::No
+                return Satisfiable::Tautology;
+            }
+            match self.get_class(keys) {
+                TestBranchClass::One(_, _) => {
+                    // predicates are mutually exclusive
+                    Satisfiable::No
+                }
+                TestBranchClass::Two(_, _) => {
+                    if condition.predicate() == &TestPredicate::AlwaysTrueTwo {
+                        // Does not teach us anything, leave unchanged
+                        Satisfiable::Yes(self.clone().try_into_constraint(keys.to_vec()).unwrap())
+                    } else {
+                        Satisfiable::Tautology
+                    }
+                }
+                TestBranchClass::Three => {
+                    if condition.predicate() == &TestPredicate::AlwaysTrueThree {
+                        // Does not teach us anything, leave unchanged
+                        Satisfiable::Yes(self.clone().try_into_constraint(keys.to_vec()).unwrap())
+                    } else {
+                        Satisfiable::Tautology
+                    }
+                }
             }
         }
     }
 
     #[rstest]
-    #[case(TestPredicate::AreEqual, vec![2, 2])]
+    #[case(TestPredicate::AreEqualOne, vec![2, 2])]
     fn test_arity_match(#[case] predicate: TestPredicate, #[case] args: Vec<usize>) {
         assert!(predicate.check(&args, &TestData));
     }

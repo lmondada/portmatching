@@ -7,7 +7,8 @@ use crate::{
     automaton::{ConstraintAutomaton, StateID},
     branch_selector::{BranchSelector, CreateBranchSelector},
     indexing::IndexKey,
-    pattern::{Pattern, Satisfiable}, HashSet, IndexingScheme, PatternID, PatternLogic,
+    pattern::{Pattern, Satisfiable},
+    HashSet, IndexingScheme, PatternID, PatternLogic,
 };
 
 mod modify;
@@ -270,15 +271,18 @@ fn approx_isize(f: f64) -> isize {
 }
 
 fn best_branch_class<'p, P: PatternLogic + 'p>(
-    patterns: impl IntoIterator<Item = &'p P>,
+    patterns: impl IntoIterator<IntoIter = impl ExactSizeIterator<Item = &'p P>>,
 ) -> Option<P::BranchClass> {
+    let patterns = patterns.into_iter();
+    let n_patterns = patterns.len() as f64;
+
     // Collect all classes that are relevant to at least one pattern
     let classes: BTreeMap<P::BranchClass, f64> =
         patterns
             .into_iter()
             .fold(BTreeMap::default(), |mut classes, pattern| {
                 for (cls, rank) in pattern.get_branch_classes() {
-                    *classes.entry(cls).or_default() += rank;
+                    *classes.entry(cls).or_insert(n_patterns) += rank - 1.;
                 }
                 classes
             });
@@ -320,15 +324,14 @@ impl<PT: Pattern, B> FromIterator<PT> for AutomatonBuilder<PT::Logic, PT::Key, B
 #[cfg(test)]
 pub(super) mod tests {
     use rstest::rstest;
-    use tests::modify::tests::{constraints, root_child, root_grandchildren};
 
-    use super::modify::tests::{automaton, automaton2};
     use crate::{
         automaton::tests::TestAutomaton,
         branch_selector::tests::TestBranchSelector,
+        constraint::tests::TestConstraint,
         indexing::tests::TestStrIndexingScheme,
         predicate::{
-            tests::{TestKey, TestPattern},
+            tests::{TestKey, TestPattern, TestPredicate},
             PredicatePattern,
         },
     };
@@ -364,20 +367,25 @@ pub(super) mod tests {
 
     #[test]
     fn test_build() {
-        let c = PredicatePattern::from_constraints(constraints());
-        let builder = TestBuilder::from_patterns([c]);
+        let p1 = PredicatePattern::from_constraints([
+            TestConstraint::new(TestPredicate::AreEqualOne),
+            TestConstraint::new(TestPredicate::AreEqualTwo),
+        ]);
+        let p2 = PredicatePattern::from_constraints([
+            TestConstraint::new(TestPredicate::AreEqualOne),
+            TestConstraint::new(TestPredicate::AlwaysTrueThree),
+        ]);
+        let builder = TestBuilder::from_patterns([p1, p2]);
         let (matcher, pattern_ids) = builder.build(BuildConfig::<TestStrIndexingScheme>::default());
-        assert_eq!(matcher.graph.node_count(), 6);
-        assert_eq!(pattern_ids, vec![PatternID(0), PatternID(1), PatternID(2)]);
+        assert_eq!(matcher.graph.node_count(), 5);
+        assert_eq!(pattern_ids, vec![PatternID(0), PatternID(1)]);
         let _ = matcher.children(matcher.root()).exactly_one().ok().unwrap();
 
         insta::assert_snapshot!(matcher.dot_string());
     }
 
     #[rstest]
-    fn test_make_det_noop(automaton: TestAutomaton) {
-        let automaton2 = automaton.clone();
-        let root_child = root_child(&automaton);
+    fn test_make_det() {
         todo!("make_det")
         // let automaton = automaton.wrap_builder(|b| b.make_det(root_child));
 
@@ -385,36 +393,36 @@ pub(super) mod tests {
         // assert_eq!(automaton.graph.edge_count(), automaton2.graph.edge_count());
     }
 
-    #[rstest]
-    fn test_make_det(automaton2: TestAutomaton) {
-        let x_child = root_child(&automaton2);
-        let [a_child, b_child, c_child, d_child] = root_grandchildren(&automaton2);
-        todo!("make_det")
+    // #[rstest]
+    // fn test_make_det(automaton2: TestAutomaton) {
+    //     let x_child = root_child(&automaton2);
+    //     let [a_child, b_child, c_child, d_child] = root_grandchildren(&automaton2);
+    //     todo!("make_det")
 
-        // // Add a FAIL transition from x_child to a new state
-        // let fail_child = automaton2.fail_child(x_child).unwrap();
-        // // Add a common constraint to the fail child and a_child
-        // let common_constraint = TestConstraint::new(vec![7, 8]);
-        // let post_fail = automaton2
-        //     .constraint_next_state(fail_child, &common_constraint)
-        //     .unwrap();
+    //     // Add a FAIL transition from x_child to a new state
+    //     let fail_child = automaton2.fail_child(x_child).unwrap();
+    //     // Add a common constraint to the fail child and a_child
+    //     let common_constraint = TestConstraint::new(vec![7, 8]);
+    //     let post_fail = automaton2
+    //         .constraint_next_state(fail_child, &common_constraint)
+    //         .unwrap();
 
-        // let automaton2 = automaton2.wrap_builder(|b| b.make_det(x_child));
+    //     let automaton2 = automaton2.wrap_builder(|b| b.make_det(x_child));
 
-        // // Now `common_constraint` should be on all children, pointing to
-        // // `post_fail`. For b, c, d, this should be the only transition.
-        // for child in [b_child, c_child, d_child] {
-        //     assert_eq!(automaton2.all_transitions(child).count(), 1);
-        //     let transition = automaton2.all_transitions(child).next().unwrap();
-        //     assert_eq!(automaton2.constraint(transition), Some(&common_constraint));
-        //     assert_eq!(automaton2.next_state(transition), post_fail);
-        // }
-        // {
-        //     // For a_child, there are two transitions with the same constraint
-        //     assert_eq!(automaton2.all_transitions(a_child).count(), 2);
-        //     let (t1, t2) = automaton2.all_transitions(a_child).collect_tuple().unwrap();
-        //     assert_eq!(automaton2.constraint(t1), Some(&common_constraint));
-        //     assert_eq!(automaton2.constraint(t2), Some(&common_constraint));
-        // }
-    }
+    //     // Now `common_constraint` should be on all children, pointing to
+    //     // `post_fail`. For b, c, d, this should be the only transition.
+    //     for child in [b_child, c_child, d_child] {
+    //         assert_eq!(automaton2.all_transitions(child).count(), 1);
+    //         let transition = automaton2.all_transitions(child).next().unwrap();
+    //         assert_eq!(automaton2.constraint(transition), Some(&common_constraint));
+    //         assert_eq!(automaton2.next_state(transition), post_fail);
+    //     }
+    //     {
+    //         // For a_child, there are two transitions with the same constraint
+    //         assert_eq!(automaton2.all_transitions(a_child).count(), 2);
+    //         let (t1, t2) = automaton2.all_transitions(a_child).collect_tuple().unwrap();
+    //         assert_eq!(automaton2.constraint(t1), Some(&common_constraint));
+    //         assert_eq!(automaton2.constraint(t2), Some(&common_constraint));
+    //     }
+    // }
 }

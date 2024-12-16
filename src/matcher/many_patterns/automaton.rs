@@ -3,16 +3,16 @@ use std::fmt::{self, Debug};
 use itertools::Itertools;
 
 use crate::automaton::BuildConfig;
-use crate::branch_selector::{CreateBranchSelector, EvaluateBranchSelector};
+use crate::branch_selector::{CreateBranchSelector, DisplayBranchSelector, EvaluateBranchSelector};
 use crate::indexing::IndexedData;
 use crate::pattern::Pattern;
+use crate::IndexingScheme;
 use crate::{
     automaton::{AutomatonBuilder, ConstraintAutomaton},
     indexing::IndexKey,
     matcher::PatternMatch,
     HashMap, PatternID, PortMatcher,
 };
-use crate::IndexingScheme;
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
@@ -109,7 +109,7 @@ impl<PT, K: IndexKey, B> ManyMatcher<PT, K, B> {
     }
 }
 
-impl<PT, K: IndexKey, B: Debug> ManyMatcher<PT, K, B> {
+impl<PT, K: IndexKey, B: DisplayBranchSelector> ManyMatcher<PT, K, B> {
     /// A dotstring representation of the trie.
     pub fn dot_string(&self) -> String {
         self.automaton.dot_string()

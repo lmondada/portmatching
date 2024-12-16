@@ -372,7 +372,7 @@ pub(crate) mod tests {
         type Value = usize;
 
         fn required_bindings(&self, key: &Self::Key) -> Vec<Self::Key> {
-            todo!()
+            vec![]
         }
     }
 
@@ -401,7 +401,8 @@ pub(crate) mod tests {
             key: &TestKey,
             known_bindings: &Self::BindMap,
         ) -> Vec<Self::Value> {
-            todo!()
+            let key_suffix: usize = key[3..].parse().unwrap_or(0);
+            vec![key_suffix]
         }
     }
     impl IndexedData<usize> for TestData {

@@ -7,10 +7,12 @@ mod traversal;
 mod view;
 
 use derive_where::derive_where;
-use petgraph::dot::Dot;
+use petgraph::dot::{Config, Dot};
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::stable_graph::StableDiGraph;
+use petgraph::visit::EdgeRef;
 
+use crate::branch_selector::DisplayBranchSelector;
 use crate::HashMap;
 use std::collections::BTreeSet;
 use std::fmt::{self, Debug};
@@ -89,10 +91,11 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
     /// Get its dot string representation
     pub fn dot_string(&self) -> String
     where
-        K: Debug,
-        B: Debug,
+        K: IndexKey,
+        B: DisplayBranchSelector,
     {
-        format!("{:?}", Dot::new(&self.graph))
+        let str_graph = self.graph.map(&fmt_node, &fmt_edge(&self.graph));
+        format!("{}", Dot::new(&str_graph))
     }
 
     /// Get the root state ID
@@ -106,7 +109,42 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
     }
 }
 
-impl<K: IndexKey, P: Debug> Debug for ConstraintAutomaton<K, P> {
+fn fmt_node<K: IndexKey, B: DisplayBranchSelector>(_: NodeIndex, weight: &State<K, B>) -> String {
+    let br = weight
+        .branch_selector
+        .as_ref()
+        .map(|br| br.fmt_class())
+        .unwrap_or_default();
+    let is_det = if weight.deterministic { "D" } else { "ND" };
+    let matches = weight
+        .matches
+        .iter()
+        .map(|(id, bindings)| format!("{}: {:?}", id, bindings))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{br} ({is_det})\n{matches}")
+}
+
+fn fmt_edge<'t, K: IndexKey, B: DisplayBranchSelector + 't>(
+    graph: &TransitionGraph<K, B>,
+) -> impl Fn(EdgeIndex, &()) -> String + '_ {
+    |edge, &()| {
+        let edge_id = TransitionID(edge);
+        let src = graph.edge_endpoints(edge).unwrap().0;
+        let src_weight = graph.node_weight(src).unwrap();
+        if let Some(pos) = src_weight.edge_order.iter().position(|&e| e == edge_id) {
+            let br = src_weight
+                .branch_selector
+                .as_ref()
+                .expect("non trivial transition but no branch selector");
+            format!("{}", br.fmt_nth_constraint(pos))
+        } else {
+            format!("FAIL")
+        }
+    }
+}
+
+impl<K: IndexKey, P: DisplayBranchSelector> Debug for ConstraintAutomaton<K, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.dot_string())
     }

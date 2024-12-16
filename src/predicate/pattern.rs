@@ -1,5 +1,7 @@
 //! Implement [`crate::Pattern`] traits by defining predicates and their logic.
 
+use itertools::Itertools;
+
 use crate::{
     branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector},
     constraint::ConstraintSet,
@@ -69,6 +71,7 @@ where
         self.constraints
             .iter()
             .flat_map(|p| p.required_bindings().iter().copied())
+            .unique()
             .collect()
     }
 
@@ -88,7 +91,7 @@ where
     type BranchClass = P::BranchClass;
 
     fn get_branch_classes(&self) -> impl Iterator<Item = (Self::BranchClass, ClassRank)> {
-        self.all_classes().map(|cls| (cls, 1.0))
+        self.all_classes().map(|cls| (cls, 0.5))
     }
 
     fn condition_on<'p>(
@@ -131,6 +134,11 @@ where
                 new_constraints.push(c.clone());
             }
         }
+
+        assert!(
+            cls_constraint.is_none() || new_constraints.iter().all(|c| &c.get_class() != cls),
+            "The conditioned results still include constraints of the original class."
+        );
 
         Some((cls_constraint, Self::from_constraints(new_constraints))).into_iter()
     }
@@ -188,6 +196,35 @@ impl<K: IndexKey, P: Clone> PredicatePatternDefaultSelector<K, P> {
             binding_indices,
         }
     }
+
+    pub fn keys(&self, pos: usize) -> Vec<K> {
+        self.binding_indices[pos]
+            .iter()
+            .map(|&i| self.all_required_bindings[i])
+            .collect()
+    }
+
+    pub fn get_class(&self) -> Option<P::BranchClass>
+    where
+        P: ConstraintLogic<K>,
+    {
+        let fst_pred = self.predicates.first()?;
+        let fst_keys = self.keys(0);
+        let cls = fst_pred.get_class(&fst_keys);
+
+        for i in 1..self.predicates.len() {
+            let keys = self.keys(i);
+            if cls != fst_pred.get_class(&keys) {
+                panic!("All predicates in a pattern must have the same class")
+            }
+        }
+
+        Some(cls)
+    }
+
+    pub fn predicates(&self) -> &[P] {
+        &self.predicates
+    }
 }
 
 impl<K, P> BranchSelector for PredicatePatternDefaultSelector<K, P>
@@ -208,6 +245,8 @@ where
     K: IndexKey,
 {
     fn eval(&self, bindings: &[Option<Value>], data: &Data) -> Vec<usize> {
+        let mut valid_pred = Vec::new();
+
         for i in 0..self.predicates.len() {
             let constraint = &self.predicates[i];
             let indices = &self.binding_indices[i];
@@ -220,10 +259,11 @@ where
                 continue;
             };
             if constraint.check(&bindings, data) {
-                return vec![i];
+                valid_pred.push(i);
             }
         }
-        vec![]
+
+        valid_pred
     }
 }
 
@@ -232,5 +272,23 @@ impl<K: IndexKey, P: Clone> CreateBranchSelector<Constraint<K, P>>
 {
     fn create_branch_selector(constraints: Vec<Constraint<K, P>>) -> Self {
         Self::from_constraints(&constraints)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        constraint::tests::TestConstraint,
+        pattern::Pattern,
+        predicate::tests::{TestPattern, TestPredicate},
+    };
+
+    #[test]
+    fn test_required_bindings() {
+        let c = TestConstraint::try_binary_from_triple("key1", TestPredicate::AreEqualOne, "key1")
+            .unwrap();
+        let p = TestPattern::from_constraints(vec![c]);
+
+        assert_eq!(p.required_bindings(), vec!["key1"]);
     }
 }
