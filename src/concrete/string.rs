@@ -29,7 +29,7 @@ use crate::{
     branch_selector::DisplayBranchSelector,
     indexing::{BindVariableError, Binding, IndexedData},
     predicate::PredicatePatternDefaultSelector,
-    BindMap, IndexingScheme, ManyMatcher,
+    BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher,
 };
 pub use pattern::{CharVar, StringPattern};
 pub use predicate::{BranchClass, CharacterPredicate};
@@ -60,6 +60,7 @@ impl DisplayBranchSelector for BranchSelector {
 
 /// A matcher for strings.
 pub type StringManyMatcher = ManyMatcher<StringPattern, StringPatternPosition, BranchSelector>;
+pub type StringNaiveManyMatcher = NaiveManyMatcher<StringPatternPosition, BranchSelector>;
 
 /// Simple indexing scheme for strings.
 ///
@@ -137,10 +138,10 @@ impl BindMap for StringPositionMap {
             return Err(BindVariableError::InvalidKey {
                 key: key.to_string(),
             });
-        } else {
-            let Self { str_len, .. } = self;
-            *str_len = cmp::max(*str_len, key + 1);
         }
+
+        let Self { str_len, .. } = self;
+        *str_len = cmp::max(*str_len, key + 1);
         Ok(())
     }
 
@@ -236,23 +237,27 @@ pub(super) mod tests {
     use rstest::rstest;
 
     use self::pattern::StringPattern;
-    use crate::{NaiveManyMatcher, Pattern, PatternID, PatternMatch, PortMatcher};
+    use crate::{Pattern, PatternID, PatternMatch, PortMatcher};
 
     use super::*;
 
-    #[derive(Debug, Clone, From)]
-    enum Matcher {
-        Many(StringManyMatcher),
-        Naive(NaiveManyMatcher<StringPatternPosition, BranchSelector>),
+    #[derive(Debug, Clone)]
+    pub(crate) enum Matcher<Many, Naive> {
+        Many(Many),
+        Naive(Naive),
     }
 
-    impl PortMatcher<String> for Matcher {
-        type Match = StringPositionMap;
+    impl<D, Many, Naive> PortMatcher<D> for Matcher<Many, Naive>
+    where
+        Many: PortMatcher<D>,
+        Naive: PortMatcher<D, Match = Many::Match>,
+    {
+        type Match = Many::Match;
 
         #[auto_enum(Iterator)]
         fn find_matches<'a>(
             &'a self,
-            host: &'a String,
+            host: &'a D,
         ) -> impl Iterator<Item = PatternMatch<Self::Match>> + 'a {
             match self {
                 Matcher::Many(m) => m.find_matches(host),
@@ -262,15 +267,15 @@ pub(super) mod tests {
     }
 
     macro_rules! define_matcher_factories {
-        ($StringPattern:ty, $StringManyMatcher:ty) => {{
-            fn many_matcher(patterns: Vec<$StringPattern>) -> Matcher {
-                <$StringManyMatcher>::from_patterns::<StringIndexingScheme>(patterns).into()
+        ($Pattern:ty, $Scheme:ty, $ManyMatcher:ty, $NaiveMatcher:ty) => {{
+            use crate::concrete::string::tests::Matcher;
+
+            fn many_matcher(patterns: Vec<$Pattern>) -> Matcher<$ManyMatcher, $NaiveMatcher> {
+                Matcher::Many(<$ManyMatcher>::from_patterns::<$Scheme>(patterns))
             }
 
-            fn naive_matcher(patterns: Vec<$StringPattern>) -> Matcher {
-                Matcher::Naive(NaiveManyMatcher::from_patterns::<StringIndexingScheme, _>(
-                    patterns,
-                ))
+            fn naive_matcher(patterns: Vec<$Pattern>) -> Matcher<$ManyMatcher, $NaiveMatcher> {
+                Matcher::Naive(<$NaiveMatcher>::from_patterns::<$Scheme, _>(patterns))
             }
 
             &[many_matcher, naive_matcher]
@@ -327,8 +332,14 @@ pub(super) mod tests {
         assert_eq!(result.len(), 0);
     }
 
-    const MATCHER_FACTORIES: &[fn(Vec<StringPattern>) -> Matcher] =
-        define_matcher_factories!(StringPattern, StringManyMatcher);
+    const MATCHER_FACTORIES: &[fn(
+        Vec<StringPattern>,
+    ) -> Matcher<StringManyMatcher, StringNaiveManyMatcher>] = define_matcher_factories!(
+        StringPattern,
+        StringIndexingScheme,
+        StringManyMatcher,
+        StringNaiveManyMatcher
+    );
 
     pub(super) fn apply_all_matchers(
         patterns: Vec<StringPattern>,

@@ -1,9 +1,10 @@
 use std::{fmt, iter};
 
 use crate::concrete::string::CharVar;
+use crate::predicate::PredicateLogic;
 use crate::{Constraint, HashMap, Pattern};
 
-use super::{CharacterPredicate, MatrixPatternPosition};
+use super::{CharacterPredicate, MatrixConstraint, MatrixPatternPosition};
 
 /// A pattern for matching a matrix of characters.
 ///
@@ -63,16 +64,30 @@ impl MatrixPattern {
             })
         })
     }
+
+    fn n_rows(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn n_cols(&self) -> usize {
+        self.rows.iter().map(|row| row.len()).max().unwrap_or(0)
+    }
 }
 
 impl Pattern for MatrixPattern {
     type Key = MatrixPatternPosition;
-    type Predicate = CharacterPredicate;
-    type Error = ();
+    type Logic = PredicateLogic<MatrixPatternPosition, CharacterPredicate>;
+    type Constraint = MatrixConstraint;
 
-    fn try_to_constraint_vec(
-        &self,
-    ) -> Result<Vec<Constraint<Self::Key, Self::Predicate>>, Self::Error> {
+    fn required_bindings(&self) -> Vec<Self::Key> {
+        (0..self.n_rows())
+            .flat_map(|row| {
+                (0..self.n_cols()).map(move |col| MatrixPatternPosition(row as isize, col as isize))
+            })
+            .collect()
+    }
+
+    fn into_logic(self) -> Self::Logic {
         // For a variable name, the first position it appears at
         let mut var_to_pos: HashMap<char, _> = Default::default();
         let mut constraints = Vec::new();
@@ -112,7 +127,8 @@ impl Pattern for MatrixPattern {
                 .unwrap(),
             );
         }
-        Ok(constraints)
+
+        Self::Logic::from_constraints(constraints)
     }
 }
 

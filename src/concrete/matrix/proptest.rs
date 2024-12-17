@@ -26,7 +26,7 @@ mod tests {
     use crate::{
         concrete::matrix::{
             tests::{apply_all_matchers, clean_match_data},
-            MatrixNaiveManyMatcher, MatrixString,
+            MatrixIndexingScheme, MatrixNaiveManyMatcher, MatrixString,
         },
         PortMatcher,
     };
@@ -46,7 +46,7 @@ mod tests {
         ) {
             let subject = MatrixString::from(&subject);
             // Skip the all deterministic matcher, too slow
-            let naive = MatrixNaiveManyMatcher::try_from_patterns(&patterns).unwrap();
+            let naive = MatrixNaiveManyMatcher::from_patterns::<MatrixIndexingScheme, _>(patterns.clone());
             let mut naive_matches = naive.find_matches(&subject).collect_vec();
             let [mut non_det, mut default] = apply_all_matchers(patterns, &subject);
 

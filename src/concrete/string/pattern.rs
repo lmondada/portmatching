@@ -1,10 +1,9 @@
 use std::{collections::hash_map::Entry, iter};
 
-use crate::{predicate::PredicateLogic, Constraint, HashMap, Pattern, PatternLogic};
+use crate::{predicate::PredicateLogic, Constraint, HashMap, Pattern};
 use derive_more::Display;
-use itertools::Itertools;
 
-use super::{predicate::CharacterPredicate, BranchClass, StringConstraint, StringPatternPosition};
+use super::{predicate::CharacterPredicate, StringConstraint, StringPatternPosition};
 
 /// A pattern for matching on strings.
 ///
