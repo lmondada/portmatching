@@ -68,7 +68,7 @@ impl<P, K: IndexKey, B> AutomatonBuilder<P, K, B> {
 
         // Record the edge in the state order
         if is_fail {
-            let epsilon = &mut self.node_weight_mut(child).epsilon;
+            let epsilon = &mut self.node_weight_mut(parent).epsilon;
             assert!(epsilon.is_none());
             *epsilon = Some(tr);
         } else {
