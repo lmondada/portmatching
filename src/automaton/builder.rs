@@ -180,13 +180,13 @@ where
             let (completed_patterns, patterns) = partition_completed_patterns(patterns);
             self.add_matches(state, completed_patterns.into_iter().map(|(id, _)| id));
 
-            if patterns.is_empty() {
-                continue;
-            }
-
             // Also, populate max scope, as it requires the whole set of
             // patterns and this info is lost later on
             self.populate_max_scope(state, patterns.iter().map(|&(id, _)| id));
+
+            if patterns.is_empty() {
+                continue;
+            }
 
             // Get the predicate class that makes us progress the most
             let cls = best_branch_class(patterns.iter().map(|(_, p)| p)).unwrap();
