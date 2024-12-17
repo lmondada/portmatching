@@ -152,7 +152,11 @@ impl BindMap for StringPositionMap {
         let Self::Bound { failed_pos, .. } = self else {
             panic!("Always bind the start position first, which cannot fail");
         };
-        *failed_pos = Some(key);
+        if let Some(failed_pos) = failed_pos.as_mut() {
+            *failed_pos = cmp::min(*failed_pos, key);
+        } else {
+            *failed_pos = Some(key);
+        }
     }
 }
 
