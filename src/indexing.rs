@@ -7,11 +7,12 @@
 //! the [IndexMap] trait.
 
 use crate::{HashMap, HashSet};
+use rustc_hash::FxHasher;
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    hash::Hash,
+    hash::{Hash, Hasher},
 };
 use thiserror::Error;
 
@@ -350,6 +351,18 @@ impl<K: IndexKey + Ord + 'static, V: IndexValue + 'static> BindMap for BTreeMap<
     fn retain_keys(&mut self, keys: &BTreeSet<Self::Key>) {
         self.retain(|key, _| keys.contains(key));
     }
+}
+
+pub(crate) fn bindings_hash<S: BindMap>(
+    bindings: &S,
+    scope: impl IntoIterator<Item = S::Key>,
+) -> u64 {
+    let mut hasher = FxHasher::default();
+    for key in scope {
+        let value = bindings.get_binding(&key);
+        value.as_ref().map(|v| v.borrow()).hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 #[cfg(test)]

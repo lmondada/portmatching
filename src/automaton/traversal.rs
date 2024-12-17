@@ -1,11 +1,9 @@
-use std::hash::{Hash, Hasher};
 use std::{borrow::Borrow, collections::VecDeque};
 
 use itertools::Itertools;
-use rustc_hash::FxHasher;
 
 use crate::branch_selector::EvaluateBranchSelector;
-use crate::indexing::{Binding, IndexedData};
+use crate::indexing::{bindings_hash, Binding, IndexedData};
 use crate::{indexing::IndexKey, BindMap, HashMap, HashSet, PatternID};
 
 use super::view::GraphView;
@@ -197,15 +195,6 @@ impl<'a, 'd, K: IndexKey, B, M: Default, D> AutomatonTraverser<'a, 'd, K, B, M, 
 
         all_bindings
     }
-}
-
-fn bindings_hash<S: BindMap>(bindings: &S, scope: impl IntoIterator<Item = S::Key>) -> u64 {
-    let mut hasher = FxHasher::default();
-    for key in scope {
-        let value = bindings.get_binding(&key);
-        value.as_ref().map(|v| v.borrow()).hash(&mut hasher);
-    }
-    hasher.finish()
 }
 
 impl<B, D, K> Iterator for AutomatonTraverser<'_, '_, K, B, D::BindMap, D>

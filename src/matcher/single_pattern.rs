@@ -2,18 +2,15 @@
 //!
 //! This matcher is used as a baseline in benchmarking by repeating
 //! the matching process for each pattern separately.
-use std::{
-    borrow::Borrow,
-    collections::{BTreeSet, HashSet},
-};
+use std::{borrow::Borrow, collections::BTreeSet};
 
 use itertools::Itertools;
 
 use crate::{
     branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector},
-    indexing::{Binding, IndexKey, IndexedData},
+    indexing::{bindings_hash, Binding, IndexKey, IndexedData},
     pattern::{Pattern, PatternLogic, Satisfiable},
-    BindMap, IndexingScheme, PatternID,
+    BindMap, HashSet, IndexingScheme, PatternID,
 };
 
 use super::{PatternMatch, PortMatcher};
@@ -86,7 +83,7 @@ impl<K, B> SinglePatternMatcher<K, B> {
 
         // Compute each step of the way which bindings are required
         let mut scopes = Vec::<Vec<K>>::with_capacity(branch_selectors.len());
-        let mut known_bindings = HashSet::new();
+        let mut known_bindings = HashSet::default();
 
         for br in &branch_selectors {
             let reqs = br.required_bindings().iter().copied();
@@ -183,7 +180,7 @@ impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
                     })
                     .collect_vec();
                 !br.eval(&bindings, host).is_empty()
-            })
+            });
         }
 
         // Finally, process the last scope and create the matches
@@ -200,6 +197,13 @@ impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
             self.required_bindings
                 .iter()
                 .all(|k| bindings.get_binding(k).is_bound())
+        });
+
+        // Remove duplicates
+        let mut hashes = BTreeSet::default();
+        final_bindings.retain(|bindings| {
+            let hash = bindings_hash(bindings, self.required_bindings.iter().copied());
+            hashes.insert(hash)
         });
 
         final_bindings
