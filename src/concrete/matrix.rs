@@ -128,18 +128,14 @@ impl BindMap for MatrixPositionMap {
             return Binding::Unbound;
         };
         let &MatrixPatternPosition(key_row, key_col) = var;
-        if key_row >= min_pos.0
-            && key_row <= max_pos.0
-            && key_col >= min_pos.1
-            && key_col <= max_pos.1
+        if key_row < min_pos.0 || key_row > max_pos.0 || key_col < min_pos.1 || key_col > max_pos.1
         {
-            Binding::Bound(MatrixSubjectPosition(
-                start_pos.0.checked_add_signed(key_row).unwrap(),
-                start_pos.1.checked_add_signed(key_col).unwrap(),
-            ))
-        } else {
-            Binding::Unbound
+            return Binding::Unbound;
         }
+        Binding::Bound(MatrixSubjectPosition(
+            start_pos.0.checked_add_signed(key_row).unwrap(),
+            start_pos.1.checked_add_signed(key_col).unwrap(),
+        ))
     }
 
     fn bind(&mut self, var: Self::Key, val: Self::Value) -> Result<(), BindVariableError> {
@@ -152,10 +148,7 @@ impl BindMap for MatrixPositionMap {
                     new_value: format!("{:?}", val),
                 });
             } else {
-                *self = Self {
-                    start_pos: Some(val),
-                    ..Default::default()
-                };
+                self.start_pos = Some(val);
             }
         } else if self.is_unbound() {
             return Err(BindVariableError::InvalidKey {
@@ -316,9 +309,11 @@ mod tests {
         let all_matches = MATCHER_FACTORIES[..2]
             .iter()
             .map(|matcher_factory| {
-                matcher_factory(patterns.clone())
-                    .find_matches(subject)
-                    .collect_vec()
+                let matcher = matcher_factory(patterns.clone());
+                if let Matcher::Many(matcher) = &matcher {
+                    println!("{}", matcher.dot_string());
+                }
+                matcher.find_matches(subject).collect_vec()
             })
             .collect_vec();
         all_matches.into_iter().collect_vec().try_into().unwrap()
@@ -342,6 +337,7 @@ mod tests {
     #[case("", vec!["--a$ca\n-\n$c\n", "\n---\n-\na\n", "\na---a\n", "-\n---a\n\n","---a-aaaa\n", "\n-a-\na\n", "\n--a\n-aa\n\n\n"])]
     #[case("", vec!["--a$ca\n-\n$c\n", "\n---\n-\na\n", "\na---a\n", "-\n---a\n\n"])]
     #[case("caaaabaa\n", vec!["-a--aaa\n", "-$c-$e--$d$c\na\naaaa\n", "a\n", "\n$c\n$ca\na-\n", "$d--ab\n$a$b$ca$aa\naaa\naaa\naaaaaaaa\na\n", "d-aaa\na\naa-a-a\n", "c----ba\n"])]
+    #[case("aa\n", vec!["", ""])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         let subject = MatrixString::from(&subject);
         let patterns = patterns
@@ -349,14 +345,10 @@ mod tests {
             .map(MatrixPattern::parse_str)
             .collect_vec();
 
-        let naive =
-            MatrixNaiveManyMatcher::from_patterns::<MatrixIndexingScheme, _>(patterns.clone());
-        let mut naive_matches = naive.find_matches(&subject).collect_vec();
-        let [mut non_det, mut default] = apply_all_matchers(patterns, &subject);
+        let [mut default, mut naive] = apply_all_matchers(patterns, &subject);
 
-        clean_match_data(&mut non_det);
         clean_match_data(&mut default);
-        clean_match_data(&mut naive_matches);
+        clean_match_data(&mut naive);
 
         // dbg!(&all_matches);
         // println!(
@@ -367,10 +359,8 @@ mod tests {
         //         .collect_vec()
         // );
 
-        non_det.sort();
         default.sort();
-        naive_matches.sort();
-        assert_eq!(non_det, default);
-        assert_eq!(non_det, naive_matches);
+        naive.sort();
+        assert_eq!(default, naive);
     }
 }

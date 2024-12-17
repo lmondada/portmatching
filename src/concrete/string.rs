@@ -27,7 +27,7 @@ use itertools::Itertools;
 
 use crate::{
     branch_selector::DisplayBranchSelector,
-    indexing::{BindVariableError, Binding, IndexedData},
+    indexing::{BindVariableError, Binding, IndexKey, IndexedData},
     predicate::PredicatePatternDefaultSelector,
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher,
 };
@@ -39,7 +39,7 @@ type BranchSelector = PredicatePatternDefaultSelector<StringPatternPosition, Cha
 /// A constraint for matching a string using [StringPredicate]s.
 type StringConstraint = crate::Constraint<StringPatternPosition, CharacterPredicate>;
 
-impl DisplayBranchSelector for BranchSelector {
+impl<K: IndexKey> DisplayBranchSelector for PredicatePatternDefaultSelector<K, CharacterPredicate> {
     fn fmt_class(&self) -> String {
         let Some(cls) = self.get_class() else {
             return String::new();

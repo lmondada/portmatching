@@ -48,23 +48,32 @@ impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
         &self.pattern_scopes[pattern.0]
     }
 
-    fn populate_max_scope(&mut self, state: StateID, patterns: impl IntoIterator<Item = PatternID>)
+    fn populate_max_scope(&mut self)
     where
         K: IndexKey,
     {
-        let mut max_scope = BTreeSet::default();
+        // Propagate max_scope from leaves to root (reverse topological sort)
+        let topo = self.graph.nodes_iter().collect_vec();
 
-        // Add keys that are required for any of the current matches
-        for keys in self.matches(state).values() {
-            max_scope.extend(keys);
+        for node in topo.into_iter().rev() {
+            let state = StateID(node);
+
+            // The max_scope is the union of:
+            // 1. the state's min_scope
+            let mut max_scope = BTreeSet::from_iter(self.min_scope(state).iter().copied());
+
+            // 2. The keys required for any of the state's matches
+            for keys in self.matches(state).values() {
+                max_scope.extend(keys);
+            }
+
+            // 3. The max_scopes of any of the state's children
+            for child in self.children(state) {
+                max_scope.extend(self.max_scope(child));
+            }
+
+            self.set_max_scope(state, max_scope);
         }
-
-        // Add keys that are required for any of the future patterns
-        for p in patterns {
-            max_scope.extend(self.get_scope(p));
-        }
-
-        self.set_max_scope(state, max_scope);
     }
 
     fn known_bindings(&self, state: StateID) -> Vec<K> {
@@ -139,6 +148,9 @@ where
         // Compute the minimum scopes for each state.
         self.populate_min_scopes(config.indexing_scheme);
 
+        // Compute the maximum scopes (must happen after min scopes).
+        self.populate_max_scope();
+
         let matcher = ConstraintAutomaton {
             graph: self.graph.into_inner(),
             root: self.root,
@@ -179,10 +191,6 @@ where
             // Before proceeding, add matches to the current state
             let (completed_patterns, patterns) = partition_completed_patterns(patterns);
             self.add_matches(state, completed_patterns.into_iter().map(|(id, _)| id));
-
-            // Also, populate max scope, as it requires the whole set of
-            // patterns and this info is lost later on
-            self.populate_max_scope(state, patterns.iter().map(|&(id, _)| id));
 
             if patterns.is_empty() {
                 continue;
