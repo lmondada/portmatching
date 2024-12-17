@@ -386,15 +386,6 @@ pub(super) mod tests {
         insta::assert_snapshot!(matcher.dot_string());
     }
 
-    #[rstest]
-    fn test_make_det() {
-        todo!("make_det")
-        // let automaton = automaton.wrap_builder(|b| b.make_det(root_child));
-
-        // assert_eq!(automaton.graph.node_count(), automaton2.graph.node_count());
-        // assert_eq!(automaton.graph.edge_count(), automaton2.graph.edge_count());
-    }
-
     // #[rstest]
     // fn test_make_det(automaton2: TestAutomaton) {
     //     let x_child = root_child(&automaton2);

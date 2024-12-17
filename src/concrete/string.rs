@@ -15,7 +15,6 @@
 //! be chosen arbitrarily.
 //!
 //! This is currently mostly useful for demonstration and testing purposes.
-mod constraint;
 mod pattern;
 mod predicate;
 #[cfg(feature = "proptest")]
@@ -32,11 +31,13 @@ use crate::{
     predicate::PredicatePatternDefaultSelector,
     BindMap, IndexingScheme, ManyMatcher,
 };
-pub use constraint::StringConstraint;
 pub use pattern::{CharVar, StringPattern};
 pub use predicate::{BranchClass, CharacterPredicate};
 
 type BranchSelector = PredicatePatternDefaultSelector<StringPatternPosition, CharacterPredicate>;
+
+/// A constraint for matching a string using [StringPredicate]s.
+type StringConstraint = crate::Constraint<StringPatternPosition, CharacterPredicate>;
 
 impl DisplayBranchSelector for BranchSelector {
     fn fmt_class(&self) -> String {
@@ -72,28 +73,24 @@ pub struct StringIndexingScheme;
 /// Only store the position of the start of the match, compute other positions by
 /// adding offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
-pub enum StringPositionMap {
-    /// No key has been bound yet
-    #[default]
-    Unbound,
-    /// Keys between 0 and `str_len` are valid and computed as offset from
-    /// the start position
-    Bound {
-        /// The position of the start of the pattern in the string
-        start_pos: StringSubjectPosition,
-        /// The length of the substring matched so far
-        str_len: usize,
-        /// The offset from which bindings have failed
-        failed_pos: Option<usize>,
-    },
+pub struct StringPositionMap {
+    /// The position of the start of the pattern in the string
+    ///
+    /// None if it is unbound.
+    start_pos: Option<StringSubjectPosition>,
+    /// The length of the substring matched so far
+    str_len: usize,
+    /// The offset from which bindings have failed
+    failed_pos: Option<usize>,
 }
 
 impl StringPositionMap {
     fn start_pos(&self) -> Option<StringSubjectPosition> {
-        match self {
-            Self::Unbound => None,
-            &Self::Bound { start_pos, .. } => Some(start_pos),
-        }
+        self.start_pos
+    }
+
+    fn is_unbound(&self) -> bool {
+        self.start_pos.is_none()
     }
 }
 
@@ -102,46 +99,46 @@ impl BindMap for StringPositionMap {
     type Value = StringSubjectPosition;
 
     fn get_binding(&self, var: &Self::Key) -> Binding<impl Borrow<Self::Value> + '_> {
-        let &Self::Bound {
+        let &Self {
             start_pos,
             str_len,
             failed_pos,
-        } = self
-        else {
+        } = self;
+        let &StringPatternPosition(key) = var;
+
+        if failed_pos.is_some() && key >= failed_pos.unwrap() {
+            return Binding::Failed;
+        } else if key >= str_len {
+            return Binding::Unbound;
+        }
+        let Some(start_pos) = start_pos else {
             return Binding::Unbound;
         };
-        let &StringPatternPosition(key) = var;
-        if key < str_len {
-            Binding::Bound(StringSubjectPosition(start_pos.0 + key))
-        } else if failed_pos.is_some() && key >= failed_pos.unwrap() {
-            Binding::Failed
-        } else {
-            Binding::Unbound
-        }
+        Binding::Bound(StringSubjectPosition(start_pos.0 + key))
     }
 
     fn bind(&mut self, var: Self::Key, val: Self::Value) -> Result<(), BindVariableError> {
         let StringPatternPosition(key) = var;
         if key == 0 {
-            if let Some(StringSubjectPosition(start_pos)) = self.start_pos() {
+            if let Some(start_pos) = self.start_pos() {
                 return Err(BindVariableError::VariableExists {
                     key: key.to_string(),
-                    curr_value: start_pos.to_string(),
+                    curr_value: format!("{:?}", start_pos),
                     new_value: format!("{:?}", val),
                 });
             } else {
-                *self = Self::Bound {
-                    start_pos: val,
+                *self = Self {
+                    start_pos: Some(val),
                     str_len: 1,
                     failed_pos: None,
                 };
             }
+        } else if self.is_unbound() {
+            return Err(BindVariableError::InvalidKey {
+                key: key.to_string(),
+            });
         } else {
-            let Self::Bound { str_len, .. } = self else {
-                return Err(BindVariableError::InvalidKey {
-                    key: key.to_string(),
-                });
-            };
+            let Self { str_len, .. } = self;
             *str_len = cmp::max(*str_len, key + 1);
         }
         Ok(())
@@ -149,14 +146,13 @@ impl BindMap for StringPositionMap {
 
     fn bind_failed(&mut self, var: Self::Key) {
         let StringPatternPosition(key) = var;
-        let Self::Bound { failed_pos, .. } = self else {
-            panic!("Always bind the start position first, which cannot fail");
-        };
+        let Self { failed_pos, .. } = self;
         if let Some(failed_pos) = failed_pos.as_mut() {
             *failed_pos = cmp::min(*failed_pos, key);
         } else {
             *failed_pos = Some(key);
         }
+        assert!(self.failed_pos.unwrap() >= self.str_len)
     }
 }
 
@@ -240,7 +236,7 @@ pub(super) mod tests {
     use rstest::rstest;
 
     use self::pattern::StringPattern;
-    use crate::{NaiveManyMatcher, PatternID, PatternMatch, PortMatcher};
+    use crate::{NaiveManyMatcher, Pattern, PatternID, PatternMatch, PortMatcher};
 
     use super::*;
 
@@ -314,7 +310,10 @@ pub(super) mod tests {
 
         let result = matcher.find_matches(&"ab".to_string()).collect_vec();
 
-        assert_eq!(result, [(PatternID(0), StringPositionMap::Unbound).into()]);
+        assert_eq!(
+            result,
+            [(PatternID(0), StringPositionMap::default()).into()]
+        );
     }
 
     #[test]
@@ -337,7 +336,6 @@ pub(super) mod tests {
     ) -> impl Iterator<Item = Vec<PatternMatch<StringPositionMap>>> + '_ {
         MATCHER_FACTORIES.iter().map(move |matcher_factory| {
             let matcher = matcher_factory(patterns.clone());
-            dbg!(&matcher);
             if let Matcher::Many(m) = &matcher {
                 println!("{}", m.dot_string());
             }

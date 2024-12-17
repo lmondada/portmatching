@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, fmt::Debug};
+use std::{borrow::Borrow, cmp, fmt::Debug};
 
 use itertools::Itertools;
 
@@ -62,7 +62,11 @@ impl<K: IndexKey> ConstraintLogic<K> for CharacterPredicate {
         assert_eq!(self.arity(), keys.len());
 
         match self {
-            BindingEq => BranchClass::Position(keys[1]),
+            BindingEq => {
+                // Treat the predicate as an assignment of the larger key
+                let max_key = cmp::max(keys[0], keys[1]);
+                BranchClass::Position(max_key)
+            }
             ConstVal(_) => BranchClass::Position(keys[0]),
         }
     }
@@ -100,5 +104,16 @@ impl Debug for CharacterPredicate {
             Self::BindingEq => write!(f, "VariableEq"),
             Self::ConstVal(c) => write!(f, "Const[{}]", c),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{concrete::string::StringPattern, Pattern};
+
+    #[test]
+    fn test_to_constraints() {
+        let p = StringPattern::parse_str("$c$d$eca$c$c$aaaba");
+        p.into_logic(); // TODO: turn into a Result.unwrap()
     }
 }

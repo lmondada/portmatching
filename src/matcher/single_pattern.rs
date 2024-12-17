@@ -231,7 +231,6 @@ mod tests {
         let pattern = TestPattern::from_constraints(vec![c1, c2, c3]);
         let matcher = TestMatcher::from_pattern::<TestStrIndexingScheme, _>(pattern);
 
-        dbg!(&matcher);
         let matches = matcher.find_matches(&TestData).collect_vec();
 
         assert_eq!(matches.len(), 1);

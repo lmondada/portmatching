@@ -12,7 +12,7 @@ use derive_more::{From, Into};
 use itertools::Itertools;
 
 use crate::{
-    concrete::string::{CharacterPredicate, StringConstraint},
+    concrete::string::CharacterPredicate,
     indexing::{BindVariableError, IndexedData},
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
 };
