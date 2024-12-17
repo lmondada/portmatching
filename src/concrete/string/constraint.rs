@@ -9,22 +9,6 @@ use super::{predicate::CharacterPredicate, StringPatternPosition};
 /// A constraint for matching a string using [StringPredicate]s.
 pub type StringConstraint<K = StringPatternPosition> = Constraint<K, CharacterPredicate>;
 
-impl<K: Copy + Ord> Ord for StringConstraint<K> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let mut self_bindings = self.required_bindings().to_vec();
-        let mut other_bindings = other.required_bindings().to_vec();
-        self_bindings.sort_by(|a, b| a.cmp(b).reverse());
-        other_bindings.sort_by(|a, b| a.cmp(b).reverse());
-        self_bindings.cmp(&other_bindings)
-    }
-}
-
-impl<K: Copy + Ord> PartialOrd for StringConstraint<K> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl<K: Copy + Ord> ToConstraintsTree<K> for CharacterPredicate {
     fn to_constraints_tree(
         constraints: Vec<StringConstraint<K>>,

@@ -1,5 +1,6 @@
 //! Implement [`crate::Pattern`] traits by defining predicates and their logic.
 
+use derive_more::From;
 use itertools::Itertools;
 
 use crate::{
@@ -15,11 +16,11 @@ use std::{collections::HashSet, hash::Hash};
 use super::ConstraintLogic;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PredicatePattern<K, P> {
+pub struct PredicateLogic<K, P> {
     constraints: ConstraintSet<K, P>,
 }
 
-impl<K, P> PredicatePattern<K, P>
+impl<K, P> PredicateLogic<K, P>
 where
     P: ConstraintLogic<K>,
 {
@@ -55,6 +56,21 @@ where
     }
 }
 
+/// A dumb wrapper around [`PredicateLogic`] that implements [`Pattern`].
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, From)]
+pub struct PredicatePattern<K, P>(PredicateLogic<K, P>);
+
+impl<K, P> PredicatePattern<K, P>
+where
+    P: ConstraintLogic<K>,
+    P::BranchClass: Hash,
+    K: Ord,
+{
+    pub fn from_constraints(constraints: impl IntoIterator<Item = Constraint<K, P>>) -> Self {
+        Self(PredicateLogic::from_constraints(constraints))
+    }
+}
+
 impl<K, P> Pattern for PredicatePattern<K, P>
 where
     K: IndexKey,
@@ -63,12 +79,13 @@ where
 {
     type Key = K;
 
-    type Logic = Self;
+    type Logic = PredicateLogic<K, P>;
 
     type Constraint = Constraint<K, P>;
 
     fn required_bindings(&self) -> Vec<Self::Key> {
-        self.constraints
+        self.0
+            .constraints
             .iter()
             .flat_map(|p| p.required_bindings().iter().copied())
             .unique()
@@ -76,11 +93,11 @@ where
     }
 
     fn into_logic(self) -> Self::Logic {
-        self
+        self.0
     }
 }
 
-impl<K, P> PatternLogic for PredicatePattern<K, P>
+impl<K, P> PatternLogic for PredicateLogic<K, P>
 where
     K: IndexKey,
     P: ConstraintLogic<K>,

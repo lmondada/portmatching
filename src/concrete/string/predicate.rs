@@ -2,7 +2,10 @@ use std::{borrow::Borrow, fmt::Debug};
 
 use itertools::Itertools;
 
-use crate::{ArityPredicate, Predicate};
+use crate::{
+    indexing::IndexKey, pattern::Satisfiable, predicate::ConstraintLogic, ArityPredicate,
+    Constraint, Predicate,
+};
 
 use super::StringSubjectPosition;
 
@@ -27,26 +30,63 @@ impl ArityPredicate for CharacterPredicate {
     }
 }
 
-impl Predicate<String> for CharacterPredicate {
-    type InvalidPredicateError = String;
-
-    fn check(
-        &self,
-        data: &String,
-        args: &[impl Borrow<StringSubjectPosition>],
-    ) -> Result<bool, String> {
+impl Predicate<String, StringSubjectPosition> for CharacterPredicate {
+    fn check(&self, args: &[impl Borrow<StringSubjectPosition>], data: &String) -> bool {
         match self {
             CharacterPredicate::BindingEq => {
                 let (StringSubjectPosition(pos1), StringSubjectPosition(pos2)) =
                     args.iter().map(|a| a.borrow()).collect_tuple().unwrap();
                 let char1 = data.chars().nth(*pos1);
                 let char2 = data.chars().nth(*pos2);
-                Ok(char1.is_some() && char1 == char2)
+                char1.is_some() && char1 == char2
             }
             CharacterPredicate::ConstVal(c) => {
                 let StringSubjectPosition(pos) =
                     args.iter().map(|a| a.borrow()).exactly_one().ok().unwrap();
-                Ok(data.chars().nth(*pos) == Some(*c))
+                data.chars().nth(*pos) == Some(*c)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub enum BranchClass<K> {
+    Position(K),
+}
+
+impl<K: IndexKey> ConstraintLogic<K> for CharacterPredicate {
+    type BranchClass = BranchClass<K>;
+
+    fn get_class(&self, keys: &[K]) -> Self::BranchClass {
+        use CharacterPredicate::*;
+        match self {
+            BindingEq => BranchClass::Position(keys[1]),
+            ConstVal(_) => BranchClass::Position(keys[0]),
+        }
+    }
+
+    fn condition_on(
+        &self,
+        keys: &[K],
+        condition: &Constraint<K, Self>,
+    ) -> Satisfiable<Constraint<K, Self>> {
+        assert_eq!(self.get_class(keys), condition.get_class());
+
+        // Safe as all predicates have arity >= 1
+        let k0 = keys[0];
+        let cond_k0 = condition.required_bindings()[0];
+
+        use CharacterPredicate::*;
+        match (self, condition.predicate()) {
+            (ConstVal(a), ConstVal(b)) if a == b => Satisfiable::Tautology,
+            (ConstVal(a), ConstVal(b)) => Satisfiable::No,
+            (BindingEq, BindingEq) if k0 == cond_k0 => Satisfiable::Tautology,
+            _ => {
+                // TODO: if we had access to other conditions, we could also
+                // solve these cases,
+                // i.e. BindingEq(c1, c2) + ConstVal(c2) => ConstVal(c1)
+                // for now: pretend we don't know anything
+                Satisfiable::Yes(self.try_into_constraint(keys.to_vec()).unwrap())
             }
         }
     }

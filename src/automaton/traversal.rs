@@ -4,9 +4,9 @@ use std::{borrow::Borrow, collections::VecDeque};
 use itertools::Itertools;
 use rustc_hash::FxHasher;
 
-use crate::branch_selector::{BranchSelector, EvaluateBranchSelector};
+use crate::branch_selector::EvaluateBranchSelector;
 use crate::indexing::{Binding, IndexedData};
-use crate::{indexing::IndexKey, BindMap, HashMap, HashSet, IndexingScheme, PatternID};
+use crate::{indexing::IndexKey, BindMap, HashMap, HashSet, PatternID};
 
 use super::view::GraphView;
 use super::{ConstraintAutomaton, StateID};

@@ -19,7 +19,7 @@ pub use matcher::{
     ManyMatcher, NaiveManyMatcher, PatternFallback, PatternID, PatternMatch, PortMatcher,
     SinglePatternMatcher,
 };
-pub use pattern::PatternLogic;
+pub use pattern::{Pattern, PatternLogic};
 pub use predicate::{ArityPredicate, Predicate};
 
 use rustc_hash::{FxHashMap, FxHashSet};

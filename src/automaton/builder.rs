@@ -331,8 +331,8 @@ pub(super) mod tests {
         constraint::tests::TestConstraint,
         indexing::tests::TestStrIndexingScheme,
         predicate::{
-            tests::{TestKey, TestPattern, TestPredicate},
-            PredicatePattern,
+            tests::{TestKey, TestLogic, TestPattern, TestPredicate},
+            PredicateLogic,
         },
     };
 
@@ -362,19 +362,21 @@ pub(super) mod tests {
         }
     }
 
-    pub(crate) type TestBuilder = AutomatonBuilder<TestPattern, TestKey, TestBranchSelector>;
+    pub(crate) type TestBuilder = AutomatonBuilder<TestLogic, TestKey, TestBranchSelector>;
     pub(crate) type TestBuildConfig = BuildConfig<TestStrIndexingScheme>;
 
     #[test]
     fn test_build() {
-        let p1 = PredicatePattern::from_constraints([
+        let p1: TestPattern = PredicateLogic::from_constraints([
             TestConstraint::new(TestPredicate::AreEqualOne),
             TestConstraint::new(TestPredicate::AreEqualTwo),
-        ]);
-        let p2 = PredicatePattern::from_constraints([
+        ])
+        .into();
+        let p2: TestPattern = PredicateLogic::from_constraints([
             TestConstraint::new(TestPredicate::AreEqualOne),
             TestConstraint::new(TestPredicate::AlwaysTrueThree),
-        ]);
+        ])
+        .into();
         let builder = TestBuilder::from_patterns([p1, p2]);
         let (matcher, pattern_ids) = builder.build(BuildConfig::<TestStrIndexingScheme>::default());
         assert_eq!(matcher.graph.node_count(), 5);

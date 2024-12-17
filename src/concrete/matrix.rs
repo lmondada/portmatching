@@ -13,7 +13,7 @@ use itertools::Itertools;
 
 use crate::{
     concrete::string::{CharacterPredicate, StringConstraint},
-    indexing::{BindVariableError, IndexedData, Key},
+    indexing::{BindVariableError, IndexedData},
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
 };
 

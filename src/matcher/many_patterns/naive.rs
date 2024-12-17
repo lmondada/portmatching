@@ -1,9 +1,9 @@
-
 use crate::{
     branch_selector::{CreateBranchSelector, EvaluateBranchSelector},
     indexing::{IndexKey, IndexedData},
     matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
-    pattern::Pattern, IndexingScheme,
+    pattern::Pattern,
+    IndexingScheme,
 };
 
 /// A simple matcher for matching multiple patterns.
@@ -12,6 +12,7 @@ use crate::{
 ///
 /// You probably do not want to use this matcher for anything other than as a
 /// baseline in benchmarking.
+#[derive(Debug, Clone)]
 pub struct NaiveManyMatcher<K, B> {
     matchers: Vec<SinglePatternMatcher<K, B>>,
 }

@@ -19,7 +19,7 @@
 //! for <var2> is in the returned set.
 
 mod pattern;
-pub use pattern::{PredicatePattern, PredicatePatternDefaultSelector};
+pub use pattern::{PredicateLogic, PredicatePattern, PredicatePatternDefaultSelector};
 
 use std::borrow::Borrow;
 
@@ -94,6 +94,7 @@ pub(crate) mod tests {
 
     pub type TestKey = &'static str;
     pub type TestPattern = super::PredicatePattern<TestKey, TestPredicate>;
+    pub type TestLogic = super::PredicateLogic<TestKey, TestPredicate>;
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub(crate) enum TestPredicate {

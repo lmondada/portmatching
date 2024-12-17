@@ -190,6 +190,10 @@ impl<V> Binding<V> {
         matches!(self, Binding::Failed)
     }
 
+    pub fn is_bound(&self) -> bool {
+        matches!(self, Binding::Bound(_))
+    }
+
     pub fn as_ref(&self) -> Binding<&V> {
         match self {
             Binding::Bound(v) => Binding::Bound(v),

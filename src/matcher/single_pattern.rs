@@ -196,6 +196,11 @@ impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
         for bindings in final_bindings.iter_mut() {
             bindings.retain_keys(&self.required_bindings);
         }
+        final_bindings.retain(|bindings| {
+            self.required_bindings
+                .iter()
+                .all(|k| bindings.get_binding(k).is_bound())
+        });
 
         final_bindings
     }
