@@ -59,6 +59,8 @@ impl<K: IndexKey> ConstraintLogic<K> for CharacterPredicate {
 
     fn get_class(&self, keys: &[K]) -> Self::BranchClass {
         use CharacterPredicate::*;
+        assert_eq!(self.arity(), keys.len());
+
         match self {
             BindingEq => BranchClass::Position(keys[1]),
             ConstVal(_) => BranchClass::Position(keys[0]),

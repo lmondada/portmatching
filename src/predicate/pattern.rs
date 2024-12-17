@@ -231,7 +231,8 @@ impl<K: IndexKey, P: Clone> PredicatePatternDefaultSelector<K, P> {
 
         for i in 1..self.predicates.len() {
             let keys = self.keys(i);
-            if cls != fst_pred.get_class(&keys) {
+            let pred = &self.predicates[i];
+            if cls != pred.get_class(&keys) {
                 panic!("All predicates in a pattern must have the same class")
             }
         }
