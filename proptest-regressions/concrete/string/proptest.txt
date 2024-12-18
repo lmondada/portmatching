@@ -12,3 +12,4 @@ cc 46f00b9f0aebd857b4e4562e7159f92d1453ee5f0196706046822e364b069ced # shrinks to
 cc 8c49c715f9f0dc87c0988986ea597b57a45839fc644d7b16a1c199649a5dc3c5 # shrinks to subject = "aaaaabdd", patterns = ["aba$aa", "abaaa", "$abaaa", "$e$e$c$b$b", "$aaaba$a", "abaaa"]
 cc f5999640a50fd0d5db84a96313f23205c02bee5ae2a51646d6ac89c3f335af8c # shrinks to subject = "", patterns = ["a"]
 cc 65b7518ddbdafc9318b53c9ea306a489233c2bd01bf5056f55c975f8ef2f390f # shrinks to subject = "", patterns = ["a"]
+cc 8d28241511a18e6761807c9ff867ccc9ee11afc30266d711a5b72415f91d7a65 # shrinks to subject = "efdcefbaaaeeaecaffdf", patterns = ["$ca$c$de$d$e$ba$aceb$abdf$f$a$c$e", "d$d$dc$cea$e$b$a$bfeef$a$c$cfae$b$bbce$c$ad$e$a", "$de$efd$a$cacbc$e$cd$b$a$aae$e$df$b$fdc$f$e$ce$f$d", "$c$c$ca$f$ea$a", "bfcca$aaf$c$d$d$d$c$d$fe$dc$f", "e$ecc$b$d$f$d$dde$ff", "a$d$d$e$faee$dfd$ebd", "$aa$b$afa$e$b$de$bdbbc$bed$bcf$b$d", "$e$b$bcc$ee$e$cc$ed$f$c$a$d$a$e$b$bc$f"]
