@@ -243,7 +243,7 @@ where
         let mut valid_pred = Vec::new();
 
         for i in 0..self.predicates.len() {
-            if valid_pred.len() > 0 && self.deterministic {
+            if !valid_pred.is_empty() && self.deterministic {
                 // Stop at the first valid predicate
                 break;
             }

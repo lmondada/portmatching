@@ -4,15 +4,14 @@ use derive_more::From;
 use itertools::Itertools;
 
 use crate::{
-    branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector},
+    branch_selector::BranchSelector,
     constraint::ConstraintSet,
     indexing::IndexKey,
     pattern::{ClassRank, Pattern, Satisfiable},
-    Constraint, HashMap, PatternLogic, Predicate,
+    Constraint, PatternLogic,
 };
-use core::panic;
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::BTreeSet,
     hash::Hash,
 };
 
@@ -68,7 +67,7 @@ where
         let mut new_constraints = BTreeSet::new();
 
         for c in &self.constraints {
-            match c.condition_on(&known_constraints, prev_constraints) {
+            match c.condition_on(known_constraints, prev_constraints) {
                 Satisfiable::Yes(new_c) => {
                     new_constraints.insert(new_c);
                 }

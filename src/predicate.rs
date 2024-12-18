@@ -98,11 +98,11 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use rstest::rstest;
 
-    use crate::branch_selector::tests::TestBranchSelector;
+    
     use crate::pattern::Satisfiable;
     use crate::predicate::Predicate;
     use crate::Constraint;
-    use crate::{branch_selector::DisplayBranchSelector, indexing::tests::TestData};
+    use crate::indexing::tests::TestData;
 
     use super::{ArityPredicate, ConstraintLogic};
 

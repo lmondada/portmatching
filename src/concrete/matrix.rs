@@ -5,7 +5,7 @@
 //! matches are possible.
 use std::{
     borrow::Borrow,
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fmt::{self, Debug},
 };
 
@@ -14,8 +14,8 @@ use itertools::Itertools;
 
 use crate::{
     concrete::string::CharacterPredicate,
-    indexing::{BindVariableError, Binding, IndexedData},
-    predicate::{DeterministicPredicatePatternSelector, PredicatePatternDefaultSelector},
+    indexing::{Binding, IndexedData},
+    predicate::DeterministicPredicatePatternSelector,
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
 };
 

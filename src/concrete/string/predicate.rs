@@ -1,6 +1,5 @@
 use std::{
     borrow::Borrow,
-    cmp,
     collections::{BTreeSet, HashMap},
     fmt::Debug,
 };
@@ -121,7 +120,7 @@ fn simplify_const_val<K: IndexKey>(
 
     // We now consider BindingEqs: if it must be k == k2 and we have a constval
     // for k2, then we can deduce the value for k too.
-    let equal_keys = find_equal_keys(k, &known_constraints);
+    let equal_keys = find_equal_keys(k, known_constraints);
 
     // Same as above: if a ConstVal() already exists for some `k2`, then we must
     // have `val == known_val`
@@ -136,7 +135,7 @@ fn simplify_const_val<K: IndexKey>(
     }
 
     let self_constraint = Constraint::try_new(CharacterPredicate::ConstVal(val), vec![k]).unwrap();
-    return Satisfiable::Yes(self_constraint);
+    Satisfiable::Yes(self_constraint)
 }
 
 fn simplify_binding_eq<K: IndexKey>(
@@ -144,13 +143,13 @@ fn simplify_binding_eq<K: IndexKey>(
     k2: K,
     known_constraints: &BTreeSet<Constraint<K, CharacterPredicate>>,
 ) -> Satisfiable<Constraint<K, CharacterPredicate>> {
-    let equal_keys_1 = find_equal_keys(k1, &known_constraints);
+    let equal_keys_1 = find_equal_keys(k1, known_constraints);
 
     if equal_keys_1.contains(&k2) {
         return Satisfiable::Tautology;
     }
 
-    let equal_keys_2 = find_equal_keys(k2, &known_constraints);
+    let equal_keys_2 = find_equal_keys(k2, known_constraints);
     let constvals = get_constvals(known_constraints);
 
     let val1 = equal_keys_1.iter().find_map(|k| constvals.get(k).copied());
@@ -237,7 +236,7 @@ fn find_equal_keys<K: IndexKey>(
         .iter()
         .copied()
         .filter(|k| {
-            let pos2 = all_keys.binary_search(&k).unwrap();
+            let pos2 = all_keys.binary_search(k).unwrap();
             uf.find(pos1) == uf.find(pos2)
         })
         .collect()

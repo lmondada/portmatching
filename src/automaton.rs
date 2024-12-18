@@ -7,10 +7,9 @@ mod traversal;
 mod view;
 
 use derive_where::derive_where;
-use petgraph::dot::{Config, Dot};
+use petgraph::dot::Dot;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::stable_graph::StableDiGraph;
-use petgraph::visit::EdgeRef;
 
 use crate::branch_selector::DisplayBranchSelector;
 use crate::HashMap;
@@ -136,9 +135,9 @@ fn fmt_edge<'t, K: IndexKey, B: DisplayBranchSelector + 't>(
                 .branch_selector
                 .as_ref()
                 .expect("non trivial transition but no branch selector");
-            format!("{}", br.fmt_nth_constraint(pos))
+            br.fmt_nth_constraint(pos).to_string()
         } else {
-            format!("FAIL")
+            "FAIL".to_string()
         }
     }
 }

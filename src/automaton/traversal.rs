@@ -79,11 +79,7 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
             });
 
             // Always traverse the epsilon transition if it exists
-            let epsilon_state = if let Some(state_id) = self.fail_child(state.state_id) {
-                Some(TraversalState { state_id, bindings })
-            } else {
-                None
-            };
+            let epsilon_state = self.fail_child(state.state_id).map(|state_id| TraversalState { state_id, bindings });
 
             next_states.chain(epsilon_state)
         });

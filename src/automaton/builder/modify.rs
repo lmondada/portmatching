@@ -110,18 +110,17 @@ impl<P, K: Ord, B> AutomatonBuilder<P, K, B> {
 
 #[cfg(test)]
 pub mod tests {
-    use itertools::Itertools;
+    
     use petgraph::acyclic::Acyclic;
-    use rstest::{fixture, rstest};
+    
 
     use crate::{
-        automaton::{builder::tests::TestBuildConfig, tests::TestAutomaton, AutomatonBuilder},
+        automaton::{tests::TestAutomaton, AutomatonBuilder},
         branch_selector::tests::TestBranchSelector,
-        constraint::tests::TestConstraint,
-        predicate::tests::{TestKey, TestPattern, TestPredicate},
+        predicate::tests::{TestKey, TestPattern},
     };
 
-    use super::*;
+    
 
     pub type TestAutomatonBuilder = AutomatonBuilder<TestPattern, TestKey, TestBranchSelector>;
 

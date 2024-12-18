@@ -21,9 +21,7 @@ mod predicate;
 mod proptest;
 
 use std::{
-    borrow::Borrow,
-    cmp,
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fmt::Debug,
 };
 
@@ -32,7 +30,7 @@ use itertools::Itertools;
 
 use crate::{
     branch_selector::DisplayBranchSelector,
-    indexing::{BindVariableError, Binding, IndexKey, IndexedData},
+    indexing::{Binding, IndexKey, IndexedData},
     predicate::DeterministicPredicatePatternSelector,
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher,
 };
@@ -155,13 +153,13 @@ impl Debug for StringPatternPosition {
 #[cfg(test)]
 pub(super) mod tests {
 
-    use std::ops::Range;
+    
 
     use auto_enums::auto_enum;
     use rstest::rstest;
 
     use self::pattern::StringPattern;
-    use crate::{Pattern, PatternID, PatternMatch, PortMatcher};
+    use crate::{PatternID, PatternMatch, PortMatcher};
 
     use super::*;
 

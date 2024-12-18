@@ -322,7 +322,7 @@ fn apply_transitions<P: PatternLogic>(
     let mut next_patterns = vec![BTreeSet::default(); transitions.len()];
     let mut next_matches = vec![BTreeSet::default(); transitions.len()];
     for (id, pattern) in patterns {
-        let new_patterns = pattern.condition_on(&transitions, &known_constraints);
+        let new_patterns = pattern.condition_on(transitions, known_constraints);
         assert_eq!(transitions.len(), new_patterns.len());
         for (i, sat_p) in new_patterns.into_iter().enumerate() {
             let next_patterns = &mut next_patterns[i];
@@ -398,10 +398,9 @@ impl<PT: Pattern, B> FromIterator<PT> for AutomatonBuilder<PT::Logic, PT::Key, B
 
 #[cfg(test)]
 pub(super) mod tests {
-    use rstest::rstest;
+    
 
     use crate::{
-        automaton::tests::TestAutomaton,
         branch_selector::tests::TestBranchSelector,
         constraint::tests::TestConstraint,
         indexing::tests::TestStrIndexingScheme,
