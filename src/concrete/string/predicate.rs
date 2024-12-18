@@ -1,6 +1,12 @@
-use std::{borrow::Borrow, cmp, fmt::Debug};
+use std::{
+    borrow::Borrow,
+    cmp,
+    collections::{BTreeSet, HashMap},
+    fmt::Debug,
+};
 
 use itertools::Itertools;
+use petgraph::unionfind::UnionFind;
 
 use crate::{
     indexing::IndexKey, pattern::Satisfiable, predicate::ConstraintLogic, ArityPredicate,
@@ -57,45 +63,184 @@ pub enum BranchClass<K> {
 impl<K: IndexKey> ConstraintLogic<K> for CharacterPredicate {
     type BranchClass = BranchClass<K>;
 
-    fn get_class(&self, keys: &[K]) -> Self::BranchClass {
+    fn get_classes(&self, keys: &[K]) -> Vec<Self::BranchClass> {
         use CharacterPredicate::*;
         assert_eq!(self.arity(), keys.len());
 
         match self {
             BindingEq => {
-                // Treat the predicate as an assignment of the larger key
-                let max_key = cmp::max(keys[0], keys[1]);
-                BranchClass::Position(max_key)
+                vec![
+                    BranchClass::Position(keys[0]),
+                    BranchClass::Position(keys[1]),
+                ]
             }
-            ConstVal(_) => BranchClass::Position(keys[0]),
+            ConstVal(_) => vec![BranchClass::Position(keys[0])],
         }
     }
 
     fn condition_on(
         &self,
         keys: &[K],
-        condition: &Constraint<K, Self>,
+        known_constraints: &BTreeSet<Constraint<K, Self>>,
+        prev_constraints: &[Constraint<K, Self>],
     ) -> Satisfiable<Constraint<K, Self>> {
-        assert_eq!(self.get_class(keys), condition.get_class());
-
-        // Safe as all predicates have arity >= 1
-        let k0 = keys[0];
-        let cond_k0 = condition.required_bindings()[0];
-
+        if prev_constraints
+            .iter()
+            .any(|c| c.predicate() == self && keys == c.required_bindings())
+        {
+            // Constraint must have been satisfied before
+            return Satisfiable::No;
+        }
         use CharacterPredicate::*;
-        match (self, condition.predicate()) {
-            (ConstVal(a), ConstVal(b)) if a == b => Satisfiable::Tautology,
-            (ConstVal(a), ConstVal(b)) => Satisfiable::No,
-            (BindingEq, BindingEq) if k0 == cond_k0 => Satisfiable::Tautology,
-            _ => {
-                // TODO: if we had access to other conditions, we could also
-                // solve these cases,
-                // i.e. BindingEq(c1, c2) + ConstVal(c2) => ConstVal(c1)
-                // for now: pretend we don't know anything
-                Satisfiable::Yes(self.try_into_constraint(keys.to_vec()).unwrap())
+        match self {
+            BindingEq => {
+                let (k0, k1) = (keys[0], keys[1]);
+                simplify_binding_eq(k0, k1, known_constraints)
+            }
+            ConstVal(val) => simplify_const_val(*val, keys[0], known_constraints),
+        }
+    }
+}
+
+fn simplify_const_val<K: IndexKey>(
+    val: char,
+    k: K,
+    known_constraints: &BTreeSet<Constraint<K, CharacterPredicate>>,
+) -> Satisfiable<Constraint<K, CharacterPredicate>> {
+    // Gather all ConstVal constraint
+    let constvals = get_constvals(known_constraints);
+
+    // If a ConstVal() already exists for `k`, then we must have `val == known_val`
+    if let Some(&known_val) = constvals.get(&k) {
+        if known_val == val {
+            return Satisfiable::Tautology;
+        } else {
+            return Satisfiable::No;
+        }
+    }
+
+    // We now consider BindingEqs: if it must be k == k2 and we have a constval
+    // for k2, then we can deduce the value for k too.
+    let equal_keys = find_equal_keys(k, &known_constraints);
+
+    // Same as above: if a ConstVal() already exists for some `k2`, then we must
+    // have `val == known_val`
+    for k2 in equal_keys {
+        if let Some(&known_val) = constvals.get(&k2) {
+            if known_val == val {
+                return Satisfiable::Tautology;
+            } else {
+                return Satisfiable::No;
             }
         }
     }
+
+    let self_constraint = Constraint::try_new(CharacterPredicate::ConstVal(val), vec![k]).unwrap();
+    return Satisfiable::Yes(self_constraint);
+}
+
+fn simplify_binding_eq<K: IndexKey>(
+    k1: K,
+    k2: K,
+    known_constraints: &BTreeSet<Constraint<K, CharacterPredicate>>,
+) -> Satisfiable<Constraint<K, CharacterPredicate>> {
+    let equal_keys_1 = find_equal_keys(k1, &known_constraints);
+
+    if equal_keys_1.contains(&k2) {
+        return Satisfiable::Tautology;
+    }
+
+    let equal_keys_2 = find_equal_keys(k2, &known_constraints);
+    let constvals = get_constvals(known_constraints);
+
+    let val1 = equal_keys_1.iter().find_map(|k| constvals.get(k).copied());
+    let val2 = equal_keys_2.iter().find_map(|k| constvals.get(k).copied());
+
+    match (val1, val2) {
+        (None, Some(val)) => {
+            let constraint =
+                Constraint::try_new(CharacterPredicate::ConstVal(val), vec![k1]).unwrap();
+            Satisfiable::Yes(constraint)
+        }
+        (Some(val), None) => {
+            let constraint =
+                Constraint::try_new(CharacterPredicate::ConstVal(val), vec![k2]).unwrap();
+            Satisfiable::Yes(constraint)
+        }
+        (Some(val1), Some(val2)) => {
+            if val1 == val2 {
+                Satisfiable::Tautology
+            } else {
+                Satisfiable::No
+            }
+        }
+        (None, None) => {
+            let constraint =
+                Constraint::try_new(CharacterPredicate::BindingEq, vec![k1, k2]).unwrap();
+            Satisfiable::Yes(constraint)
+        }
+    }
+}
+
+fn get_constvals<K: IndexKey>(
+    known_constraints: &BTreeSet<Constraint<K, CharacterPredicate>>,
+) -> HashMap<K, char> {
+    let constvals = known_constraints
+        .iter()
+        .filter_map(|c| {
+            let &CharacterPredicate::ConstVal(val) = c.predicate() else {
+                return None;
+            };
+            (c.required_bindings()[0], val).into()
+        })
+        .into_group_map();
+    constvals
+        .into_iter()
+        .map(|(k, vals)| {
+            let v = vals[0];
+            assert!(vals.iter().all(|&v2| v == v2));
+            (k, v)
+        })
+        .collect()
+}
+
+fn find_equal_keys<K: IndexKey>(
+    k: K,
+    known_constraints: &BTreeSet<Constraint<K, CharacterPredicate>>,
+) -> BTreeSet<K> {
+    let binding_eqs = known_constraints
+        .iter()
+        .filter_map(|c| {
+            let &CharacterPredicate::BindingEq = c.predicate() else {
+                return None;
+            };
+            [c.required_bindings()[0], c.required_bindings()[1]].into()
+        })
+        .collect_vec();
+    let mut all_keys: Vec<_> = binding_eqs.iter().flat_map(|&[k1, k2]| [k1, k2]).collect();
+    all_keys.sort_unstable();
+    all_keys.dedup();
+
+    let Ok(pos1) = all_keys.binary_search(&k) else {
+        return [k].into();
+    };
+
+    let mut uf = UnionFind::new(all_keys.len());
+
+    for &[k1, k2] in &binding_eqs {
+        let pos1 = all_keys.binary_search(&k1).unwrap();
+        let pos2 = all_keys.binary_search(&k2).unwrap();
+        uf.union(pos1, pos2);
+    }
+
+    all_keys
+        .iter()
+        .copied()
+        .filter(|k| {
+            let pos2 = all_keys.binary_search(&k).unwrap();
+            uf.find(pos1) == uf.find(pos2)
+        })
+        .collect()
 }
 
 impl Debug for CharacterPredicate {

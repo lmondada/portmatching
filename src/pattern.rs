@@ -7,6 +7,7 @@
 //! - The `ConcretePattern` trait, for patterns that can themselves be matched on.
 //! - Error types related to pattern matching operations.
 
+use std::collections::BTreeSet;
 
 use crate::indexing::IndexKey;
 
@@ -45,8 +46,6 @@ pub trait Pattern {
     fn into_logic(self) -> Self::Logic;
 }
 
-type ConditionalPattern<C, P> = (Option<C>, P);
-
 /// The evaluation logic for a type of pattern.
 pub trait PatternLogic: Ord + Clone {
     /// The type of predicates used in the pattern.
@@ -54,28 +53,35 @@ pub trait PatternLogic: Ord + Clone {
     /// A partition of all predicates into mutually exclusive sets.
     type BranchClass: Ord;
 
-    /// The predicate classes used in the pattern, along with their rank.
+    /// The branch classes most pertinent to the pattern, along with a rank.
     ///
-    /// The rank indicates the probability of the pattern being retained when
-    /// matching for the corresponding predicate class.
-    fn get_branch_classes(&self) -> impl Iterator<Item = (Self::BranchClass, ClassRank)>;
+    /// The rank estimates the expected number of constraints in the class that
+    /// are satisfied in both the pattern and random input data.
+    ///
+    /// i.e. if F is the set of constrains in a branch class and A c F is the
+    /// subset of constraints satisfied by the pattern A(P), then the rank of
+    /// the branch class F is E_G[ | { A in F | A(P) and A(G) } | ].
+    ///
+    /// The class with lowest overall rank will be selected.
+    fn rank_classes(&self) -> impl Iterator<Item = (Self::BranchClass, ClassRank)>;
 
-    /// A pattern equivalent to `self` when conditioned on `constraints` and
-    /// the branch class `cls`.
+    /// Get all constraints in a class that are useful for pattern matching
+    /// `self`.
     ///
-    /// This can be viewed as 'popping' a constraint from the pattern: return
-    /// tuples where the first element is an optional constraint in `cls` and
-    /// the second is the pattern equivalent to `self` when conditioned on that
-    /// constraint and `constraints`. The iterator enumerates all possible
-    /// decompositions of `self` into a constraint in `cls` and a pattern
-    /// equivalent to `self`.
-    fn condition_on<'p>(
+    /// If the set is empty, then the pattern will be excluded from this
+    /// class evaluation and be attached to the epsilon transition instead.
+    fn nominate(&self, cls: &Self::BranchClass) -> BTreeSet<Self::Constraint>;
+
+    /// Simplify patterns conditioned on which transitions are taken.
+    ///
+    /// For each transition in `transitions`, return whether the pattern is
+    /// still satisfiable and, if so, the pattern equivalent to `self` when
+    /// conditioned on that transition and `known_constraints`.
+    fn condition_on(
         &self,
-        cls: &Self::BranchClass,
-        constraints: impl IntoIterator<Item = &'p Self::Constraint>,
-    ) -> impl Iterator<Item = ConditionalPattern<Self::Constraint, Self>>
-    where
-        Self: 'p;
+        transitions: &[Self::Constraint],
+        known_constraints: &BTreeSet<Self::Constraint>,
+    ) -> Vec<Satisfiable<Self>>;
 
     /// Check whether the pattern is satisfiable.
     fn is_satisfiable(&self) -> Satisfiable;

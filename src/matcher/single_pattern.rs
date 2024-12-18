@@ -72,11 +72,11 @@ impl<K, B> SinglePatternMatcher<K, B> {
         let required_bindings = BTreeSet::from_iter(pattern.required_bindings());
 
         // Break pattern into predicates
-        let predicates = decompose_constraints(pattern.into_logic());
+        let constraints = decompose_constraints(pattern.into_logic());
 
         // Turn predicates into branch selectors (with only one branch -- they
         // are just predicate evaluators in this case)
-        let branch_selectors = predicates
+        let branch_selectors = constraints
             .into_iter()
             .map(|p| B::create_branch_selector(vec![p]))
             .collect_vec();
@@ -105,38 +105,54 @@ impl<K, B> SinglePatternMatcher<K, B> {
     }
 }
 
-fn decompose_constraints<L>(mut pattern: L) -> Vec<L::Constraint>
+fn decompose_constraints<P>(mut pattern: P) -> Vec<P::Constraint>
 where
-    L: PatternLogic,
+    P: PatternLogic,
 {
     fn approx_isize(f: f64) -> isize {
         (f * 10000.) as isize
     }
 
-    let mut all_constraints = vec![];
+    match pattern.is_satisfiable() {
+        Satisfiable::Yes(()) => {}
+        Satisfiable::No => panic!("Pattern is not satisfiable"),
+        Satisfiable::Tautology => return Vec::new(),
+    }
 
-    while pattern.is_satisfiable() == Satisfiable::Yes(()) {
+    let mut all_constraints = vec![];
+    let mut known_constraints = BTreeSet::new();
+    loop {
         let Some((cls, _)) = pattern
-            .get_branch_classes()
+            .rank_classes()
             .max_by_key(|(_, rank)| approx_isize(*rank))
         else {
             return Vec::new();
         };
 
-        let Some((Some(in_cls), new_pattern)) = pattern.condition_on(&cls, &all_constraints).next()
-        else {
-            panic!("Applying a predicate from the pattern's prefered classes should always result in a predicate selection");
+        let constraints = pattern.nominate(&cls).into_iter().collect_vec();
+        let new_patterns = pattern.condition_on(&constraints, &known_constraints);
+
+        // Only support patterns with a single nominated constraint per class
+        let Ok(constraint) = constraints.into_iter().exactly_one() else {
+            unimplemented!("SinglePatternMatcher currently only supports patterns that nominate a single constraint per class");
         };
+        let new_pattern = new_patterns
+            .into_iter()
+            .exactly_one()
+            .ok()
+            .expect("must match size of transitions");
 
-        all_constraints.push(in_cls);
-        pattern = new_pattern
+        known_constraints.insert(constraint.clone());
+        all_constraints.push(constraint);
+
+        match new_pattern {
+            Satisfiable::Yes(new_pattern) => pattern = new_pattern,
+            Satisfiable::No => {
+                panic!("Could not decompose pattern into constraints")
+            }
+            Satisfiable::Tautology => break,
+        }
     }
-
-    assert_eq!(
-        pattern.is_satisfiable(),
-        Satisfiable::Tautology,
-        "Could not satisfy pattern"
-    );
 
     all_constraints
 }

@@ -28,18 +28,21 @@ use itertools::Itertools;
 use crate::{
     branch_selector::DisplayBranchSelector,
     indexing::{BindVariableError, Binding, IndexKey, IndexedData},
-    predicate::PredicatePatternDefaultSelector,
+    predicate::DeterministicPredicatePatternSelector,
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher,
 };
 pub use pattern::{CharVar, StringPattern};
 pub use predicate::{BranchClass, CharacterPredicate};
 
-type BranchSelector = PredicatePatternDefaultSelector<StringPatternPosition, CharacterPredicate>;
+type BranchSelector =
+    DeterministicPredicatePatternSelector<StringPatternPosition, CharacterPredicate>;
 
 /// A constraint for matching a string using [StringPredicate]s.
 type StringConstraint = crate::Constraint<StringPatternPosition, CharacterPredicate>;
 
-impl<K: IndexKey> DisplayBranchSelector for PredicatePatternDefaultSelector<K, CharacterPredicate> {
+impl<K: IndexKey> DisplayBranchSelector
+    for DeterministicPredicatePatternSelector<K, CharacterPredicate>
+{
     fn fmt_class(&self) -> String {
         let Some(cls) = self.get_class() else {
             return String::new();
@@ -50,8 +53,7 @@ impl<K: IndexKey> DisplayBranchSelector for PredicatePatternDefaultSelector<K, C
     }
 
     fn fmt_nth_constraint(&self, n: usize) -> String {
-        let pred = &self.predicates()[n];
-        match pred {
+        match &self.predicates()[n] {
             CharacterPredicate::BindingEq => format!(" == {:?}", self.keys(n)[0]),
             CharacterPredicate::ConstVal(c) => format!(" == {:?}", c),
         }
@@ -406,6 +408,17 @@ pub(super) mod tests {
         "b",
         "aba",
         "$cb$a",
+    ])]
+    #[case("aaa", vec!["a$ba", "$aa$a", "aa$a"])]
+    #[case("cbaaaaaab", vec![
+        "c", "d", "$c$baaaaaa$baaaaaaaaaa","$baaaa$b$baaaa"
+    ])]
+    #[case("ddaaaaaadaaaaaaaaaaaaaad", vec![
+        "$aaaaaaaabaaaaaaaaaaaaa$a$a", "$f$f", "$caaaa$caa$c",
+    ])]
+    #[case("aaaaaaaa", vec![
+        "aaaaabaaa",
+        "$c$bbaa$b$b",
     ])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         let patterns = patterns

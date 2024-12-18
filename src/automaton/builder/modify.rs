@@ -17,38 +17,27 @@ impl<P, K: IndexKey, B> GraphView<K, B> for AutomatonBuilder<P, K, B> {
 
 /// Methods for modifying the automaton
 impl<P, K: IndexKey, B> AutomatonBuilder<P, K, B> {
-    /// Add a new disconnected non-deterministic state
-    pub(super) fn add_non_det_node(&mut self) -> StateID {
-        let node = self.graph.add_node(State::default());
-        StateID(node)
-    }
-
-    /// Set the deterministic flag of `state` to true and return whether it was
-    /// already deterministic.
-    pub(super) fn set_deterministic(&mut self, state: StateID) -> bool {
-        let node = self.node_weight_mut(state);
-        let was_det = node.deterministic;
-        node.deterministic = true;
-        was_det
-    }
-
+    /// Add a child state, record matches and link to parent
+    ///
+    /// If the child state already exists, it will be reused and `None` will
+    /// be returned. Otherwise, the new state will be returned
     pub(super) fn add_child(
         &mut self,
         parent: StateID,
         patterns: BTreeSet<(PatternID, P)>,
+        matches: BTreeSet<PatternID>,
         is_fail: bool,
-    ) -> StateID
+    ) -> Option<StateID>
     where
-        P: Ord,
+        P: Clone + Ord,
     {
-        assert!(
-            self.branch_selector(parent).is_some(),
-            "cannot add child to non-branching state"
-        );
+        let hash_key = (patterns.clone(), matches.clone());
+
+        let mut child_created = false;
 
         // First create (or reuse) the child state
         let mut child = None;
-        if let Some(&c) = self.hashcons.get(&patterns) {
+        if let Some(&c) = self.hashcons.get(&hash_key) {
             // Requirement for reusing the child: parent -> c is a valid edge
             if self.graph.is_valid_edge(parent.0, c.0) {
                 child = Some(c);
@@ -58,7 +47,8 @@ impl<P, K: IndexKey, B> AutomatonBuilder<P, K, B> {
             let node = self.graph.add_node(State::default());
             let state = StateID(node);
             // The newest state is always the best to hashcons to
-            self.hashcons.insert(patterns, state);
+            self.hashcons.insert(hash_key, state);
+            child_created = true;
             state
         });
 
@@ -76,7 +66,10 @@ impl<P, K: IndexKey, B> AutomatonBuilder<P, K, B> {
             order.push(tr);
         }
 
-        child
+        // Finally, add the matches
+        self.add_matches(child, matches.iter().copied());
+
+        child_created.then_some(child)
     }
 
     pub(super) fn set_max_scope(&mut self, state: StateID, max_scope: BTreeSet<K>) {

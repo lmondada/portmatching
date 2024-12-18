@@ -19,9 +19,12 @@
 //! for <var2> is in the returned set.
 
 mod pattern;
-pub use pattern::{PredicateLogic, PredicatePattern, PredicatePatternDefaultSelector};
+mod selector;
 
-use std::borrow::Borrow;
+pub use pattern::{PredicateLogic, PredicatePattern};
+pub use selector::{DeterministicPredicatePatternSelector, PredicatePatternDefaultSelector};
+
+use std::{borrow::Borrow, collections::BTreeSet};
 
 use crate::{constraint::InvalidConstraint, pattern::Satisfiable, Constraint};
 
@@ -43,14 +46,19 @@ pub trait Predicate<Data, Value>: ArityPredicate {
 pub trait ConstraintLogic<K>: Clone + Ord + Sized {
     type BranchClass: Ord;
 
-    fn get_class(&self, keys: &[K]) -> Self::BranchClass;
+    fn get_classes(&self, keys: &[K]) -> Vec<Self::BranchClass>;
 
     /// Compute equivalent constraint when conditioned on an other constraint
     /// of the same class.
+    ///
+    /// `prev_constraints` is the set of constraints that have been evaluated
+    /// so far (useful for a deterministic branch selector, in which case this
+    /// means they were not satisfied).
     fn condition_on(
         &self,
         keys: &[K],
-        condition: &Constraint<K, Self>,
+        known_constraints: &BTreeSet<Constraint<K, Self>>,
+        prev_constraints: &[Constraint<K, Self>],
     ) -> Satisfiable<Constraint<K, Self>>;
 
     fn try_into_constraint(self, keys: Vec<K>) -> Result<Constraint<K, Self>, InvalidConstraint>
@@ -62,24 +70,30 @@ pub trait ConstraintLogic<K>: Clone + Ord + Sized {
 }
 
 impl<K, P> Constraint<K, P> {
-    pub fn get_class(&self) -> P::BranchClass
+    pub fn get_classes(&self) -> Vec<P::BranchClass>
     where
         P: ConstraintLogic<K>,
     {
-        self.predicate().get_class(self.required_bindings())
+        self.predicate().get_classes(self.required_bindings())
     }
 
-    pub fn condition_on(&self, condition: &Constraint<K, P>) -> Satisfiable<Constraint<K, P>>
+    pub fn condition_on(
+        &self,
+        known_constraints: &BTreeSet<Constraint<K, P>>,
+        prev_constraints: &[Constraint<K, P>],
+    ) -> Satisfiable<Constraint<K, P>>
     where
         P: ConstraintLogic<K>,
     {
         let keys = self.required_bindings();
-        self.predicate().condition_on(keys, condition)
+        self.predicate()
+            .condition_on(keys, known_constraints, prev_constraints)
     }
 }
 #[cfg(test)]
 pub(crate) mod tests {
     use std::borrow::Borrow;
+    use std::collections::BTreeSet;
 
     use itertools::Itertools;
     use rstest::rstest;
@@ -150,7 +164,7 @@ pub(crate) mod tests {
     impl ConstraintLogic<TestKey> for TestPredicate {
         type BranchClass = TestBranchClass;
 
-        fn get_class(&self, keys: &[TestKey]) -> Self::BranchClass {
+        fn get_classes(&self, keys: &[TestKey]) -> Vec<Self::BranchClass> {
             assert_eq!(self.arity(), keys.len());
 
             let args = keys.iter().cloned().collect_tuple();
@@ -159,24 +173,32 @@ pub(crate) mod tests {
             match self {
                 AreEqualOne | NotEqualOne => {
                     let (a, b) = args.unwrap();
-                    TestBranchClass::One(a, b)
+                    vec![TestBranchClass::One(a, b)]
                 }
                 AreEqualTwo | AlwaysTrueTwo => {
                     let (a, b) = args.unwrap();
-                    TestBranchClass::Two(a, b)
+                    vec![TestBranchClass::Two(a, b)]
                 }
-                NeverTrueThree | AlwaysTrueThree => TestBranchClass::Three,
+                NeverTrueThree | AlwaysTrueThree => vec![TestBranchClass::Three],
             }
         }
 
         fn condition_on(
             &self,
             keys: &[TestKey],
-            condition: &Constraint<TestKey, Self>,
+            known_constraints: &BTreeSet<Constraint<TestKey, Self>>,
+            _: &[Constraint<TestKey, Self>],
         ) -> Satisfiable<Constraint<TestKey, Self>> {
+            let condition = known_constraints
+                .iter()
+                .find(|c| c.get_classes() == self.get_classes(keys));
+            let Some(condition) = condition else {
+                let self_constraint = self.clone().try_into_constraint(keys.to_vec()).unwrap();
+                return Satisfiable::Yes(self_constraint);
+            };
             assert_eq!(
-                self.get_class(keys),
-                condition.get_class(),
+                self.get_classes(keys),
+                condition.get_classes(),
                 "class mismatch in TestPredicate::condition_on"
             );
             assert_eq!(
@@ -188,7 +210,7 @@ pub(crate) mod tests {
             if self == condition.predicate() {
                 return Satisfiable::Tautology;
             }
-            match self.get_class(keys) {
+            match self.get_classes(keys).into_iter().exactly_one().unwrap() {
                 TestBranchClass::One(_, _) => {
                     // predicates are mutually exclusive
                     Satisfiable::No

@@ -60,15 +60,13 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
                 .map(|k| match bindings.get_binding(k) {
                     Binding::Bound(v) => Some(v.borrow().clone()),
                     Binding::Failed => None,
-                    Binding::Unbound => panic!("tried to use unbound key {k:?}"),
+                    Binding::Unbound => panic!(
+                        "tried to use unbound key {k:?} in state {:?}",
+                        state.state_id
+                    ),
                 })
                 .collect_vec();
             let transitions = br.eval(&reqs_bindings, host);
-
-            // Figure out now if we need to add the fail transition before
-            // consuming the transitions
-            let needs_fail_transition =
-                !self.is_deterministic(state.state_id) || transitions.is_empty();
 
             // Traverse allowed transitions to next states
             let bindings_clone = bindings.clone();
@@ -80,15 +78,14 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
                 }
             });
 
-            // Follow fail transition if required
-            let mut fail_state = None;
-            if needs_fail_transition {
-                if let Some(state_id) = self.fail_child(state.state_id) {
-                    fail_state = Some(TraversalState { state_id, bindings })
-                }
-            }
+            // Always traverse the epsilon transition if it exists
+            let epsilon_state = if let Some(state_id) = self.fail_child(state.state_id) {
+                Some(TraversalState { state_id, bindings })
+            } else {
+                None
+            };
 
-            next_states.chain(fail_state)
+            next_states.chain(epsilon_state)
         });
 
         Some(all_next_states).into_iter().flatten()

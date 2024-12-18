@@ -115,14 +115,13 @@ fn fmt_node<K: IndexKey, B: DisplayBranchSelector>(_: NodeIndex, weight: &State<
         .as_ref()
         .map(|br| br.fmt_class())
         .unwrap_or_default();
-    let is_det = if weight.deterministic { "D" } else { "ND" };
     let matches = weight
         .matches
         .iter()
         .map(|(id, bindings)| format!("{}: {:?}", id, bindings))
         .collect::<Vec<_>>()
         .join("\n");
-    format!("{br} ({is_det})\n{matches}")
+    format!("{br}\n{matches}")
 }
 
 fn fmt_edge<'t, K: IndexKey, B: DisplayBranchSelector + 't>(
@@ -182,8 +181,6 @@ struct State<K: Ord, B> {
     ///
     /// None if the state has no child
     branch_selector: Option<B>,
-    /// Whether the state is deterministic
-    deterministic: bool,
     /// The order of the outgoing contraint transitions. Must map one-to-one to
     /// the outgoing constraint edges, i.e. the edges with non-None weights.
     edge_order: Vec<TransitionID>,
@@ -200,11 +197,6 @@ struct State<K: Ord, B> {
 
 impl<K: IndexKey, B> Debug for State<K, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.deterministic {
-            write!(f, "D")?;
-        } else {
-            write!(f, "ND")?;
-        }
         if !self.matches.is_empty() {
             write!(f, " {:?}", self.matches)?;
         }
@@ -212,27 +204,6 @@ impl<K: IndexKey, B> Debug for State<K, B> {
         writeln!(f, "max_scope: {:?}", self.max_scope)?;
         writeln!(f, "min_scope: {:?}", self.min_scope)?;
         Ok(())
-    }
-}
-
-/// A transition from one state to another.
-///
-/// A transition has an optional constraint that must be satisfied for the
-/// transition to occur. A None constraint is either an "epsilon" or "FAIL"
-/// constraint, depending on the state's deterministic flag.
-#[derive(Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct Transition<C> {
-    constraint: Option<C>,
-}
-
-impl<C: Debug> Debug for Transition<C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(constraint) = &self.constraint {
-            write!(f, "{:?}", constraint)
-        } else {
-            write!(f, "ε")
-        }
     }
 }
 

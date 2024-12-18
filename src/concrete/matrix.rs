@@ -15,7 +15,7 @@ use itertools::Itertools;
 use crate::{
     concrete::string::CharacterPredicate,
     indexing::{BindVariableError, Binding, IndexedData},
-    predicate::PredicatePatternDefaultSelector,
+    predicate::{DeterministicPredicatePatternSelector, PredicatePatternDefaultSelector},
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
 };
 
@@ -45,7 +45,8 @@ impl<S: AsRef<str>> From<S> for MatrixString {
 /// indexing.
 pub type MatrixConstraint = crate::Constraint<MatrixPatternPosition, CharacterPredicate>;
 
-type BranchSelector = PredicatePatternDefaultSelector<MatrixPatternPosition, CharacterPredicate>;
+type BranchSelector =
+    DeterministicPredicatePatternSelector<MatrixPatternPosition, CharacterPredicate>;
 
 /// A matcher for 2D character matrices.
 pub type MatrixManyMatcher = ManyMatcher<MatrixPattern, MatrixPatternPosition, BranchSelector>;
@@ -337,6 +338,7 @@ mod tests {
     #[case("", vec!["--a$ca\n-\n$c\n", "\n---\n-\na\n", "\na---a\n", "-\n---a\n\n","---a-aaaa\n", "\n-a-\na\n", "\n--a\n-aa\n\n\n"])]
     #[case("", vec!["--a$ca\n-\n$c\n", "\n---\n-\na\n", "\na---a\n", "-\n---a\n\n"])]
     #[case("caaaabaa\n", vec!["-a--aaa\n", "-$c-$e--$d$c\na\naaaa\n", "a\n", "\n$c\n$ca\na-\n", "$d--ab\n$a$b$ca$aa\naaa\naaa\naaaaaaaa\na\n", "d-aaa\na\naa-a-a\n", "c----ba\n"])]
+    #[case("aaa", vec!["a-a", "-aa", "aa-"])]
     #[case("aa\n", vec!["", ""])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         let subject = MatrixString::from(&subject);

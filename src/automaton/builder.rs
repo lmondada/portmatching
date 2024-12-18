@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use petgraph::acyclic::Acyclic;
 
 use crate::{
     automaton::{ConstraintAutomaton, StateID},
-    branch_selector::{BranchSelector, CreateBranchSelector},
+    branch_selector::CreateBranchSelector,
     indexing::IndexKey,
     pattern::{Pattern, Satisfiable},
     HashSet, IndexingScheme, PatternID, PatternLogic,
@@ -14,6 +14,8 @@ use crate::{
 mod modify;
 
 use super::{view::GraphView, BuildConfig, State, TransitionGraph};
+
+type StateHashKey<PT> = (BTreeSet<(PatternID, PT)>, BTreeSet<PatternID>);
 
 /// Create constraint automata from lists of patterns, given by lists of
 /// constraints.
@@ -27,7 +29,7 @@ pub struct AutomatonBuilder<PT, K: Ord, B> {
     /// The scopes that each pattern requires
     pattern_scopes: Vec<HashSet<K>>,
     /// A map of all created states, to be reused when possible
-    hashcons: BTreeMap<BTreeSet<(PatternID, PT)>, StateID>,
+    hashcons: BTreeMap<StateHashKey<PT>, StateID>,
 }
 
 impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
@@ -46,34 +48,6 @@ impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
 
     fn get_scope(&self, pattern: PatternID) -> &HashSet<K> {
         &self.pattern_scopes[pattern.0]
-    }
-
-    fn populate_max_scope(&mut self)
-    where
-        K: IndexKey,
-    {
-        // Propagate max_scope from leaves to root (reverse topological sort)
-        let topo = self.graph.nodes_iter().collect_vec();
-
-        for node in topo.into_iter().rev() {
-            let state = StateID(node);
-
-            // The max_scope is the union of:
-            // 1. the state's min_scope
-            let mut max_scope = BTreeSet::from_iter(self.min_scope(state).iter().copied());
-
-            // 2. The keys required for any of the state's matches
-            for keys in self.matches(state).values() {
-                max_scope.extend(keys);
-            }
-
-            // 3. The max_scopes of any of the state's children
-            for child in self.children(state) {
-                max_scope.extend(self.max_scope(child));
-            }
-
-            self.set_max_scope(state, max_scope);
-        }
     }
 
     fn known_bindings(&self, state: StateID) -> Vec<K> {
@@ -175,7 +149,13 @@ where
         let mut bfs_queue = VecDeque::new();
 
         // Register all patterns at the root
-        self.hashcons.insert(patterns.clone(), self.root);
+        // Find matches at the root
+        let (completed_patterns, patterns) = partition_completed_patterns(patterns);
+        let root_matches = BTreeSet::from_iter(completed_patterns.into_iter().map(|(id, _)| id));
+        self.add_matches(self.root, root_matches.iter().copied());
+        self.hashcons
+            .insert((patterns.clone(), root_matches), self.root);
+
         bfs_queue.push_back(BuildState {
             state: self.root,
             patterns,
@@ -188,48 +168,71 @@ where
             satisfied_constraints,
         }) = bfs_queue.pop_front()
         {
-            // Before proceeding, add matches to the current state
-            let (completed_patterns, patterns) = partition_completed_patterns(patterns);
-            self.add_matches(state, completed_patterns.into_iter().map(|(id, _)| id));
-
             if patterns.is_empty() {
                 continue;
             }
+            if state == StateID(11.into()) {
+                println!("interest");
+            }
 
-            // Get the predicate class that makes us progress the most
-            let cls = best_branch_class(patterns.iter().map(|(_, p)| p)).unwrap();
+            // 1. Vote: get the branch class that makes us progress the most
+            let cls = select_best_class(patterns.iter().map(|(_, p)| p)).unwrap();
 
-            // Now collect the predicates within the class. These are all
-            // mutually exclusive by definition!
-            let mut constraints = group_by_constraint(patterns, &cls, &satisfied_constraints);
+            // 2. Collect all constraints of interest to the patterns
+            let nominations = patterns.iter().map(|(_, p)| p.nominate(&cls)).collect_vec();
+            let mut nominations_iter = nominations.iter();
+            // Take apart the patterns that do not nominate any constraints
+            let (patterns, skip_patterns): (BTreeSet<_>, BTreeSet<_>) = patterns
+                .into_iter()
+                .partition(|_| !nominations_iter.next().unwrap().is_empty());
+            let mut constraints = nominations.into_iter().flatten().collect_vec();
+            constraints.sort_unstable();
+            constraints.dedup();
 
-            // Remove predicates with no patterns
-            constraints.retain(|_, patterns| {
-                drop_impossible_patterns(patterns);
-                !patterns.is_empty()
-            });
+            // 3. Apply all transition to each pattern. Track new patterns and
+            // new matches
+            let (mut next_patterns, mut next_matches) =
+                apply_transitions(patterns, &constraints, &satisfied_constraints);
 
-            // Branch selector will evaluate all predicates at once to find
-            // which ones are satisfied
-            let non_fail_predicates = constraints.keys().filter_map(|p| p.as_ref()).cloned();
-            self.set_branch_selector(
-                state,
-                B::create_branch_selector(non_fail_predicates.collect()),
-            );
+            // Remove transitions that do not lead to a new child
+            retain_non_empty(&mut constraints, &mut next_patterns, &mut next_matches);
 
-            // For each predicate, create a new state and add it to the queue
-            for (constraint, patterns) in constraints {
-                let next_state = self.add_child(state, patterns.clone(), constraint.is_none());
-                let mut satisfied_constraints = satisfied_constraints.clone();
-                if let Some(constraint) = constraint {
-                    satisfied_constraints.insert(constraint);
-                }
-                let build_state = BuildState {
-                    state: next_state,
-                    patterns,
-                    satisfied_constraints,
+            // Add new children and queue them up when useful
+            for (constraint, patterns, matches) in izip!(&constraints, next_patterns, next_matches)
+            {
+                let Some(next_state) = self.add_child(state, patterns.clone(), matches, false)
+                else {
+                    // The child state was already added
+                    continue;
                 };
-                bfs_queue.push_back(build_state);
+                if !patterns.is_empty() {
+                    let mut satisfied_constraints = satisfied_constraints.clone();
+                    satisfied_constraints.insert(constraint.clone());
+                    let build_state = BuildState {
+                        state: next_state,
+                        patterns,
+                        satisfied_constraints,
+                    };
+                    bfs_queue.push_back(build_state);
+                }
+            }
+
+            // Create the branch selector
+            let br = B::create_branch_selector(constraints);
+            self.set_branch_selector(state, br);
+
+            // Add epsilon transition to skip patterns
+            if !skip_patterns.is_empty() {
+                if let Some(state) =
+                    self.add_child(state, skip_patterns.clone(), BTreeSet::default(), true)
+                {
+                    let build_state = BuildState {
+                        state,
+                        patterns: skip_patterns,
+                        satisfied_constraints,
+                    };
+                    bfs_queue.push_back(build_state);
+                }
             }
         }
 
@@ -245,40 +248,107 @@ where
     ///  - are required to evaluate outgoing constraints at `state`.
     fn populate_min_scopes(&mut self, indexing: impl IndexingScheme<Key = K>) {
         for state in self.all_states().collect_vec() {
-            let Some(br) = self.branch_selector(state) else {
-                continue;
-            };
-            let reqs = br.required_bindings().iter().copied();
+            let reqs = self.required_bindings(state);
             let known_bindings = self.known_bindings(state);
             let min_scope = indexing.all_missing_bindings(reqs, known_bindings);
             self.set_min_scope(state, min_scope);
         }
     }
-}
 
-fn group_by_constraint<P: PatternLogic>(
-    patterns: BTreeSet<(PatternID, P)>,
-    cls: &P::BranchClass,
-    satisfied_constraints: &BTreeSet<P::Constraint>,
-) -> BTreeMap<Option<P::Constraint>, BTreeSet<(PatternID, P)>> {
-    let mut constraints: BTreeMap<Option<P::Constraint>, BTreeSet<(PatternID, P)>> =
-        BTreeMap::default();
-    for (id, pattern) in patterns {
-        for (in_cls, other_constraints) in pattern.condition_on(cls, satisfied_constraints) {
-            constraints
-                .entry(in_cls)
-                .or_default()
-                .insert((id, other_constraints));
+    fn populate_max_scope(&mut self)
+    where
+        K: IndexKey,
+    {
+        // Propagate max_scope from leaves to root (reverse topological sort)
+        let topo = self.graph.nodes_iter().collect_vec();
+
+        for node in topo.into_iter().rev() {
+            let state = StateID(node);
+
+            // The max_scope is the union of:
+            // 1. the required bindings at the state
+            let mut max_scope = BTreeSet::from_iter(self.required_bindings(state));
+
+            // 2. The keys required for any of the state's matches
+            for keys in self.matches(state).values() {
+                max_scope.extend(keys);
+            }
+
+            // 3. The max_scopes of any of the state's children
+            for child in self.children(state) {
+                max_scope.extend(self.max_scope(child));
+            }
+
+            self.set_max_scope(state, max_scope);
         }
     }
-    constraints
+
+    fn required_bindings(&self, state: StateID) -> impl Iterator<Item = K> + '_ {
+        if let Some(br) = self.branch_selector(state) {
+            Some(br.required_bindings().iter().copied())
+                .into_iter()
+                .flatten()
+        } else {
+            None.into_iter().flatten()
+        }
+    }
+}
+
+fn retain_non_empty<P: PatternLogic>(
+    constraints: &mut Vec<<P as PatternLogic>::Constraint>,
+    next_patterns: &mut Vec<BTreeSet<(PatternID, P)>>,
+    next_matches: &mut Vec<BTreeSet<PatternID>>,
+) {
+    let retain_transitions = next_patterns
+        .iter()
+        .zip(&*next_matches)
+        .map(|(p, m)| !p.is_empty() || !m.is_empty())
+        .collect_vec();
+
+    macro_rules! retain {
+        ($vec:expr) => {
+            let mut iter = retain_transitions.iter().copied();
+            $vec.retain(|_| iter.next().unwrap());
+        };
+    }
+
+    retain!(constraints);
+    retain!(next_patterns);
+    retain!(next_matches);
+}
+
+fn apply_transitions<P: PatternLogic>(
+    patterns: BTreeSet<(PatternID, P)>,
+    transitions: &[<P as PatternLogic>::Constraint],
+    known_constraints: &BTreeSet<<P as PatternLogic>::Constraint>,
+) -> (Vec<BTreeSet<(PatternID, P)>>, Vec<BTreeSet<PatternID>>) {
+    let mut next_patterns = vec![BTreeSet::default(); transitions.len()];
+    let mut next_matches = vec![BTreeSet::default(); transitions.len()];
+    for (id, pattern) in patterns {
+        let new_patterns = pattern.condition_on(&transitions, &known_constraints);
+        assert_eq!(transitions.len(), new_patterns.len());
+        for (i, sat_p) in new_patterns.into_iter().enumerate() {
+            let next_patterns = &mut next_patterns[i];
+            let next_matches = &mut next_matches[i];
+            match sat_p {
+                Satisfiable::Yes(p) => {
+                    next_patterns.insert((id, p));
+                }
+                Satisfiable::No => {}
+                Satisfiable::Tautology => {
+                    next_matches.insert(id);
+                }
+            }
+        }
+    }
+    (next_patterns, next_matches)
 }
 
 fn approx_isize(f: f64) -> isize {
     (f * 10000.) as isize
 }
 
-fn best_branch_class<'p, P: PatternLogic + 'p>(
+fn select_best_class<'p, P: PatternLogic + 'p>(
     patterns: impl IntoIterator<IntoIter = impl ExactSizeIterator<Item = &'p P>>,
 ) -> Option<P::BranchClass> {
     let patterns = patterns.into_iter();
@@ -289,7 +359,7 @@ fn best_branch_class<'p, P: PatternLogic + 'p>(
         patterns
             .into_iter()
             .fold(BTreeMap::default(), |mut classes, pattern| {
-                for (cls, rank) in pattern.get_branch_classes() {
+                for (cls, rank) in pattern.rank_classes() {
                     *classes.entry(cls).or_insert(n_patterns) += rank - 1.;
                 }
                 classes

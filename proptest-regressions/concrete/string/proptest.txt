@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 266b7f247b6f56caa317d802b477969e000456f4a7ef2c295d4a2a627aa712e0 # shrinks to subject = "", patterns = ["a", "", "$d$dbaa$a", "da", "b", "$fa$a$f", "$f$c$f$a$c", "c", "$aaa"]
+cc 701e4795d0e2531f8089a45c932df77c7324ce6596782025c3584760d365d900 # shrinks to subject = "cbaaaaaab", patterns = ["c", "d", "$c$baaaaaa$baaaaaaaaaa", "$baaaa$b$baaaa"]
+cc 2e75126b2c3ecac64501de98401c44a9515613a299c520c8d2ec26d9e5740530 # shrinks to subject = "ddaaaaaadaaaaaaaaaaaaaad", patterns = ["$aaaaaaaabaaaaaaaaaaaaa$a$a", "$f$f", "$caaaa$caa$c"]
+cc 2bcaf3dc5d289674c79e1c06446f6df9cd9db515a3e9e183e4b6160a0a6c3a81 # shrinks to subject = "aaaaaaaa", patterns = ["aaaaabaaa", "$c$bbaa$b$b"]

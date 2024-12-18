@@ -5,3 +5,5 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 63dc8ea7724f63fcaf492496f54b9387a44419a39f6bf6d23fd77e0f935c374b # shrinks to subject = "aa\n", patterns = [""" """ ]
+cc f7322d486f3d83c582089b880cfcec7d1bec4633637eb492b2e33469410a1b01 # shrinks to subject = "aeaeaa\n", patterns = [""" ----a """ , """ ---a$a a-a--$a-$a """ , """ -e-e-aa """ , """ ----b $f$faa """ ]
+cc 6cde079787306da161d5722efb332b146492c64e5a92470a39cd9bb1ffe1ece8 # shrinks to subject = "", patterns = [""" """ , """ -   a """ , """ -   a- """ ]

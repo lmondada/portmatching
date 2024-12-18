@@ -53,8 +53,7 @@ pub(crate) mod tests {
         }
 
         fn fmt_nth_constraint(&self, n: usize) -> String {
-            let pred = &self.predicates()[n];
-            match pred {
+            match self.predicates()[n] {
                 TestPredicate::AreEqualOne => "==".to_string(),
                 TestPredicate::NotEqualOne => "!=".to_string(),
                 TestPredicate::AreEqualTwo => "==".to_string(),

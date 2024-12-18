@@ -43,10 +43,6 @@ pub(super) trait GraphView<K: IndexKey, B> {
         &self.node_weight(state).matches
     }
 
-    fn is_deterministic(&self, state: StateID) -> bool {
-        self.node_weight(state).deterministic
-    }
-
     /// The start state of a transition
     fn parent(&self, transition: TransitionID) -> StateID {
         self.underlying_graph()
