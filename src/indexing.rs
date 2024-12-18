@@ -180,6 +180,17 @@ impl<VRef> Binding<VRef> {
             Binding::Unbound => Binding::Unbound,
         }
     }
+
+    pub fn copied<V: Copy>(&self) -> Binding<V>
+    where
+        VRef: Borrow<V>,
+    {
+        match self {
+            Binding::Bound(v) => Binding::Bound(*v.borrow()),
+            Binding::Failed => Binding::Failed,
+            Binding::Unbound => Binding::Unbound,
+        }
+    }
 }
 
 impl<V> Binding<V> {

@@ -20,7 +20,12 @@ mod predicate;
 #[cfg(feature = "proptest")]
 mod proptest;
 
-use std::{borrow::Borrow, cmp, collections::BTreeSet, fmt::Debug};
+use std::{
+    borrow::Borrow,
+    cmp,
+    collections::{BTreeMap, BTreeSet},
+    fmt::Debug,
+};
 
 use derive_more::{From, Into};
 use itertools::Itertools;
@@ -71,102 +76,10 @@ pub type StringNaiveManyMatcher = NaiveManyMatcher<StringPatternPosition, Branch
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StringIndexingScheme;
 
-/// A map for string positions.
-///
-/// Only store the position of the start of the match, compute other positions by
-/// adding offsets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
-pub struct StringPositionMap {
-    /// The position of the start of the pattern in the string
-    ///
-    /// None if it is unbound.
-    start_pos: Option<StringSubjectPosition>,
-    /// The length of the substring matched so far
-    str_len: usize,
-    /// The offset from which bindings have failed
-    failed_pos: Option<usize>,
-}
-
-impl StringPositionMap {
-    fn start_pos(&self) -> Option<StringSubjectPosition> {
-        self.start_pos
-    }
-
-    fn is_unbound(&self) -> bool {
-        self.start_pos.is_none()
-    }
-}
-
-impl BindMap for StringPositionMap {
-    type Key = StringPatternPosition;
-    type Value = StringSubjectPosition;
-
-    fn get_binding(&self, var: &Self::Key) -> Binding<impl Borrow<Self::Value> + '_> {
-        let &Self {
-            start_pos,
-            str_len,
-            failed_pos,
-        } = self;
-        let &StringPatternPosition(key) = var;
-
-        if failed_pos.is_some() && key >= failed_pos.unwrap() {
-            return Binding::Failed;
-        } else if key >= str_len {
-            return Binding::Unbound;
-        }
-        let Some(start_pos) = start_pos else {
-            return Binding::Unbound;
-        };
-        Binding::Bound(StringSubjectPosition(start_pos.0 + key))
-    }
-
-    fn bind(&mut self, var: Self::Key, val: Self::Value) -> Result<(), BindVariableError> {
-        let StringPatternPosition(key) = var;
-        if key == 0 {
-            if let Some(start_pos) = self.start_pos() {
-                return Err(BindVariableError::VariableExists {
-                    key: key.to_string(),
-                    curr_value: format!("{:?}", start_pos),
-                    new_value: format!("{:?}", val),
-                });
-            } else {
-                *self = Self {
-                    start_pos: Some(val),
-                    str_len: 1,
-                    failed_pos: None,
-                };
-            }
-        } else if self.is_unbound() {
-            return Err(BindVariableError::InvalidKey {
-                key: key.to_string(),
-            });
-        }
-
-        let Self { str_len, .. } = self;
-        *str_len = cmp::max(*str_len, key + 1);
-        Ok(())
-    }
-
-    fn bind_failed(&mut self, var: Self::Key) {
-        let StringPatternPosition(key) = var;
-        let Self { failed_pos, .. } = self;
-        if let Some(failed_pos) = failed_pos.as_mut() {
-            *failed_pos = cmp::min(*failed_pos, key);
-        } else {
-            *failed_pos = Some(key);
-        }
-        assert!(self.failed_pos.unwrap() >= self.str_len)
-    }
-
-    fn retain_keys(&mut self, keys: &BTreeSet<Self::Key>) {
-        let max_retain_pos = keys.iter().map(|&StringPatternPosition(pos)| pos).max();
-        let retain_len = max_retain_pos.unwrap_or_default() + 1;
-        self.str_len = cmp::min(self.str_len, retain_len);
-    }
-}
+type StringBindMap = BTreeMap<StringPatternPosition, Option<StringSubjectPosition>>;
 
 impl IndexingScheme for StringIndexingScheme {
-    type BindMap = StringPositionMap;
+    type BindMap = StringBindMap;
     type Key = StringPatternPosition;
     type Value = StringSubjectPosition;
 
@@ -201,7 +114,10 @@ impl IndexedData<StringPatternPosition> for String {
         } else {
             // Must bind the start position first; all other positions are
             // obtained by offsetting from start
-            let Some(StringSubjectPosition(start_pos)) = known_bindings.start_pos() else {
+            let Binding::Bound(StringSubjectPosition(start_pos)) = known_bindings
+                .get_binding(&StringPatternPosition::start())
+                .copied()
+            else {
                 return vec![];
             };
 
@@ -323,10 +239,7 @@ pub(super) mod tests {
 
         let result = matcher.find_matches(&"ab".to_string()).collect_vec();
 
-        assert_eq!(
-            result,
-            [(PatternID(0), StringPositionMap::default()).into()]
-        );
+        assert_eq!(result, [(PatternID(0), BTreeMap::default()).into()]);
     }
 
     #[test]
@@ -352,7 +265,7 @@ pub(super) mod tests {
     pub(super) fn apply_all_matchers(
         patterns: Vec<StringPattern>,
         subject: &str,
-    ) -> impl Iterator<Item = Vec<PatternMatch<StringPositionMap>>> + '_ {
+    ) -> impl Iterator<Item = Vec<PatternMatch<StringBindMap>>> + '_ {
         MATCHER_FACTORIES.iter().map(move |matcher_factory| {
             let matcher = matcher_factory(patterns.clone());
             // if let Matcher::Many(m) = &matcher {
@@ -360,14 +273,6 @@ pub(super) mod tests {
             // }
             matcher.find_matches(&subject.to_string()).collect_vec()
         })
-    }
-
-    /// Do not compare failed_pos
-    pub(super) fn clean_match_data(matches: &mut [PatternMatch<StringPositionMap>]) {
-        matches.iter_mut().for_each(|m| {
-            let data = &mut m.match_data;
-            data.failed_pos = None;
-        });
     }
 
     #[rstest]
@@ -457,9 +362,6 @@ pub(super) mod tests {
         // Compare results up to reordering
         default.sort();
         naive.sort();
-
-        clean_match_data(&mut default);
-        clean_match_data(&mut naive);
 
         assert_eq!(default, naive);
     }

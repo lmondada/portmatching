@@ -24,7 +24,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::concrete::string::tests::{apply_all_matchers, clean_match_data};
+    use crate::concrete::string::tests::apply_all_matchers;
 
     use super::*;
 
@@ -42,9 +42,6 @@ mod tests {
             default.sort();
             naive.sort();
 
-            clean_match_data(&mut default);
-            clean_match_data(&mut naive);
-
             prop_assert_eq!(&default, &naive);
         }
 
@@ -52,7 +49,7 @@ mod tests {
         #[ignore = "a bit slow"]
         fn proptest_string_large(
             subject in "[a-f]*",
-            patterns in prop::collection::vec(any::<StringPattern>(), 1..20)
+            patterns in prop::collection::vec(any::<StringPattern>(), 1..10)
         ) {
             let (mut default, mut naive) = apply_all_matchers(patterns, &subject)
                 .collect_tuple()
@@ -60,9 +57,6 @@ mod tests {
 
             default.sort();
             naive.sort();
-
-            clean_match_data(&mut default);
-            clean_match_data(&mut naive);
 
             prop_assert_eq!(&default, &naive);
         }

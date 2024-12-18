@@ -5,7 +5,7 @@
 //! matches are possible.
 use std::{
     borrow::Borrow,
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug},
 };
 
@@ -78,101 +78,7 @@ impl Predicate<MatrixString, MatrixSubjectPosition> for CharacterPredicate {
     }
 }
 
-/// A map for matrix positions.
-///
-/// Only store the position of the start of the match, compute other positions by
-/// adding row & column offsets.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
-pub struct MatrixPositionMap {
-    /// The position of the start of the pattern in the string
-    ///
-    /// None if no variable has been bound yet.
-    start_pos: Option<MatrixSubjectPosition>,
-    /// The interval matched so far, inclusive (start)
-    ///
-    /// If `start_pos` is `None`, then this is (0, 0) and is meaningless.
-    min_pos: MatrixPatternPosition,
-    /// The interval matched so far, inclusive (end)
-    ///
-    /// If `start_pos` is `None`, then this is (0, 0) and is meaningless.
-    max_pos: MatrixPatternPosition,
-
-    /// A set of positions that we have failed to bind
-    failed_bindings: BTreeSet<MatrixPatternPosition>,
-}
-
-impl MatrixPositionMap {
-    fn start_pos(&self) -> Option<MatrixSubjectPosition> {
-        self.start_pos
-    }
-
-    fn is_unbound(&self) -> bool {
-        self.start_pos.is_none()
-    }
-}
-
-impl BindMap for MatrixPositionMap {
-    type Key = MatrixPatternPosition;
-    type Value = MatrixSubjectPosition;
-
-    fn get_binding(&self, var: &Self::Key) -> Binding<impl Borrow<Self::Value> + '_> {
-        let Self {
-            start_pos,
-            min_pos,
-            max_pos,
-            failed_bindings,
-        } = self;
-        if failed_bindings.contains(var) {
-            return Binding::Failed;
-        }
-        let Some(start_pos) = start_pos else {
-            return Binding::Unbound;
-        };
-        let &MatrixPatternPosition(key_row, key_col) = var;
-        if key_row < min_pos.0 || key_row > max_pos.0 || key_col < min_pos.1 || key_col > max_pos.1
-        {
-            return Binding::Unbound;
-        }
-        Binding::Bound(MatrixSubjectPosition(
-            start_pos.0.checked_add_signed(key_row).unwrap(),
-            start_pos.1.checked_add_signed(key_col).unwrap(),
-        ))
-    }
-
-    fn bind(&mut self, var: Self::Key, val: Self::Value) -> Result<(), BindVariableError> {
-        let MatrixPatternPosition(key_row, key_col) = var;
-        if key_row == 0 && key_col == 0 {
-            if let Some(MatrixSubjectPosition(start_row, start_col)) = self.start_pos() {
-                return Err(BindVariableError::VariableExists {
-                    key: format!("{:?}", var),
-                    curr_value: format!("({}, {})", start_row, start_col),
-                    new_value: format!("{:?}", val),
-                });
-            } else {
-                self.start_pos = Some(val);
-            }
-        } else if self.is_unbound() {
-            return Err(BindVariableError::InvalidKey {
-                key: format!("{:?}", var),
-            });
-        }
-
-        let Self {
-            min_pos, max_pos, ..
-        } = self;
-
-        *min_pos = min_pos.cwise_min(&var);
-        *max_pos = max_pos.cwise_max(&var);
-        Ok(())
-    }
-
-    fn bind_failed(&mut self, var: Self::Key) {
-        let Self {
-            failed_bindings, ..
-        } = self;
-        failed_bindings.insert(var);
-    }
-}
+type MatrixBindMap = BTreeMap<MatrixPatternPosition, Option<MatrixSubjectPosition>>;
 
 /// Simple indexing schemes for matrices.
 ///
@@ -181,7 +87,7 @@ impl BindMap for MatrixPositionMap {
 pub struct MatrixIndexingScheme;
 
 impl IndexingScheme for MatrixIndexingScheme {
-    type BindMap = MatrixPositionMap;
+    type BindMap = MatrixBindMap;
     type Key = <Self::BindMap as BindMap>::Key;
     type Value = <Self::BindMap as BindMap>::Value;
 
@@ -206,13 +112,13 @@ impl IndexedData<MatrixPatternPosition> for MatrixString {
     fn list_bind_options(
         &self,
         key: &MatrixPatternPosition,
-        known_bindings: &MatrixPositionMap,
+        known_bindings: &MatrixBindMap,
     ) -> Vec<MatrixSubjectPosition> {
         let &MatrixPatternPosition(key_row, key_col) = key;
 
         if key_row == 0 && key_col == 0 {
             // No key has been bound yet
-            assert!(known_bindings.is_unbound());
+            assert!(known_bindings.is_empty());
 
             // For the root binding, any matrix position is valid
             (0..self.rows.len())
@@ -222,7 +128,9 @@ impl IndexedData<MatrixPatternPosition> for MatrixString {
         } else {
             // Must bind the start position first; all other positions are
             // obtained by offsetting from start
-            let Some(MatrixSubjectPosition(start_row, start_col)) = known_bindings.start_pos()
+            let Binding::Bound(&MatrixSubjectPosition(start_row, start_col)) = known_bindings
+                .get_binding(&MatrixPatternPosition::default())
+                .borrowed()
             else {
                 return vec![];
             };
@@ -305,7 +213,7 @@ mod tests {
     pub(super) fn apply_all_matchers(
         patterns: Vec<MatrixPattern>,
         subject: &MatrixString,
-    ) -> [Vec<PatternMatch<MatrixPositionMap>>; 2] {
+    ) -> [Vec<PatternMatch<MatrixBindMap>>; 2] {
         // Skip the all deterministic matcher, too slow
         let all_matches = MATCHER_FACTORIES
             .iter()
@@ -323,13 +231,16 @@ mod tests {
     /// Do not compare min_pos and max_pos, as more than the pattern might have
     /// been matched
     pub(super) fn get_start_pos(
-        matches: &[PatternMatch<MatrixPositionMap>],
-    ) -> Vec<(PatternID, Option<MatrixSubjectPosition>)> {
+        matches: &[PatternMatch<MatrixBindMap>],
+    ) -> Vec<(PatternID, Binding<MatrixSubjectPosition>)> {
         matches
             .iter()
             .map(|m| {
                 let data = &m.match_data;
-                (m.pattern, data.start_pos)
+                (
+                    m.pattern,
+                    data.get_binding(&MatrixPatternPosition::start()).copied(),
+                )
             })
             .collect()
     }
