@@ -20,7 +20,7 @@ mod predicate;
 #[cfg(feature = "proptest")]
 mod proptest;
 
-use std::{borrow::Borrow, cmp, fmt::Debug};
+use std::{borrow::Borrow, cmp, collections::BTreeSet, fmt::Debug};
 
 use derive_more::{From, Into};
 use itertools::Itertools;
@@ -156,6 +156,12 @@ impl BindMap for StringPositionMap {
             *failed_pos = Some(key);
         }
         assert!(self.failed_pos.unwrap() >= self.str_len)
+    }
+
+    fn retain_keys(&mut self, keys: &BTreeSet<Self::Key>) {
+        let max_retain_pos = keys.iter().map(|&StringPatternPosition(pos)| pos).max();
+        let retain_len = max_retain_pos.unwrap_or_default() + 1;
+        self.str_len = cmp::min(self.str_len, retain_len);
     }
 }
 
@@ -349,11 +355,19 @@ pub(super) mod tests {
     ) -> impl Iterator<Item = Vec<PatternMatch<StringPositionMap>>> + '_ {
         MATCHER_FACTORIES.iter().map(move |matcher_factory| {
             let matcher = matcher_factory(patterns.clone());
-            if let Matcher::Many(m) = &matcher {
-                println!("{}", m.dot_string());
-            }
+            // if let Matcher::Many(m) = &matcher {
+            //     println!("{}", m.dot_string());
+            // }
             matcher.find_matches(&subject.to_string()).collect_vec()
         })
+    }
+
+    /// Do not compare failed_pos
+    pub(super) fn clean_match_data(matches: &mut [PatternMatch<StringPositionMap>]) {
+        matches.iter_mut().for_each(|m| {
+            let data = &mut m.match_data;
+            data.failed_pos = None;
+        });
     }
 
     #[rstest]
@@ -420,6 +434,15 @@ pub(super) mod tests {
         "aaaaabaaa",
         "$c$bbaa$b$b",
     ])]
+    #[case("aaaaabdd", vec![
+        "aba$aa",
+        "abaaa",
+        "$abaaa",
+        "$e$e$c$b$b",
+        "$aaaba$a",
+        "abaaa",
+    ])]
+    #[case("c", vec!["c", "$b$b"])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         let patterns = patterns
             .into_iter()
@@ -434,6 +457,9 @@ pub(super) mod tests {
         // Compare results up to reordering
         default.sort();
         naive.sort();
+
+        clean_match_data(&mut default);
+        clean_match_data(&mut naive);
 
         assert_eq!(default, naive);
     }

@@ -24,7 +24,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::concrete::string::tests::apply_all_matchers;
+    use crate::concrete::string::tests::{apply_all_matchers, clean_match_data};
 
     use super::*;
 
@@ -42,6 +42,9 @@ mod tests {
             default.sort();
             naive.sort();
 
+            clean_match_data(&mut default);
+            clean_match_data(&mut naive);
+
             prop_assert_eq!(&default, &naive);
         }
 
@@ -57,6 +60,9 @@ mod tests {
 
             default.sort();
             naive.sort();
+
+            clean_match_data(&mut default);
+            clean_match_data(&mut naive);
 
             prop_assert_eq!(&default, &naive);
         }

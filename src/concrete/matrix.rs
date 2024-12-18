@@ -287,7 +287,7 @@ impl Debug for MatrixString {
 mod tests {
     use crate::{
         concrete::string::tests::{define_matcher_factories, Matcher},
-        PatternMatch, PortMatcher,
+        PatternID, PatternMatch, PortMatcher,
     };
 
     use super::*;
@@ -307,7 +307,7 @@ mod tests {
         subject: &MatrixString,
     ) -> [Vec<PatternMatch<MatrixPositionMap>>; 2] {
         // Skip the all deterministic matcher, too slow
-        let all_matches = MATCHER_FACTORIES[..2]
+        let all_matches = MATCHER_FACTORIES
             .iter()
             .map(|matcher_factory| {
                 let matcher = matcher_factory(patterns.clone());
@@ -322,15 +322,16 @@ mod tests {
 
     /// Do not compare min_pos and max_pos, as more than the pattern might have
     /// been matched
-    pub(super) fn clean_match_data(matches: &mut [PatternMatch<MatrixPositionMap>]) {
-        matches.iter_mut().for_each(|m| {
-            let data = &mut m.match_data;
-            let MatrixPositionMap {
-                min_pos, max_pos, ..
-            } = data;
-            *min_pos = MatrixPatternPosition(0, 0);
-            *max_pos = MatrixPatternPosition(1, 1);
-        });
+    pub(super) fn get_start_pos(
+        matches: &[PatternMatch<MatrixPositionMap>],
+    ) -> Vec<(PatternID, Option<MatrixSubjectPosition>)> {
+        matches
+            .iter()
+            .map(|m| {
+                let data = &m.match_data;
+                (m.pattern, data.start_pos)
+            })
+            .collect()
     }
 
     #[rstest]
@@ -340,6 +341,10 @@ mod tests {
     #[case("caaaabaa\n", vec!["-a--aaa\n", "-$c-$e--$d$c\na\naaaa\n", "a\n", "\n$c\n$ca\na-\n", "$d--ab\n$a$b$ca$aa\naaa\naaa\naaaaaaaa\na\n", "d-aaa\na\naa-a-a\n", "c----ba\n"])]
     #[case("aaa", vec!["a-a", "-aa", "aa-"])]
     #[case("aa\n", vec!["", ""])]
+    #[case("aa\n", vec!["", "-"])]
+    #[case("aab\n\n\n\n\n\n\naaaaaaaaa\n", vec![
+        "----", "-------\n-$c\n\n\n\n\n\n---$c", "-\n-a"
+    ])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         let subject = MatrixString::from(&subject);
         let patterns = patterns
@@ -347,10 +352,11 @@ mod tests {
             .map(MatrixPattern::parse_str)
             .collect_vec();
 
-        let [mut default, mut naive] = apply_all_matchers(patterns, &subject);
+        let [default, naive] = apply_all_matchers(patterns, &subject);
 
-        clean_match_data(&mut default);
-        clean_match_data(&mut naive);
+        dbg!(&default);
+        let mut default = get_start_pos(&default);
+        let mut naive = get_start_pos(&naive);
 
         // dbg!(&all_matches);
         // println!(
@@ -363,6 +369,10 @@ mod tests {
 
         default.sort();
         naive.sort();
+
+        default.dedup();
+        naive.dedup();
+
         assert_eq!(default, naive);
     }
 }

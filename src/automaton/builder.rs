@@ -171,9 +171,6 @@ where
             if patterns.is_empty() {
                 continue;
             }
-            if state == StateID(11.into()) {
-                println!("interest");
-            }
 
             // 1. Vote: get the branch class that makes us progress the most
             let cls = select_best_class(patterns.iter().map(|(_, p)| p)).unwrap();
