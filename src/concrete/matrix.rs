@@ -128,11 +128,17 @@ impl IndexedData<MatrixPatternPosition> for MatrixString {
         } else {
             // Must bind the start position first; all other positions are
             // obtained by offsetting from start
-            let Binding::Bound(&MatrixSubjectPosition(start_row, start_col)) = known_bindings
+            let (start_row, start_col) = match known_bindings
                 .get_binding(&MatrixPatternPosition::default())
                 .borrowed()
-            else {
-                return vec![];
+            {
+                Binding::Bound(&MatrixSubjectPosition(start_row, start_col)) => {
+                    (start_row, start_col)
+                }
+                Binding::Failed => return vec![],
+                Binding::Unbound => {
+                    panic!("root binding not found. Always bind the start position first");
+                }
             };
 
             let Some(new_row) = start_row.checked_add_signed(key_row) else {
@@ -247,6 +253,9 @@ mod tests {
     #[case("aa\n", vec!["", "-"])]
     #[case("aab\n\n\n\n\n\n\naaaaaaaaa\n", vec![
         "----", "-------\n-$c\n\n\n\n\n\n---$c", "-\n-a"
+    ])]
+    #[case("aaaaac\naaaaaafa\n\n\n\naaaaaaaaaaa\n", vec![
+        "\n$a--a$a\n\n\n\n$a", "--ca-\nb--fa"
     ])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         let subject = MatrixString::from(&subject);

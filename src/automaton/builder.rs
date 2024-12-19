@@ -258,15 +258,18 @@ where
             let state = StateID(node);
 
             // The max_scope is the union of:
-            // 1. the required bindings at the state
-            let mut max_scope = BTreeSet::from_iter(self.required_bindings(state));
+            // 1. The min_scope of the state
+            let mut max_scope = BTreeSet::from_iter(self.min_scope(state).iter().copied());
 
-            // 2. The keys required for any of the state's matches
+            // 2. the required bindings at the state
+            max_scope.extend(self.required_bindings(state));
+
+            // 3. The keys required for any of the state's matches
             for keys in self.matches(state).values() {
                 max_scope.extend(keys);
             }
 
-            // 3. The max_scopes of any of the state's children
+            // 4. The max_scopes of any of the state's children
             for child in self.children(state) {
                 max_scope.extend(self.max_scope(child));
             }
