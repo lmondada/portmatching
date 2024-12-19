@@ -342,6 +342,17 @@ pub(super) mod tests {
         "abaaa",
     ])]
     #[case("c", vec!["c", "$b$b"])]
+    #[case("fdcefbaaaeeaecaffdf", vec![
+        "$ca$c$de$d$e$ba$aceb$abdf$f$a$c$e",
+        "d$d$dc$cea$e$b$a$bfeef$a$c$cfae$b$bbce$c$ad$e$a",
+        "$de$efd$a$cacbc$e$cd$b$a$aae$e$df$b$fdc$f$e$ce$f$d",
+        "$c$c$ca$f$ea$a",
+        "bfcca$aaf$c$d$d$d$c$d$fe$dc$f",
+        "e$ecc$b$d$f$d$dde$ff",
+        "a$d$d$e$faee$dfd$ebd",
+        "$aa$b$afa$e$b$de$bdbbc$bed$bcf$b$d",
+        "$e$b$bcc$ee$e$cc$ed$f$c$a$d$a$e$b$bc$f",
+    ])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         let patterns = patterns
             .into_iter()
