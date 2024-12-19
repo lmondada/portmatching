@@ -110,28 +110,22 @@ impl<P, K: Ord, B> AutomatonBuilder<P, K, B> {
 
 #[cfg(test)]
 pub mod tests {
-    
-    use petgraph::acyclic::Acyclic;
-    
+    // use crate::{
+    //     automaton::{tests::TestAutomaton, AutomatonBuilder},
+    //     branch_selector::tests::TestBranchSelector,
+    //     predicate::tests::{TestKey, TestPattern},
+    // };
 
-    use crate::{
-        automaton::{tests::TestAutomaton, AutomatonBuilder},
-        branch_selector::tests::TestBranchSelector,
-        predicate::tests::{TestKey, TestPattern},
-    };
+    // pub type TestAutomatonBuilder = AutomatonBuilder<TestPattern, TestKey, TestBranchSelector>;
 
-    
-
-    pub type TestAutomatonBuilder = AutomatonBuilder<TestPattern, TestKey, TestBranchSelector>;
-
-    impl TestAutomatonBuilder {
-        pub(crate) fn from_matcher(automaton: TestAutomaton) -> TestAutomatonBuilder {
-            let TestAutomaton { graph, root } = automaton;
-            Self {
-                graph: Acyclic::try_from_graph(graph).unwrap(),
-                root,
-                ..Default::default()
-            }
-        }
-    }
+    // impl TestAutomatonBuilder {
+    //     pub(crate) fn from_matcher(automaton: TestAutomaton) -> TestAutomatonBuilder {
+    //         let TestAutomaton { graph, root } = automaton;
+    //         Self {
+    //             graph: Acyclic::try_from_graph(graph).unwrap(),
+    //             root,
+    //             ..Default::default()
+    //         }
+    //     }
+    // }
 }

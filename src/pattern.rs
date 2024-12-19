@@ -11,18 +11,24 @@ use std::collections::BTreeSet;
 
 use crate::indexing::IndexKey;
 
+/// A rank value used to prioritize branch classes.
+///
+/// Lower is better.
 pub type ClassRank = f64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Represents whether a pattern or constraint is satisfiable
 pub enum Satisfiable<P = ()> {
-    /// The pattern is satisfiable.
+    /// The pattern or constraint is satisfiable
     Yes(P),
-    /// The pattern is not satisfiable.
+    /// The pattern or constraint is not satisfiable
     No,
-    /// The pattern is a tautology (i.e. is always satisifed).
+    /// The pattern or constraint is a tautology (i.e. is always satisifed).
     Tautology,
 }
 
+#[derive(Debug, Clone)]
+/// Represents a selection of predicates for pattern matching
 pub enum PredicateSelection<P> {
     /// All predicates in the class may imply the pattern.
     All,
@@ -36,7 +42,7 @@ pub trait Pattern {
     type Key: IndexKey;
     /// The predicate evaluatation logic.
     type Logic: PatternLogic<Constraint = Self::Constraint>;
-
+    /// The type of constraints used in the pattern logic.
     type Constraint;
 
     /// List of required bindings to match the pattern.

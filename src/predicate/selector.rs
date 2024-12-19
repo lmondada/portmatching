@@ -11,9 +11,16 @@ use crate::{
 use super::{ConstraintLogic, Predicate};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// A default selector for predicate-based patterns.
+///
+/// This selector is non-deterministic, meaning it will return all constraints
+/// that match.
 pub struct PredicatePatternDefaultSelector<K, P>(InnerSelector<K, P>);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// A deterministic selector for predicate-based patterns.
+///
+/// This selector will return only the first constraint that matches.
 pub struct DeterministicPredicatePatternSelector<K, P>(InnerSelector<K, P>);
 
 /// A helper struct to implement [`PredicatePatternDefaultSelector`] and
@@ -36,6 +43,9 @@ struct InnerSelector<K, P> {
 }
 
 impl<K: IndexKey, P: Clone> PredicatePatternDefaultSelector<K, P> {
+    /// Create a new selector from a set of constraints.
+    ///
+    /// The constraints are used to initialize the selector.
     pub fn from_constraints<'c>(constraints: impl IntoIterator<Item = &'c Constraint<K, P>>) -> Self
     where
         Constraint<K, P>: 'c,
@@ -45,18 +55,28 @@ impl<K: IndexKey, P: Clone> PredicatePatternDefaultSelector<K, P> {
 
     delegate! {
         to self.0 {
+            /// Get the keys at a given position.
+            ///
+            /// The position is used to index into the `binding_indices` vector.
             pub fn keys(&self, pos: usize) -> Vec<K>;
 
+            /// Get the branch class for this selector.
+            ///
+            /// The branch class is determined by the predicates in the selector.
             pub fn get_class(&self) -> Option<P::BranchClass>
             where
                 P: ConstraintLogic<K>;
 
+            /// Get the predicates in this selector.
+            ///
+            /// The predicates are stored in the `predicates` vector.
             pub fn predicates(&self) -> &[P];
         }
     }
 }
 
 impl<K: IndexKey, P: Clone> DeterministicPredicatePatternSelector<K, P> {
+    /// Create a new selector from a set of constraints.
     pub fn from_constraints<'c>(constraints: impl IntoIterator<Item = &'c Constraint<K, P>>) -> Self
     where
         Constraint<K, P>: 'c,
@@ -66,12 +86,21 @@ impl<K: IndexKey, P: Clone> DeterministicPredicatePatternSelector<K, P> {
 
     delegate! {
         to self.0 {
+            /// Get the keys at a given position.
+            ///
+            /// The position is used to index into the `binding_indices` vector.
             pub fn keys(&self, pos: usize) -> Vec<K>;
 
+            /// Get the branch class for this selector.
+            ///
+            /// The branch class is determined by the predicates in the selector.
             pub fn get_class(&self) -> Option<P::BranchClass>
             where
                 P: ConstraintLogic<K>;
 
+            /// Get the predicates in this selector.
+            ///
+            /// The predicates are stored in the `predicates` vector.
             pub fn predicates(&self) -> &[P];
         }
     }

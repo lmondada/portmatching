@@ -54,8 +54,10 @@ impl Predicate<String, StringSubjectPosition> for CharacterPredicate {
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
+/// Branch classes for string pattern matching
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BranchClass<K> {
+    /// A constraint on a position of the input string
     Position(K),
 }
 

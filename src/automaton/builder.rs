@@ -84,11 +84,6 @@ impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
             ..Self::new()
         }
     }
-
-    /// Get the root of the automaton.
-    pub(super) fn root(&self) -> StateID {
-        self.root
-    }
 }
 
 /// State of the builder at one particular state in the graph
@@ -380,10 +375,6 @@ fn partition_completed_patterns<P: PatternLogic>(
         .partition(|(_, p)| matches!(p.is_satisfiable(), Satisfiable::Tautology))
 }
 
-fn drop_impossible_patterns<P: PatternLogic>(patterns: &mut BTreeSet<(PatternID, P)>) {
-    patterns.retain(|(_, p)| !matches!(p.is_satisfiable(), Satisfiable::No))
-}
-
 impl<P, K: IndexKey, B> Default for AutomatonBuilder<P, K, B> {
     fn default() -> Self {
         Self::new()
@@ -398,7 +389,6 @@ impl<PT: Pattern, B> FromIterator<PT> for AutomatonBuilder<PT::Logic, PT::Key, B
 
 #[cfg(test)]
 pub(super) mod tests {
-    
 
     use crate::{
         branch_selector::tests::TestBranchSelector,
@@ -413,6 +403,7 @@ pub(super) mod tests {
     use super::*;
 
     impl<P, B, K: Ord> AutomatonBuilder<P, K, B> {
+        #[allow(unused)]
         pub(crate) fn into_matcher(self) -> ConstraintAutomaton<K, B> {
             ConstraintAutomaton {
                 graph: self.graph.into_inner(),
@@ -422,6 +413,7 @@ pub(super) mod tests {
     }
 
     impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
+        #[allow(unused)]
         pub(crate) fn wrap_builder<P: PatternLogic>(
             self,
             with_builder: impl Fn(&mut AutomatonBuilder<P, K, B>),

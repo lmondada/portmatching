@@ -163,14 +163,6 @@ impl MatrixPatternPosition {
     pub fn start() -> Self {
         Self(0, 0)
     }
-
-    fn cwise_max(&self, other: &Self) -> Self {
-        Self(self.0.max(other.0), self.1.max(other.1))
-    }
-
-    fn cwise_min(&self, other: &Self) -> Self {
-        Self(self.0.min(other.0), self.1.min(other.1))
-    }
 }
 
 impl Debug for MatrixPatternPosition {

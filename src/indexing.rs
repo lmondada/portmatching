@@ -31,7 +31,9 @@ pub trait IndexingScheme {
     /// The index key - value map used to store index bindings.
     type BindMap: BindMap<Key = Self::Key, Value = Self::Value>;
 
+    /// The key type used for indexing
     type Key: IndexKey;
+    /// The value type associated with indexed items
     type Value: IndexValue;
 
     /// List required bindings for an index key.
@@ -108,8 +110,9 @@ pub trait IndexingScheme {
 pub trait IndexedData<K: IndexKey> {
     /// The indexing scheme used to access the data.
     type IndexingScheme: IndexingScheme<BindMap = Self::BindMap, Key = K, Value = Self::Value>;
-
+    /// The value type that bindings resolve to
     type Value: IndexValue;
+    /// The map used to store key-to-value bindings
     type BindMap: BindMap<Key = K, Value = Self::Value>;
 
     /// List all valid bindings for an index key.
@@ -160,16 +163,21 @@ pub trait IndexedData<K: IndexKey> {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+/// The result of getting the binding for a key
 pub enum Binding<V> {
-    /// Variable bound to a value
+    /// Key is bound to a specific value
     Bound(V),
-    /// Variable unable to be bound
-    Failed,
-    /// Variable not yet bound
+    /// No value has been assigned to the key yet.
     Unbound,
+    /// A previous attempt at binding this key was unsuccessful.
+    Failed,
 }
 
 impl<VRef> Binding<VRef> {
+    /// Create a new Binding by borrowing the inner value
+    ///
+    /// # Arguments
+    /// * `v` - The value to borrow
     pub fn borrowed<V>(&self) -> Binding<&V>
     where
         VRef: Borrow<V>,
@@ -181,6 +189,7 @@ impl<VRef> Binding<VRef> {
         }
     }
 
+    /// Create a new Binding by copying the inner value
     pub fn copied<V: Copy>(&self) -> Binding<V>
     where
         VRef: Borrow<V>,
@@ -194,18 +203,22 @@ impl<VRef> Binding<VRef> {
 }
 
 impl<V> Binding<V> {
+    /// Whether this binding is in the Unbound state
     pub fn is_unbound(&self) -> bool {
         matches!(self, Binding::Unbound)
     }
 
+    /// Whether this binding is in the Failed state
     pub fn is_failed(&self) -> bool {
         matches!(self, Binding::Failed)
     }
 
+    /// Whether this binding is in the Bound state
     pub fn is_bound(&self) -> bool {
         matches!(self, Binding::Bound(_))
     }
 
+    /// A reference to the bound value if this binding is Bound
     pub fn as_ref(&self) -> Binding<&V> {
         match self {
             Binding::Bound(v) => Binding::Bound(v),
@@ -214,6 +227,10 @@ impl<V> Binding<V> {
         }
     }
 
+    /// Map a function over the bound value if this binding is Bound
+    ///
+    /// # Arguments
+    /// * `f` - The function to apply to the bound value
     pub fn map<U>(self, f: impl FnOnce(V) -> U) -> Binding<U> {
         match self {
             Binding::Bound(v) => Binding::Bound(f(v)),
@@ -225,9 +242,9 @@ impl<V> Binding<V> {
 
 /// A map-like trait for index key-value bindings.
 pub trait BindMap: Default + Clone {
-    /// Index keys used to access the data.
+    /// The key type used for binding
     type Key: IndexKey;
-    /// Values of the indexed data.
+    /// The value type that can be bound to keys
     type Value: IndexValue;
 
     /// Lookup a binding for an index key.
@@ -399,7 +416,7 @@ pub(crate) mod tests {
 
         type Value = usize;
 
-        fn required_bindings(&self, key: &Self::Key) -> Vec<Self::Key> {
+        fn required_bindings(&self, _: &Self::Key) -> Vec<Self::Key> {
             vec![]
         }
     }
@@ -424,11 +441,7 @@ pub(crate) mod tests {
         type Value = <Self::IndexingScheme as IndexingScheme>::Value;
         type BindMap = <Self::IndexingScheme as IndexingScheme>::BindMap;
 
-        fn list_bind_options(
-            &self,
-            key: &TestKey,
-            known_bindings: &Self::BindMap,
-        ) -> Vec<Self::Value> {
+        fn list_bind_options(&self, key: &TestKey, _: &Self::BindMap) -> Vec<Self::Value> {
             let key_suffix: usize = key[3..].parse().unwrap_or(0);
             vec![key_suffix]
         }

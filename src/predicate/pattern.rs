@@ -4,20 +4,17 @@ use derive_more::From;
 use itertools::Itertools;
 
 use crate::{
-    branch_selector::BranchSelector,
     constraint::ConstraintSet,
     indexing::IndexKey,
     pattern::{ClassRank, Pattern, Satisfiable},
     Constraint, PatternLogic,
 };
-use std::{
-    collections::BTreeSet,
-    hash::Hash,
-};
+use std::{collections::BTreeSet, hash::Hash};
 
 use super::ConstraintLogic;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Define the logic for matching patterns using predicates
 pub struct PredicateLogic<K, P> {
     constraints: ConstraintSet<K, P>,
 }
@@ -26,20 +23,14 @@ impl<K, P> PredicateLogic<K, P>
 where
     P: ConstraintLogic<K>,
 {
-    /// Create a predicate pattern from a set of constraints
+    /// Create a new PredicateLogic from a set of constraints
     ///
     /// Every constraint must have a different class, otherwise this will panic.
-    pub fn from_constraints(constraints: impl IntoIterator<Item = Constraint<K, P>>) -> Self
-    where
-        K: Ord,
-    {
-        Self::from_constraints_set(constraints.into_iter().collect())
-    }
-
     pub fn from_constraints_set(constraints: BTreeSet<Constraint<K, P>>) -> Self {
         Self { constraints }
     }
 
+    /// Get all unique branch classes from the constraints
     pub fn all_classes(&self) -> BTreeSet<P::BranchClass> {
         self.constraints
             .iter()
@@ -47,6 +38,10 @@ where
             .collect()
     }
 
+    /// Get constraints that match a specific branch class
+    ///
+    /// # Arguments
+    /// * `cls` - The branch class to match
     pub fn get_by_class<'c>(
         &'c self,
         cls: &'c P::BranchClass,
@@ -56,6 +51,15 @@ where
             .filter(|p| p.get_classes().contains(cls))
     }
 
+    /// Create a new PredicateLogic from an iterator of constraints
+    pub fn from_constraints(constraints: impl IntoIterator<Item = Constraint<K, P>>) -> Self
+    where
+        K: Ord,
+    {
+        Self::from_constraints_set(constraints.into_iter().collect())
+    }
+
+    /// Condition pattern on a set of known constraints
     pub fn conditioned(
         &self,
         known_constraints: &BTreeSet<Constraint<K, P>>,
@@ -94,10 +98,12 @@ where
     P::BranchClass: Hash,
     K: Ord,
 {
+    /// Create a new PredicatePattern from an iterator of constraints
     pub fn from_constraints(constraints: impl IntoIterator<Item = Constraint<K, P>>) -> Self {
         Self(PredicateLogic::from_constraints(constraints))
     }
 
+    /// Create a new PredicatePattern from a set of constraints
     pub fn from_constraints_set(constraints: BTreeSet<Constraint<K, P>>) -> Self {
         Self(PredicateLogic::from_constraints_set(constraints))
     }

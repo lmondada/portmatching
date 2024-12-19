@@ -20,10 +20,7 @@ mod predicate;
 #[cfg(feature = "proptest")]
 mod proptest;
 
-use std::{
-    collections::BTreeMap,
-    fmt::Debug,
-};
+use std::{collections::BTreeMap, fmt::Debug};
 
 use derive_more::{From, Into};
 use itertools::Itertools;
@@ -63,8 +60,9 @@ impl<K: IndexKey> DisplayBranchSelector
     }
 }
 
-/// A matcher for strings.
+/// Default matcher for strings.
 pub type StringManyMatcher = ManyMatcher<StringPattern, StringPatternPosition, BranchSelector>;
+/// A naive matcher for strings.
 pub type StringNaiveManyMatcher = NaiveManyMatcher<StringPatternPosition, BranchSelector>;
 
 /// Simple indexing scheme for strings.
@@ -152,8 +150,6 @@ impl Debug for StringPatternPosition {
 
 #[cfg(test)]
 pub(super) mod tests {
-
-    
 
     use auto_enums::auto_enum;
     use rstest::rstest;

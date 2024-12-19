@@ -2,6 +2,11 @@
 
 use crate::indexing::IndexKey;
 
+/// BranchSelectors are used to evaluate all constraints in a state and choose
+/// which transitions to descend into.
+///
+/// This base trait defines the interface useful both when constructing
+/// branch selectors and when evaluating them.
 pub trait BranchSelector {
     /// The variable type
     type Key: IndexKey;
@@ -10,6 +15,8 @@ pub trait BranchSelector {
     fn required_bindings(&self) -> &[Self::Key];
 }
 
+/// Extend `BranchSelector` with the ability to evaluate data and produce values
+/// of a specific type.
 pub trait EvaluateBranchSelector<Data, Value>: BranchSelector {
     /// Evaluate the branch predicates and return the indices of the selected
     /// branches.
@@ -19,10 +26,17 @@ pub trait EvaluateBranchSelector<Data, Value>: BranchSelector {
     fn eval(&self, bindings: &[Option<Value>], data: &Data) -> Vec<usize>;
 }
 
+/// Extend `BranchSelector` with the ability to be constructed from
+/// a collection of constraints.
 pub trait CreateBranchSelector<C>: BranchSelector + Sized {
+    /// Create a new branch selector from a vector of constraints
+    ///
+    /// # Arguments
+    /// * `constraints` - A vector of constraints used to construct the selector
     fn create_branch_selector(constraints: Vec<C>) -> Self;
 }
 
+/// Extend `BranchSelector` with the ability to be formatted for display.
 pub trait DisplayBranchSelector: BranchSelector {
     /// A string representation of the selector's branch class
     fn fmt_class(&self) -> String;

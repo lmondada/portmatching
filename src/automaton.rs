@@ -68,8 +68,13 @@ impl<K: IndexKey, P> Default for ConstraintAutomaton<K, P> {
     }
 }
 
+/// Configuration for building an automaton
+///
+/// This struct holds configuration parameters used during the automaton construction process.
 #[derive(Clone, Debug, Default)]
 pub struct BuildConfig<I> {
+    /// The indexing scheme to use for the automaton.
+    /// This determines how to index into host data through variable names (keys).
     pub indexing_scheme: I,
 }
 
@@ -208,11 +213,5 @@ impl<K: IndexKey, B> Debug for State<K, B> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{branch_selector::tests::TestBranchSelector, predicate::tests::TestKey};
-
-    use super::ConstraintAutomaton;
-
-    pub(crate) type TestAutomaton = ConstraintAutomaton<TestKey, TestBranchSelector>;
-
     pub(crate) use super::builder::tests::TestBuilder;
 }

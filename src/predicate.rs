@@ -28,24 +28,38 @@ use std::{borrow::Borrow, collections::BTreeSet};
 
 use crate::{constraint::InvalidConstraint, pattern::Satisfiable, Constraint};
 
+/// Define the arity of a predicate
+///
+/// Predicates always operate on a fixed number of arguments, as given by
+/// [`ArityPredicate::arity`].
 pub trait ArityPredicate: Clone + Ord {
+    /// The number of arguments this predicate expects
     fn arity(&self) -> usize;
 }
 
-/// A N-ary predicate evaluated on bindings and subject data.
+/// Evaluate predicates against data and bindings
 ///
-/// A predicate of the form `pred <key1> ... <keyN>`. Given bindings for <key1>
-/// to <keyN>, the predicate checks if it's satisfied on the values.
-///
-/// ## Parameter types
-/// - `Data`: The subject data type on which predicates are evaluated.
+/// Define how predicates are evaluated against concrete data and bindings
+/// to produce boolean results.
 pub trait Predicate<Data, Value>: ArityPredicate {
+    /// Check if this predicate holds for the given bindings and data
+    ///
+    /// # Arguments
+    /// * `bindings` - The bound values to check against
+    /// * `data` - The data context for evaluation
     fn check(&self, bindings: &[impl Borrow<Value>], data: &Data) -> bool;
 }
 
+/// Define the logic of constraints made of predicates
+///
+/// Predicates are used to define constraints, which in turn define
+/// patterns. This trait categorises constraints into classes, as well as how
+/// constraints simplify when conditioned on other constraints.
 pub trait ConstraintLogic<K>: Clone + Ord + Sized {
+    /// Sets of constraints that can be evaluated together form branch classes.
     type BranchClass: Ord;
 
+    /// All classes the constraint made of `self` and `keys` belongs to
     fn get_classes(&self, keys: &[K]) -> Vec<Self::BranchClass>;
 
     /// Compute equivalent constraint when conditioned on an other constraint
@@ -61,6 +75,9 @@ pub trait ConstraintLogic<K>: Clone + Ord + Sized {
         prev_constraints: &[Constraint<K, Self>],
     ) -> Satisfiable<Constraint<K, Self>>;
 
+    /// Convert a predicate with keys into a constraint
+    ///
+    /// Fails if the predicate arity does not match the number of keys
     fn try_into_constraint(self, keys: Vec<K>) -> Result<Constraint<K, Self>, InvalidConstraint>
     where
         Self: ArityPredicate,
@@ -70,6 +87,7 @@ pub trait ConstraintLogic<K>: Clone + Ord + Sized {
 }
 
 impl<K, P> Constraint<K, P> {
+    /// Get the branch classes that this constraint belongs to
     pub fn get_classes(&self) -> Vec<P::BranchClass>
     where
         P: ConstraintLogic<K>,
@@ -77,6 +95,12 @@ impl<K, P> Constraint<K, P> {
         self.predicate().get_classes(self.required_bindings())
     }
 
+    /// Condition this constraint on a set of known constraints
+    ///
+    /// # Arguments
+    /// * `known_constraints` - The set of known constraints
+    /// * `prev_constraints` - The set of constraints that have been evaluated
+    ///                        so far
     pub fn condition_on(
         &self,
         known_constraints: &BTreeSet<Constraint<K, P>>,
@@ -90,6 +114,7 @@ impl<K, P> Constraint<K, P> {
             .condition_on(keys, known_constraints, prev_constraints)
     }
 }
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::borrow::Borrow;
@@ -98,11 +123,10 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use rstest::rstest;
 
-    
+    use crate::indexing::tests::TestData;
     use crate::pattern::Satisfiable;
     use crate::predicate::Predicate;
     use crate::Constraint;
-    use crate::indexing::tests::TestData;
 
     use super::{ArityPredicate, ConstraintLogic};
 

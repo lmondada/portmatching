@@ -17,6 +17,7 @@ use itertools::Itertools;
 use std::{borrow::Borrow, cell::RefCell, collections::BTreeSet, fmt::Debug};
 use thiserror::Error;
 
+/// A set of constraints
 pub type ConstraintSet<K, P> = BTreeSet<Constraint<K, P>>;
 
 /// A constraint for pattern matching.

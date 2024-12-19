@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, hash::Hash};
+use std::collections::BTreeSet;
 
 use petgraph::{algo::toposort, visit::EdgeRef, Direction};
 
@@ -18,10 +18,6 @@ pub(super) trait GraphView<K: IndexKey, B> {
             .expect("invalid transition")
             .1
             .into()
-    }
-
-    fn is_unreachable(&self, state: StateID) -> bool {
-        self.incoming_transitions(state).next().is_none()
     }
 
     fn incoming_transitions<'a>(
@@ -159,12 +155,4 @@ impl<K: IndexKey, B> GraphView<K, B> for ConstraintAutomaton<K, B> {
     fn underlying_graph(&self) -> &TransitionGraph<K, B> {
         &self.graph
     }
-}
-
-/// Some data that fully specifies the action of a state.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(super) struct StateTuple<'a, C> {
-    deterministic: bool,
-    matches: Vec<PatternID>,
-    transitions: Vec<(Option<&'a C>, StateID)>,
 }

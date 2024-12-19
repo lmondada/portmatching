@@ -21,14 +21,10 @@ impl Arbitrary for MatrixPattern {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
 
-    use crate::{
-        concrete::matrix::{
-            tests::{apply_all_matchers, get_start_pos},
-            MatrixIndexingScheme, MatrixNaiveManyMatcher, MatrixString,
-        },
-        PortMatcher,
+    use crate::concrete::matrix::{
+        tests::{apply_all_matchers, get_start_pos},
+        MatrixString,
     };
 
     use super::*;
