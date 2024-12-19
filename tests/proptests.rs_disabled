@@ -6,7 +6,7 @@ use portgraph::proptest::gen_portgraph;
 use proptest::prelude::*;
 
 use portmatching::{
-    portgraph::{PGManyPatternMatcher, PGNaiveManyPatternMatcher, PGPattern},
+    concrete::portgraph::{PGManyPatternMatcher, PGNaiveManyPatternMatcher, PGPattern},
     utils::{gen_portgraph_connected, test::SerialPatternMatch},
     PortMatcher,
 };

@@ -18,106 +18,252 @@
 //! `FilterPredicate` by calling `assign_check` and then checking that the binding
 //! for <var2> is in the returned set.
 
-use std::borrow::Borrow;
+mod pattern;
+mod selector;
 
-use crate::indexing::{DataValue, IndexedData};
+pub use pattern::{PredicateLogic, PredicatePattern};
+pub use selector::{DeterministicPredicatePatternSelector, PredicatePatternDefaultSelector};
 
-/// A predicate with a fixed arity.
-pub trait ArityPredicate: Eq + Clone {
-    /// Get predicate arity
+use std::{borrow::Borrow, collections::BTreeSet};
+
+use crate::{constraint::InvalidConstraint, pattern::Satisfiable, Constraint};
+
+/// Define the arity of a predicate
+///
+/// Predicates always operate on a fixed number of arguments, as given by
+/// [`ArityPredicate::arity`].
+pub trait ArityPredicate: Clone + Ord {
+    /// The number of arguments this predicate expects
     fn arity(&self) -> usize;
 }
 
-/// A N-ary predicate evaluated on bindings and subject data.
+/// Evaluate predicates against data and bindings
 ///
-/// A predicate of the form `pred <key1> ... <keyN>`. Given bindings for <key1>
-/// to <keyN>, the predicate checks if it's satisfied on the values.
-///
-/// ## Parameter types
-/// - `Data`: The subject data type on which predicates are evaluated.
-pub trait Predicate<Data: IndexedData>: ArityPredicate {
-    /// The error type for malformed predicates.
-    type InvalidPredicateError: std::fmt::Display;
-
-    /// Check if the predicate is satisfied by the given data and values.
+/// Define how predicates are evaluated against concrete data and bindings
+/// to produce boolean results.
+pub trait Predicate<Data, Value>: ArityPredicate {
+    /// Check if this predicate holds for the given bindings and data
     ///
-    /// `values` must be of length [Predicate::arity].
-    fn check(
+    /// # Arguments
+    /// * `bindings` - The bound values to check against
+    /// * `data` - The data context for evaluation
+    fn check(&self, bindings: &[impl Borrow<Value>], data: &Data) -> bool;
+}
+
+/// Define the logic of constraints made of predicates
+///
+/// Predicates are used to define constraints, which in turn define
+/// patterns. This trait categorises constraints into classes, as well as how
+/// constraints simplify when conditioned on other constraints.
+pub trait ConstraintLogic<K>: Clone + Ord + Sized {
+    /// Sets of constraints that can be evaluated together form branch classes.
+    type BranchClass: Ord;
+
+    /// All classes the constraint made of `self` and `keys` belongs to
+    fn get_classes(&self, keys: &[K]) -> Vec<Self::BranchClass>;
+
+    /// Compute equivalent constraint when conditioned on an other constraint
+    /// of the same class.
+    ///
+    /// `prev_constraints` is the set of constraints that have been evaluated
+    /// so far (useful for a deterministic branch selector, in which case this
+    /// means they were not satisfied).
+    fn condition_on(
         &self,
-        data: &Data,
-        args: &[impl Borrow<DataValue<Data>>],
-    ) -> Result<bool, Self::InvalidPredicateError>;
+        keys: &[K],
+        known_constraints: &BTreeSet<Constraint<K, Self>>,
+        prev_constraints: &[Constraint<K, Self>],
+    ) -> Satisfiable<Constraint<K, Self>>;
+
+    /// Convert a predicate with keys into a constraint
+    ///
+    /// Fails if the predicate arity does not match the number of keys
+    fn try_into_constraint(self, keys: Vec<K>) -> Result<Constraint<K, Self>, InvalidConstraint>
+    where
+        Self: ArityPredicate,
+    {
+        Constraint::try_new(self, keys)
+    }
+}
+
+impl<K, P> Constraint<K, P> {
+    /// Get the branch classes that this constraint belongs to
+    pub fn get_classes(&self) -> Vec<P::BranchClass>
+    where
+        P: ConstraintLogic<K>,
+    {
+        self.predicate().get_classes(self.required_bindings())
+    }
+
+    /// Condition this constraint on a set of known constraints
+    ///
+    /// # Arguments
+    /// * `known_constraints` - The set of known constraints
+    /// * `prev_constraints` - The set of constraints that have been evaluated
+    ///                        so far
+    pub fn condition_on(
+        &self,
+        known_constraints: &BTreeSet<Constraint<K, P>>,
+        prev_constraints: &[Constraint<K, P>],
+    ) -> Satisfiable<Constraint<K, P>>
+    where
+        P: ConstraintLogic<K>,
+    {
+        let keys = self.required_bindings();
+        self.predicate()
+            .condition_on(keys, known_constraints, prev_constraints)
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use std::borrow::Borrow;
-    use std::cmp;
+    use std::collections::BTreeSet;
 
     use itertools::Itertools;
     use rstest::rstest;
 
     use crate::indexing::tests::TestData;
-    use crate::indexing::DataValue;
+    use crate::pattern::Satisfiable;
     use crate::predicate::Predicate;
+    use crate::Constraint;
 
-    use super::ArityPredicate;
+    use super::{ArityPredicate, ConstraintLogic};
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    pub(crate) struct TestPredicate {
-        pub(crate) arity: usize,
+    pub type TestKey = &'static str;
+    pub type TestPattern = super::PredicatePattern<TestKey, TestPredicate>;
+    pub type TestLogic = super::PredicateLogic<TestKey, TestPredicate>;
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub(crate) enum TestPredicate {
+        // BranchClass One
+        AreEqualOne,
+        NotEqualOne,
+        // BranchClass Two
+        AreEqualTwo,
+        AlwaysTrueTwo,
+        // BranchClass Three
+        NeverTrueThree,  // take one arg
+        AlwaysTrueThree, // take one arg
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    pub(crate) enum TestBranchClass {
+        One(TestKey, TestKey),
+        Two(TestKey, TestKey),
+        Three,
     }
 
     impl ArityPredicate for TestPredicate {
         fn arity(&self) -> usize {
-            self.arity
-        }
-    }
+            use TestPredicate::*;
 
-    impl Predicate<TestData> for TestPredicate {
-        type InvalidPredicateError = String;
-
-        fn check(
-            &self,
-            _: &TestData,
-            args: &[impl Borrow<DataValue<TestData>>],
-        ) -> Result<bool, String> {
-            if args.len() != self.arity {
-                Err("Invalid constraint: arity mismatch".to_string())
-            } else {
-                Ok(args
-                    .iter()
-                    .tuple_windows()
-                    .all(|(a, b)| a.borrow() == b.borrow()))
+            match self {
+                AlwaysTrueThree | NeverTrueThree => 1,
+                AreEqualOne | NotEqualOne | AreEqualTwo | AlwaysTrueTwo => 2,
             }
         }
     }
 
-    impl PartialOrd for TestPredicate {
-        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            Some(self.cmp(other))
+    impl Predicate<TestData, usize> for TestPredicate {
+        fn check(&self, bindings: &[impl Borrow<usize>], TestData: &TestData) -> bool {
+            use TestPredicate::*;
+
+            let args = bindings.iter().collect_tuple();
+            match self {
+                AreEqualOne | AreEqualTwo => {
+                    let (a, b) = args.unwrap();
+                    a.borrow() == b.borrow()
+                }
+                NotEqualOne => {
+                    let (a, b) = args.unwrap();
+                    a.borrow() != b.borrow()
+                }
+                AlwaysTrueThree | AlwaysTrueTwo => true,
+                NeverTrueThree => false,
+            }
         }
     }
 
-    impl Ord for TestPredicate {
-        fn cmp(&self, other: &Self) -> cmp::Ordering {
-            cmp::Reverse(self.arity).cmp(&cmp::Reverse(other.arity))
+    impl ConstraintLogic<TestKey> for TestPredicate {
+        type BranchClass = TestBranchClass;
+
+        fn get_classes(&self, keys: &[TestKey]) -> Vec<Self::BranchClass> {
+            assert_eq!(self.arity(), keys.len());
+
+            let args = keys.iter().cloned().collect_tuple();
+
+            use TestPredicate::*;
+            match self {
+                AreEqualOne | NotEqualOne => {
+                    let (a, b) = args.unwrap();
+                    vec![TestBranchClass::One(a, b)]
+                }
+                AreEqualTwo | AlwaysTrueTwo => {
+                    let (a, b) = args.unwrap();
+                    vec![TestBranchClass::Two(a, b)]
+                }
+                NeverTrueThree | AlwaysTrueThree => vec![TestBranchClass::Three],
+            }
+        }
+
+        fn condition_on(
+            &self,
+            keys: &[TestKey],
+            known_constraints: &BTreeSet<Constraint<TestKey, Self>>,
+            _: &[Constraint<TestKey, Self>],
+        ) -> Satisfiable<Constraint<TestKey, Self>> {
+            let condition = known_constraints
+                .iter()
+                .find(|c| c.get_classes() == self.get_classes(keys));
+            let Some(condition) = condition else {
+                let self_constraint = self.clone().try_into_constraint(keys.to_vec()).unwrap();
+                return Satisfiable::Yes(self_constraint);
+            };
+            assert_eq!(
+                self.get_classes(keys),
+                condition.get_classes(),
+                "class mismatch in TestPredicate::condition_on"
+            );
+            assert_eq!(
+                keys,
+                condition.required_bindings(),
+                "Cannot be in same class if keys are not the same"
+            );
+
+            if self == condition.predicate() {
+                return Satisfiable::Tautology;
+            }
+            match self.get_classes(keys).into_iter().exactly_one().unwrap() {
+                TestBranchClass::One(_, _) => {
+                    // predicates are mutually exclusive
+                    Satisfiable::No
+                }
+                TestBranchClass::Two(_, _) => {
+                    if condition.predicate() == &TestPredicate::AlwaysTrueTwo {
+                        // Does not teach us anything, leave unchanged
+                        Satisfiable::Yes(self.clone().try_into_constraint(keys.to_vec()).unwrap())
+                    } else {
+                        Satisfiable::Tautology
+                    }
+                }
+                TestBranchClass::Three => {
+                    if condition.predicate() == &TestPredicate::AlwaysTrueThree {
+                        // Does not teach us anything, leave unchanged
+                        Satisfiable::Yes(self.clone().try_into_constraint(keys.to_vec()).unwrap())
+                    } else {
+                        Satisfiable::Tautology
+                    }
+                }
+            }
         }
     }
 
     #[rstest]
-    #[case(2)]
-    #[case(3)]
-    fn test_arity_match(#[case] arity: usize) {
-        let p = TestPredicate { arity };
-        let args = vec![&3; p.arity()];
-        assert!(p.check(&TestData, &args).unwrap());
+    #[case(TestPredicate::AreEqualOne, vec![2, 2])]
+    fn test_arity_match(#[case] predicate: TestPredicate, #[case] args: Vec<usize>) {
+        assert!(predicate.check(&args, &TestData));
     }
 
-    #[test]
-    fn test_arity_mismatch() {
-        let p = TestPredicate { arity: 2 };
-        let args = vec![&3];
-        assert!(p.check(&TestData, &args).is_err());
-    }
+    // TODO: more tests
 }

@@ -5,6 +5,7 @@
 //! matches are possible.
 use std::{
     borrow::Borrow,
+    collections::BTreeMap,
     fmt::{self, Debug},
 };
 
@@ -12,8 +13,9 @@ use derive_more::{From, Into};
 use itertools::Itertools;
 
 use crate::{
-    indexing::{BindVariableError, IndexedData, Key},
-    string::{CharacterPredicate, StringConstraint},
+    concrete::string::CharacterPredicate,
+    indexing::{Binding, IndexedData},
+    predicate::DeterministicPredicatePatternSelector,
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
 };
 
@@ -41,32 +43,27 @@ impl<S: AsRef<str>> From<S> for MatrixString {
 ///
 /// This is the same constraint as for string matching, up to a difference in
 /// indexing.
-pub type MatrixConstraint = StringConstraint<MatrixPatternPosition>;
+pub type MatrixConstraint = crate::Constraint<MatrixPatternPosition, CharacterPredicate>;
+
+type BranchSelector =
+    DeterministicPredicatePatternSelector<MatrixPatternPosition, CharacterPredicate>;
 
 /// A matcher for 2D character matrices.
-pub type MatrixManyMatcher =
-    ManyMatcher<MatrixPattern, MatrixPatternPosition, CharacterPredicate, MatrixIndexingScheme>;
+pub type MatrixManyMatcher = ManyMatcher<MatrixPattern, MatrixPatternPosition, BranchSelector>;
 /// A naive matcher for 2D character matrices.
 ///
 /// Only use for testing, as it is too slow for practical purposes.
-pub type MatrixNaiveManyMatcher =
-    NaiveManyMatcher<MatrixPatternPosition, CharacterPredicate, MatrixIndexingScheme>;
+pub type MatrixNaiveManyMatcher = NaiveManyMatcher<MatrixPatternPosition, BranchSelector>;
 
-impl Predicate<MatrixString> for CharacterPredicate {
-    type InvalidPredicateError = String;
-
-    fn check(
-        &self,
-        data: &MatrixString,
-        args: &[impl Borrow<MatrixSubjectPosition>],
-    ) -> Result<bool, String> {
+impl Predicate<MatrixString, MatrixSubjectPosition> for CharacterPredicate {
+    fn check(&self, args: &[impl Borrow<MatrixSubjectPosition>], data: &MatrixString) -> bool {
         match self {
             CharacterPredicate::BindingEq => {
                 let (MatrixSubjectPosition(row1, col1), MatrixSubjectPosition(row2, col2)) =
                     args.iter().map(|pos| pos.borrow()).collect_tuple().unwrap();
                 let char1 = data.rows.get(*row1).and_then(|row| row.get(*col1));
                 let char2 = data.rows.get(*row2).and_then(|row| row.get(*col2));
-                Ok(char1.is_some() && char1 == char2)
+                char1.is_some() && char1 == char2
             }
             CharacterPredicate::ConstVal(c) => {
                 let MatrixSubjectPosition(row, col) = args
@@ -75,102 +72,13 @@ impl Predicate<MatrixString> for CharacterPredicate {
                     .exactly_one()
                     .ok()
                     .unwrap();
-                Ok(data.rows.get(*row).and_then(|row| row.get(*col)) == Some(c))
+                data.rows.get(*row).and_then(|row| row.get(*col)) == Some(c)
             }
         }
     }
 }
 
-/// A map for matrix positions.
-///
-/// Only store the position of the start of the match, compute other positions by
-/// adding row & column offsets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
-pub enum MatrixPositionMap {
-    /// No key has been bound yet
-    #[default]
-    Unbound,
-    /// Keys in the submatrix between `min_pos` and `max_pos` are valid and
-    /// computed as offset from the start position
-    Bound {
-        /// The position of the start of the pattern in the string
-        start_pos: MatrixSubjectPosition,
-        /// The interval matched so far, inclusive (start)
-        min_pos: MatrixPatternPosition,
-        /// The interval matched so far, inclusive (end)
-        max_pos: MatrixPatternPosition,
-    },
-}
-
-impl MatrixPositionMap {
-    fn start_pos(&self) -> Option<MatrixSubjectPosition> {
-        match self {
-            Self::Unbound => None,
-            &Self::Bound { start_pos, .. } => Some(start_pos),
-        }
-    }
-}
-
-impl BindMap for MatrixPositionMap {
-    type Key = MatrixPatternPosition;
-    type Value = MatrixSubjectPosition;
-    type ValueRef<'a> = MatrixSubjectPosition;
-
-    fn get(&self, var: &Self::Key) -> Option<Self::ValueRef<'_>> {
-        let Self::Bound {
-            start_pos,
-            min_pos,
-            max_pos,
-        } = self
-        else {
-            return None;
-        };
-        let &MatrixPatternPosition(key_row, key_col) = var;
-        if key_row >= min_pos.0
-            && key_row <= max_pos.0
-            && key_col >= min_pos.1
-            && key_col <= max_pos.1
-        {
-            Some(MatrixSubjectPosition(
-                start_pos.0.checked_add_signed(key_row).unwrap(),
-                start_pos.1.checked_add_signed(key_col).unwrap(),
-            ))
-        } else {
-            None
-        }
-    }
-
-    fn bind(&mut self, var: Self::Key, val: Self::Value) -> Result<(), BindVariableError> {
-        let MatrixPatternPosition(key_row, key_col) = var;
-        if key_row == 0 && key_col == 0 {
-            if let Some(MatrixSubjectPosition(start_row, start_col)) = self.start_pos() {
-                return Err(BindVariableError::VariableExists {
-                    key: format!("{:?}", var),
-                    curr_value: format!("({}, {})", start_row, start_col),
-                    new_value: format!("{:?}", val),
-                });
-            } else {
-                *self = Self::Bound {
-                    start_pos: val,
-                    min_pos: MatrixPatternPosition(0, 0),
-                    max_pos: MatrixPatternPosition(0, 0),
-                };
-            }
-        } else {
-            let Self::Bound {
-                min_pos, max_pos, ..
-            } = self
-            else {
-                return Err(BindVariableError::InvalidKey {
-                    key: format!("{:?}", var),
-                });
-            };
-            *min_pos = min_pos.cwise_min(&var);
-            *max_pos = max_pos.cwise_max(&var);
-        }
-        Ok(())
-    }
-}
+type MatrixBindMap = BTreeMap<MatrixPatternPosition, Option<MatrixSubjectPosition>>;
 
 /// Simple indexing schemes for matrices.
 ///
@@ -179,9 +87,11 @@ impl BindMap for MatrixPositionMap {
 pub struct MatrixIndexingScheme;
 
 impl IndexingScheme for MatrixIndexingScheme {
-    type BindMap = MatrixPositionMap;
+    type BindMap = MatrixBindMap;
+    type Key = <Self::BindMap as BindMap>::Key;
+    type Value = <Self::BindMap as BindMap>::Value;
 
-    fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>> {
+    fn required_bindings(&self, key: &Self::Key) -> Vec<Self::Key> {
         let &MatrixPatternPosition(key_row, key_col) = key;
 
         if key_row == 0 && key_col == 0 {
@@ -194,19 +104,22 @@ impl IndexingScheme for MatrixIndexingScheme {
     }
 }
 
-impl IndexedData for MatrixString {
+impl IndexedData<MatrixPatternPosition> for MatrixString {
     type IndexingScheme = MatrixIndexingScheme;
+    type Value = <Self::IndexingScheme as IndexingScheme>::Value;
+    type BindMap = <Self::IndexingScheme as IndexingScheme>::BindMap;
 
     fn list_bind_options(
         &self,
         key: &MatrixPatternPosition,
-        known_bindings: &MatrixPositionMap,
+        known_bindings: &MatrixBindMap,
     ) -> Vec<MatrixSubjectPosition> {
         let &MatrixPatternPosition(key_row, key_col) = key;
 
         if key_row == 0 && key_col == 0 {
             // No key has been bound yet
-            assert!(matches!(known_bindings, MatrixPositionMap::Unbound));
+            assert!(known_bindings.is_empty());
+
             // For the root binding, any matrix position is valid
             (0..self.rows.len())
                 .flat_map(|row| (0..self.rows[row].len()).map(move |col| (row, col)))
@@ -215,9 +128,17 @@ impl IndexedData for MatrixString {
         } else {
             // Must bind the start position first; all other positions are
             // obtained by offsetting from start
-            let Some(MatrixSubjectPosition(start_row, start_col)) = known_bindings.start_pos()
-            else {
-                return vec![];
+            let (start_row, start_col) = match known_bindings
+                .get_binding(&MatrixPatternPosition::default())
+                .borrowed()
+            {
+                Binding::Bound(&MatrixSubjectPosition(start_row, start_col)) => {
+                    (start_row, start_col)
+                }
+                Binding::Failed => return vec![],
+                Binding::Unbound => {
+                    panic!("root binding not found. Always bind the start position first");
+                }
             };
 
             let Some(new_row) = start_row.checked_add_signed(key_row) else {
@@ -240,21 +161,13 @@ impl IndexedData for MatrixString {
 pub struct MatrixSubjectPosition(usize, usize);
 
 /// An index key, obtained from the position index of the character in the pattern.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, From, Into)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, From, Into)]
 pub struct MatrixPatternPosition(isize, isize);
 
 impl MatrixPatternPosition {
     /// The root index key.
     pub fn start() -> Self {
         Self(0, 0)
-    }
-
-    fn cwise_max(&self, other: &Self) -> Self {
-        Self(self.0.max(other.0), self.1.max(other.1))
-    }
-
-    fn cwise_min(&self, other: &Self) -> Self {
-        Self(self.0.min(other.0), self.1.min(other.1))
     }
 }
 
@@ -278,25 +191,36 @@ impl Debug for MatrixString {
 
 #[cfg(test)]
 mod tests {
-    use crate::{string::tests::define_matcher_factories, PatternMatch, PortMatcher};
+    use crate::{
+        concrete::string::tests::{define_matcher_factories, Matcher},
+        PatternID, PatternMatch, PortMatcher,
+    };
 
     use super::*;
     use rstest::rstest;
 
-    const MATCHER_FACTORIES: &[fn(Vec<MatrixPattern>) -> MatrixManyMatcher] =
-        define_matcher_factories!(MatrixPattern, MatrixManyMatcher);
+    type MatcherFactory =
+        fn(Vec<MatrixPattern>) -> Matcher<MatrixManyMatcher, MatrixNaiveManyMatcher>;
+    const MATCHER_FACTORIES: &[MatcherFactory] = define_matcher_factories!(
+        MatrixPattern,
+        MatrixIndexingScheme,
+        MatrixManyMatcher,
+        MatrixNaiveManyMatcher
+    );
 
     pub(super) fn apply_all_matchers(
         patterns: Vec<MatrixPattern>,
         subject: &MatrixString,
-    ) -> [Vec<PatternMatch<MatrixPositionMap>>; 2] {
+    ) -> [Vec<PatternMatch<MatrixBindMap>>; 2] {
         // Skip the all deterministic matcher, too slow
-        let all_matches = MATCHER_FACTORIES[..2]
+        let all_matches = MATCHER_FACTORIES
             .iter()
             .map(|matcher_factory| {
-                matcher_factory(patterns.clone())
-                    .find_matches(subject)
-                    .collect_vec()
+                let matcher = matcher_factory(patterns.clone());
+                if let Matcher::Many(matcher) = &matcher {
+                    println!("{}", matcher.dot_string());
+                }
+                matcher.find_matches(subject).collect_vec()
             })
             .collect_vec();
         all_matches.into_iter().collect_vec().try_into().unwrap()
@@ -304,17 +228,19 @@ mod tests {
 
     /// Do not compare min_pos and max_pos, as more than the pattern might have
     /// been matched
-    pub(super) fn clean_match_data(matches: &mut [PatternMatch<MatrixPositionMap>]) {
-        matches.iter_mut().for_each(|m| {
-            let data = &mut m.match_data;
-            if let MatrixPositionMap::Bound {
-                min_pos, max_pos, ..
-            } = data
-            {
-                *min_pos = MatrixPatternPosition(0, 0);
-                *max_pos = MatrixPatternPosition(1, 1);
-            }
-        });
+    pub(super) fn get_start_pos(
+        matches: &[PatternMatch<MatrixBindMap>],
+    ) -> Vec<(PatternID, Binding<MatrixSubjectPosition>)> {
+        matches
+            .iter()
+            .map(|m| {
+                let data = &m.match_data;
+                (
+                    m.pattern,
+                    data.get_binding(&MatrixPatternPosition::start()).copied(),
+                )
+            })
+            .collect()
     }
 
     #[rstest]
@@ -322,6 +248,15 @@ mod tests {
     #[case("", vec!["--a$ca\n-\n$c\n", "\n---\n-\na\n", "\na---a\n", "-\n---a\n\n","---a-aaaa\n", "\n-a-\na\n", "\n--a\n-aa\n\n\n"])]
     #[case("", vec!["--a$ca\n-\n$c\n", "\n---\n-\na\n", "\na---a\n", "-\n---a\n\n"])]
     #[case("caaaabaa\n", vec!["-a--aaa\n", "-$c-$e--$d$c\na\naaaa\n", "a\n", "\n$c\n$ca\na-\n", "$d--ab\n$a$b$ca$aa\naaa\naaa\naaaaaaaa\na\n", "d-aaa\na\naa-a-a\n", "c----ba\n"])]
+    #[case("aaa", vec!["a-a", "-aa", "aa-"])]
+    #[case("aa\n", vec!["", ""])]
+    #[case("aa\n", vec!["", "-"])]
+    #[case("aab\n\n\n\n\n\n\naaaaaaaaa\n", vec![
+        "----", "-------\n-$c\n\n\n\n\n\n---$c", "-\n-a"
+    ])]
+    #[case("aaaaac\naaaaaafa\n\n\n\naaaaaaaaaaa\n", vec![
+        "\n$a--a$a\n\n\n\n$a", "--ca-\nb--fa"
+    ])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
         let subject = MatrixString::from(&subject);
         let patterns = patterns
@@ -329,13 +264,11 @@ mod tests {
             .map(MatrixPattern::parse_str)
             .collect_vec();
 
-        let naive = MatrixNaiveManyMatcher::try_from_patterns(&patterns).unwrap();
-        let mut naive_matches = naive.find_matches(&subject).collect_vec();
-        let [mut non_det, mut default] = apply_all_matchers(patterns, &subject);
+        let [default, naive] = apply_all_matchers(patterns, &subject);
 
-        clean_match_data(&mut non_det);
-        clean_match_data(&mut default);
-        clean_match_data(&mut naive_matches);
+        dbg!(&default);
+        let mut default = get_start_pos(&default);
+        let mut naive = get_start_pos(&naive);
 
         // dbg!(&all_matches);
         // println!(
@@ -346,10 +279,12 @@ mod tests {
         //         .collect_vec()
         // );
 
-        non_det.sort();
         default.sort();
-        naive_matches.sort();
-        assert_eq!(non_det, default);
-        assert_eq!(non_det, naive_matches);
+        naive.sort();
+
+        default.dedup();
+        naive.dedup();
+
+        assert_eq!(default, naive);
     }
 }

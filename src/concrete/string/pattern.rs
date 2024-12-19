@@ -1,9 +1,9 @@
 use std::{collections::hash_map::Entry, iter};
 
-use crate::{Constraint, HashMap, Pattern};
+use crate::{predicate::PredicateLogic, Constraint, HashMap, Pattern};
 use derive_more::Display;
 
-use super::{predicate::CharacterPredicate, StringPatternPosition};
+use super::{predicate::CharacterPredicate, StringConstraint, StringPatternPosition};
 
 /// A pattern for matching on strings.
 ///
@@ -65,16 +65,23 @@ impl StringPattern {
             .enumerate()
             .map(|(i, &char_var)| (StringPatternPosition(i), char_var))
     }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 impl Pattern for StringPattern {
     type Key = StringPatternPosition;
-    type Predicate = CharacterPredicate;
-    type Error = ();
+    type Logic = PredicateLogic<StringPatternPosition, CharacterPredicate>;
 
-    fn try_to_constraint_vec(
-        &self,
-    ) -> Result<Vec<Constraint<Self::Key, Self::Predicate>>, Self::Error> {
+    type Constraint = StringConstraint;
+
+    fn required_bindings(&self) -> Vec<Self::Key> {
+        (0..self.len()).map(StringPatternPosition).collect()
+    }
+
+    fn into_logic(self) -> Self::Logic {
         // For a variable name, the first position it appears at
         let mut var_to_pos: HashMap<char, _> = Default::default();
         let mut constraints = Vec::new();
@@ -102,25 +109,7 @@ impl Pattern for StringPattern {
                 },
             }
         }
-        // We make sure the largest index key is referenced once in the constraints,
-        // to force it to be bound so that strings that are too short do not match
-        // the pattern.
-        if let Some(max_index_key) = self.0.len().checked_sub(1) {
-            let max_index_key = StringPatternPosition(max_index_key);
-            if !constraints
-                .iter()
-                .any(|c| c.required_bindings().contains(&max_index_key))
-            {
-                constraints.push(
-                    Constraint::try_new(
-                        CharacterPredicate::BindingEq,
-                        vec![max_index_key, max_index_key],
-                    )
-                    .unwrap(),
-                );
-            }
-        }
-        Ok(constraints)
+        PredicateLogic::from_constraints(constraints)
     }
 }
 

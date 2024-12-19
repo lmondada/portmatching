@@ -7,67 +7,88 @@
 //! - The `ConcretePattern` trait, for patterns that can themselves be matched on.
 //! - Error types related to pattern matching operations.
 
-use thiserror::Error;
+use std::collections::BTreeSet;
 
-use crate::Constraint;
+use crate::indexing::IndexKey;
 
-/// Vector of constraints expressing a pattern `PT`.
-pub type ConstraintVec<PT> = Vec<Constraint<<PT as Pattern>::Key, <PT as Pattern>::Predicate>>;
+/// A rank value used to prioritize branch classes.
+///
+/// Lower is better.
+pub type ClassRank = f64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Represents whether a pattern or constraint is satisfiable
+pub enum Satisfiable<P = ()> {
+    /// The pattern or constraint is satisfiable
+    Yes(P),
+    /// The pattern or constraint is not satisfiable
+    No,
+    /// The pattern or constraint is a tautology (i.e. is always satisifed).
+    Tautology,
+}
+
+#[derive(Debug, Clone)]
+/// Represents a selection of predicates for pattern matching
+pub enum PredicateSelection<P> {
+    /// All predicates in the class may imply the pattern.
+    All,
+    /// A disjunction of predicates that may imply the pattern.
+    Some(Vec<P>),
+}
 
 /// A pattern for pattern matching.
-///
-/// Define valid patterns by providing a conversion to a vector of constraints.
 pub trait Pattern {
     /// The type of variable names used in the pattern.
-    type Key;
+    type Key: IndexKey;
+    /// The predicate evaluatation logic.
+    type Logic: PatternLogic<Constraint = Self::Constraint>;
+    /// The type of constraints used in the pattern logic.
+    type Constraint;
+
+    /// List of required bindings to match the pattern.
+    fn required_bindings(&self) -> Vec<Self::Key>;
+
+    /// Extract the pattern logic for further processing.
+    fn into_logic(self) -> Self::Logic;
+}
+
+/// The evaluation logic for a type of pattern.
+pub trait PatternLogic: Ord + Clone {
     /// The type of predicates used in the pattern.
-    type Predicate;
-    /// The error type returned by the conversion to a vector of constraints.
-    type Error;
+    type Constraint: Ord + Clone;
+    /// A partition of all predicates into mutually exclusive sets.
+    type BranchClass: Ord;
 
-    /// Convert to a vector of constraints.
-    fn try_to_constraint_vec(&self) -> Result<ConstraintVec<Self>, Self::Error>;
-
-    /// Optionally, get a list of required bindings.
+    /// The branch classes most pertinent to the pattern, along with a rank.
     ///
-    /// The set of bindings used during matching will always be returned (and
-    /// used by default if no further bindings are given).
-    fn required_bindings(&self) -> Option<Vec<Self::Key>> {
-        None
-    }
-}
+    /// The rank estimates the expected number of constraints in the class that
+    /// are satisfied in both the pattern and random input data.
+    ///
+    /// i.e. if F is the set of constrains in a branch class and A c F is the
+    /// subset of constraints satisfied by the pattern A(P), then the rank of
+    /// the branch class F is E_G[ | { A in F | A(P) and A(G) } | ].
+    ///
+    /// The class with lowest overall rank will be selected.
+    fn rank_classes(&self) -> impl Iterator<Item = (Self::BranchClass, ClassRank)>;
 
-/// A pattern that can be viewed as concrete data that can be matched on.
-///
-/// This excludes patterns that may map on multiple concrete hosts (e.g.
-/// patterns with wildcards, variable number of nodes, etc.)
-pub trait ConcretePattern: Pattern {
-    /// The concrete host data that the pattern maps on.
-    type Host;
+    /// Get all constraints in a class that are useful for pattern matching
+    /// `self`.
+    ///
+    /// If the set is empty, then the pattern will be excluded from this
+    /// class evaluation and be attached to the epsilon transition instead.
+    fn nominate(&self, cls: &Self::BranchClass) -> BTreeSet<Self::Constraint>;
 
-    /// View pattern as host data that can be matched on.
-    fn as_host(&self) -> &Self::Host;
-}
+    /// Simplify patterns conditioned on which transitions are taken.
+    ///
+    /// For each transition in `transitions`, return whether the pattern is
+    /// still satisfiable and, if so, the pattern equivalent to `self` when
+    /// conditioned on that transition and `known_constraints`.
+    fn condition_on(
+        &self,
+        transitions: &[Self::Constraint],
+        known_constraints: &BTreeSet<Self::Constraint>,
+    ) -> Vec<Satisfiable<Self>>;
 
-/// A concrete pattern was expected but failed at runtime.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("Pattern is not concrete and cannot be matched directly")]
-pub struct NonConcretePattern;
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use derive_more::{From, Into};
-
-    #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Into)]
-    pub(crate) struct TestPattern<K, P>(Vec<Constraint<K, P>>);
-    impl<K: Clone, P: Clone> Pattern for TestPattern<K, P> {
-        type Key = K;
-        type Predicate = P;
-        type Error = ();
-
-        fn try_to_constraint_vec(&self) -> Result<Vec<Constraint<K, P>>, Self::Error> {
-            Ok(self.0.clone())
-        }
-    }
+    /// Check whether the pattern is satisfiable.
+    fn is_satisfiable(&self) -> Satisfiable;
 }

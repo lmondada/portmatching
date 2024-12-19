@@ -15,28 +15,55 @@
 //! be chosen arbitrarily.
 //!
 //! This is currently mostly useful for demonstration and testing purposes.
-mod constraint;
 mod pattern;
 mod predicate;
 #[cfg(feature = "proptest")]
 mod proptest;
 
-use std::{cmp, fmt::Debug};
+use std::{collections::BTreeMap, fmt::Debug};
 
 use derive_more::{From, Into};
 use itertools::Itertools;
 
 use crate::{
-    indexing::{BindVariableError, IndexedData},
-    BindMap, IndexingScheme, ManyMatcher,
+    branch_selector::DisplayBranchSelector,
+    indexing::{Binding, IndexKey, IndexedData},
+    predicate::DeterministicPredicatePatternSelector,
+    BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher,
 };
-pub use constraint::StringConstraint;
 pub use pattern::{CharVar, StringPattern};
-pub use predicate::CharacterPredicate;
+pub use predicate::{BranchClass, CharacterPredicate};
 
-/// A matcher for strings.
-pub type StringManyMatcher =
-    ManyMatcher<StringPattern, StringPatternPosition, CharacterPredicate, StringIndexingScheme>;
+type BranchSelector =
+    DeterministicPredicatePatternSelector<StringPatternPosition, CharacterPredicate>;
+
+/// A constraint for matching a string using [StringPredicate]s.
+type StringConstraint = crate::Constraint<StringPatternPosition, CharacterPredicate>;
+
+impl<K: IndexKey> DisplayBranchSelector
+    for DeterministicPredicatePatternSelector<K, CharacterPredicate>
+{
+    fn fmt_class(&self) -> String {
+        let Some(cls) = self.get_class() else {
+            return String::new();
+        };
+        match cls {
+            BranchClass::Position(pos) => format!("Position({pos:?})"),
+        }
+    }
+
+    fn fmt_nth_constraint(&self, n: usize) -> String {
+        match &self.predicates()[n] {
+            CharacterPredicate::BindingEq => format!(" == {:?}", self.keys(n)[0]),
+            CharacterPredicate::ConstVal(c) => format!(" == {:?}", c),
+        }
+    }
+}
+
+/// Default matcher for strings.
+pub type StringManyMatcher = ManyMatcher<StringPattern, StringPatternPosition, BranchSelector>;
+/// A naive matcher for strings.
+pub type StringNaiveManyMatcher = NaiveManyMatcher<StringPatternPosition, BranchSelector>;
 
 /// Simple indexing scheme for strings.
 ///
@@ -45,85 +72,14 @@ pub type StringManyMatcher =
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StringIndexingScheme;
 
-/// A map for string positions.
-///
-/// Only store the position of the start of the match, compute other positions by
-/// adding offsets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
-pub enum StringPositionMap {
-    /// No key has been bound yet
-    #[default]
-    Unbound,
-    /// Keys between 0 and `str_len` are valid and computed as offset from
-    /// the start position
-    Bound {
-        /// The position of the start of the pattern in the string
-        start_pos: StringSubjectPosition,
-        /// The length of the substring matched so far
-        str_len: usize,
-    },
-}
-
-impl StringPositionMap {
-    fn start_pos(&self) -> Option<StringSubjectPosition> {
-        match self {
-            Self::Unbound => None,
-            &Self::Bound { start_pos, .. } => Some(start_pos),
-        }
-    }
-}
-
-impl BindMap for StringPositionMap {
-    type Key = StringPatternPosition;
-    type Value = StringSubjectPosition;
-    type ValueRef<'a> = StringSubjectPosition;
-
-    fn get(&self, var: &Self::Key) -> Option<Self::ValueRef<'_>> {
-        let Self::Bound { start_pos, str_len } = self else {
-            return None;
-        };
-        let StringPatternPosition(key) = var;
-        if key < str_len {
-            Some(StringSubjectPosition(start_pos.0 + key))
-        } else {
-            None
-        }
-    }
-
-    fn bind(&mut self, var: Self::Key, val: Self::Value) -> Result<(), BindVariableError> {
-        let StringPatternPosition(key) = var;
-        if key == 0 {
-            if let Some(StringSubjectPosition(start_pos)) = self.start_pos() {
-                return Err(BindVariableError::VariableExists {
-                    key: key.to_string(),
-                    curr_value: start_pos.to_string(),
-                    new_value: format!("{:?}", val),
-                });
-            } else {
-                *self = Self::Bound {
-                    start_pos: val,
-                    str_len: 1,
-                };
-            }
-        } else {
-            let Self::Bound { str_len, .. } = self else {
-                return Err(BindVariableError::InvalidKey {
-                    key: key.to_string(),
-                });
-            };
-            *str_len = cmp::max(*str_len, key + 1);
-        }
-        Ok(())
-    }
-}
+type StringBindMap = BTreeMap<StringPatternPosition, Option<StringSubjectPosition>>;
 
 impl IndexingScheme for StringIndexingScheme {
-    type BindMap = StringPositionMap;
+    type BindMap = StringBindMap;
+    type Key = StringPatternPosition;
+    type Value = StringSubjectPosition;
 
-    fn required_bindings(
-        &self,
-        key: &crate::indexing::Key<Self>,
-    ) -> Vec<crate::indexing::Key<Self>> {
+    fn required_bindings(&self, key: &Self::Key) -> Vec<Self::Key> {
         let &StringPatternPosition(offset) = key;
 
         if offset == 0 {
@@ -136,14 +92,16 @@ impl IndexingScheme for StringIndexingScheme {
     }
 }
 
-impl IndexedData for String {
+impl IndexedData<StringPatternPosition> for String {
     type IndexingScheme = StringIndexingScheme;
+    type Value = <Self::IndexingScheme as IndexingScheme>::Value;
+    type BindMap = <Self::IndexingScheme as IndexingScheme>::BindMap;
 
     fn list_bind_options(
         &self,
-        key: &crate::indexing::Key<Self::IndexingScheme>,
-        known_bindings: &<Self::IndexingScheme as IndexingScheme>::BindMap,
-    ) -> Vec<crate::indexing::Value<Self::IndexingScheme>> {
+        key: &StringPatternPosition,
+        known_bindings: &Self::BindMap,
+    ) -> Vec<Self::Value> {
         let &StringPatternPosition(offset) = key;
 
         if offset == 0 {
@@ -152,7 +110,10 @@ impl IndexedData for String {
         } else {
             // Must bind the start position first; all other positions are
             // obtained by offsetting from start
-            let Some(StringSubjectPosition(start_pos)) = known_bindings.start_pos() else {
+            let Binding::Bound(StringSubjectPosition(start_pos)) = known_bindings
+                .get_binding(&StringPatternPosition::start())
+                .copied()
+            else {
                 return vec![];
             };
 
@@ -190,8 +151,7 @@ impl Debug for StringPatternPosition {
 #[cfg(test)]
 pub(super) mod tests {
 
-    use std::ops::Range;
-
+    use auto_enums::auto_enum;
     use rstest::rstest;
 
     use self::pattern::StringPattern;
@@ -199,33 +159,44 @@ pub(super) mod tests {
 
     use super::*;
 
+    #[derive(Debug, Clone)]
+    pub(crate) enum Matcher<Many, Naive> {
+        Many(Many),
+        Naive(Naive),
+    }
+
+    impl<D, Many, Naive> PortMatcher<D> for Matcher<Many, Naive>
+    where
+        Many: PortMatcher<D>,
+        Naive: PortMatcher<D, Match = Many::Match>,
+    {
+        type Match = Many::Match;
+
+        #[auto_enum(Iterator)]
+        fn find_matches<'a>(
+            &'a self,
+            host: &'a D,
+        ) -> impl Iterator<Item = PatternMatch<Self::Match>> + 'a {
+            match self {
+                Matcher::Many(m) => m.find_matches(host),
+                Matcher::Naive(m) => m.find_matches(host),
+            }
+        }
+    }
+
     macro_rules! define_matcher_factories {
-        ($StringPattern:ty, $StringManyMatcher:ty) => {{
-            use crate::DetHeuristic;
+        ($Pattern:ty, $Scheme:ty, $ManyMatcher:ty, $NaiveMatcher:ty) => {{
+            use crate::concrete::string::tests::Matcher;
 
-            fn non_det_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
-                <$StringManyMatcher>::try_from_patterns_with_det_heuristic(
-                    patterns,
-                    Default::default(),
-                    DetHeuristic::Never,
-                )
-                .unwrap()
+            fn many_matcher(patterns: Vec<$Pattern>) -> Matcher<$ManyMatcher, $NaiveMatcher> {
+                Matcher::Many(<$ManyMatcher>::from_patterns::<$Scheme>(patterns))
             }
 
-            fn default_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
-                <$StringManyMatcher>::try_from_patterns(patterns, Default::default()).unwrap()
+            fn naive_matcher(patterns: Vec<$Pattern>) -> Matcher<$ManyMatcher, $NaiveMatcher> {
+                Matcher::Naive(<$NaiveMatcher>::from_patterns::<$Scheme, _>(patterns))
             }
 
-            fn det_matcher(patterns: Vec<$StringPattern>) -> $StringManyMatcher {
-                <$StringManyMatcher>::try_from_patterns_with_det_heuristic(
-                    patterns,
-                    Default::default(),
-                    DetHeuristic::default(),
-                )
-                .unwrap()
-            }
-
-            &[non_det_matcher, default_matcher, det_matcher]
+            &[many_matcher, naive_matcher]
         }};
     }
 
@@ -236,8 +207,7 @@ pub(super) mod tests {
         let p1 = StringPattern::parse_str("ab$xcd$x");
         let p2 = StringPattern::parse_str("abcc");
 
-        let matcher =
-            StringManyMatcher::try_from_patterns(vec![p1, p2], Default::default()).unwrap();
+        let matcher = StringManyMatcher::from_patterns::<StringIndexingScheme>(vec![p1, p2]);
 
         let result = matcher.find_matches(&"abccdc".to_string()).collect_vec();
 
@@ -248,7 +218,7 @@ pub(super) mod tests {
     fn test_dummy_len_3_string_matching() {
         let p1 = StringPattern::parse_str("$x$y$z");
 
-        let matcher = StringManyMatcher::try_from_patterns(vec![p1], Default::default()).unwrap();
+        let matcher = StringManyMatcher::from_patterns::<StringIndexingScheme>(vec![p1]);
 
         let result = matcher.find_matches(&"ab".to_string()).collect_vec();
 
@@ -259,37 +229,43 @@ pub(super) mod tests {
     fn test_empty_pattern() {
         let p1 = StringPattern::parse_str("");
 
-        let matcher = StringManyMatcher::try_from_patterns(vec![p1], Default::default()).unwrap();
+        let matcher = StringManyMatcher::from_patterns::<StringIndexingScheme>(vec![p1]);
 
         let result = matcher.find_matches(&"ab".to_string()).collect_vec();
 
-        assert_eq!(result, [(PatternID(0), StringPositionMap::Unbound).into()]);
+        assert_eq!(result, [(PatternID(0), BTreeMap::default()).into()]);
     }
 
     #[test]
     fn test_pattern_with_dummy_end() {
         let p1 = StringPattern::parse_str("$x$x$z");
 
-        let matcher = StringManyMatcher::try_from_patterns(vec![p1], Default::default()).unwrap();
+        let matcher = StringManyMatcher::from_patterns::<StringIndexingScheme>(vec![p1]);
 
         let result = matcher.find_matches(&"aa".to_string()).collect_vec();
 
         assert_eq!(result.len(), 0);
     }
 
-    const MATCHER_FACTORIES: &[fn(Vec<StringPattern>) -> StringManyMatcher] =
-        define_matcher_factories!(StringPattern, StringManyMatcher);
+    type MatcherFactory =
+        fn(Vec<StringPattern>) -> Matcher<StringManyMatcher, StringNaiveManyMatcher>;
+    const MATCHER_FACTORIES: &[MatcherFactory] = define_matcher_factories!(
+        StringPattern,
+        StringIndexingScheme,
+        StringManyMatcher,
+        StringNaiveManyMatcher
+    );
 
     pub(super) fn apply_all_matchers(
         patterns: Vec<StringPattern>,
         subject: &str,
-        slice: Range<usize>,
-    ) -> impl Iterator<Item = Vec<PatternMatch<StringPositionMap>>> + '_ {
-        MATCHER_FACTORIES[slice].iter().map(move |matcher_factory| {
-            println!("{}", matcher_factory(patterns.clone()).dot_string());
-            matcher_factory(patterns.clone())
-                .find_matches(&subject.to_string())
-                .collect_vec()
+    ) -> impl Iterator<Item = Vec<PatternMatch<StringBindMap>>> + '_ {
+        MATCHER_FACTORIES.iter().map(move |matcher_factory| {
+            let matcher = matcher_factory(patterns.clone());
+            // if let Matcher::Many(m) = &matcher {
+            //     println!("{}", m.dot_string());
+            // }
+            matcher.find_matches(&subject.to_string()).collect_vec()
         })
     }
 
@@ -346,24 +322,41 @@ pub(super) mod tests {
         "aba",
         "$cb$a",
     ])]
+    #[case("aaa", vec!["a$ba", "$aa$a", "aa$a"])]
+    #[case("cbaaaaaab", vec![
+        "c", "d", "$c$baaaaaa$baaaaaaaaaa","$baaaa$b$baaaa"
+    ])]
+    #[case("ddaaaaaadaaaaaaaaaaaaaad", vec![
+        "$aaaaaaaabaaaaaaaaaaaaa$a$a", "$f$f", "$caaaa$caa$c",
+    ])]
+    #[case("aaaaaaaa", vec![
+        "aaaaabaaa",
+        "$c$bbaa$b$b",
+    ])]
+    #[case("aaaaabdd", vec![
+        "aba$aa",
+        "abaaa",
+        "$abaaa",
+        "$e$e$c$b$b",
+        "$aaaba$a",
+        "abaaa",
+    ])]
+    #[case("c", vec!["c", "$b$b"])]
     fn proptest_fail_cases(#[case] subject: &str, #[case] patterns: Vec<&str>) {
-        use itertools::Itertools;
-
         let patterns = patterns
             .into_iter()
             .map(StringPattern::parse_str)
             .collect_vec();
 
         // let [mut non_det, mut default, mut det] = apply_all_matchers(patterns, subject);
-        let (mut non_det, mut default) = apply_all_matchers(patterns, subject, 0..2)
+        let (mut default, mut naive) = apply_all_matchers(patterns, subject)
             .collect_tuple()
             .unwrap();
 
         // Compare results up to reordering
-        non_det.sort();
         default.sort();
-        // det.sort();
-        assert_eq!(non_det, default);
-        // assert_eq!(non_det, det);
+        naive.sort();
+
+        assert_eq!(default, naive);
     }
 }

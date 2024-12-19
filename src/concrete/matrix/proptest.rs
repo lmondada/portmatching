@@ -21,14 +21,10 @@ impl Arbitrary for MatrixPattern {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
 
-    use crate::{
-        matrix::{
-            tests::{apply_all_matchers, clean_match_data},
-            MatrixNaiveManyMatcher, MatrixString,
-        },
-        PortMatcher,
+    use crate::concrete::matrix::{
+        tests::{apply_all_matchers, get_start_pos},
+        MatrixString,
     };
 
     use super::*;
@@ -46,17 +42,18 @@ mod tests {
         ) {
             let subject = MatrixString::from(&subject);
             // Skip the all deterministic matcher, too slow
-            let naive = MatrixNaiveManyMatcher::try_from_patterns(&patterns).unwrap();
-            let mut naive_matches = naive.find_matches(&subject).collect_vec();
-            let [mut non_det, mut default] = apply_all_matchers(patterns, &subject);
+            let [mut default, mut naive] = apply_all_matchers(patterns, &subject);
 
-            clean_match_data(&mut non_det);
-            clean_match_data(&mut default);
-            clean_match_data(&mut naive_matches);
+            let mut default = get_start_pos(&mut default);
+            let mut naive = get_start_pos(&mut naive);
 
-            non_det.sort();
             default.sort();
-            prop_assert_eq!(non_det, default);
+            naive.sort();
+
+            default.dedup();
+            naive.dedup();
+
+            prop_assert_eq!(default, naive);
         }
     }
 }
