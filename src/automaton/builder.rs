@@ -15,7 +15,9 @@ mod modify;
 
 use super::{view::GraphView, BuildConfig, State, TransitionGraph};
 
-type StateHashKey<PT> = (BTreeSet<(PatternID, PT)>, BTreeSet<PatternID>);
+type PatternsInProgress<PT> = BTreeSet<(PatternID, PT)>;
+type Matches = BTreeSet<PatternID>;
+type StateHashKey<PT> = (PatternsInProgress<PT>, Matches);
 
 /// Create constraint automata from lists of patterns, given by lists of
 /// constraints.
@@ -89,7 +91,7 @@ impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
 /// State of the builder at one particular state in the graph
 struct BuildState<P: PatternLogic> {
     state: StateID,
-    patterns: BTreeSet<(PatternID, P)>,
+    patterns: PatternsInProgress<P>,
     satisfied_constraints: BTreeSet<P::Constraint>,
 }
 
@@ -132,7 +134,7 @@ where
     /// Given patterns, construct its constraint automaton.
     fn construct_graph(&mut self) -> Vec<PatternID> {
         // Drain all patterns into set
-        let patterns: BTreeSet<_> = self
+        let patterns: PatternsInProgress<_> = self
             .patterns
             .drain(..)
             .enumerate()
@@ -146,7 +148,7 @@ where
         // Register all patterns at the root
         // Find matches at the root
         let (completed_patterns, patterns) = partition_completed_patterns(patterns);
-        let root_matches = BTreeSet::from_iter(completed_patterns.into_iter().map(|(id, _)| id));
+        let root_matches = Matches::from_iter(completed_patterns.into_iter().map(|(id, _)| id));
         self.add_matches(self.root, root_matches.iter().copied());
         self.hashcons
             .insert((patterns.clone(), root_matches), self.root);
@@ -174,9 +176,10 @@ where
             let nominations = patterns.iter().map(|(_, p)| p.nominate(&cls)).collect_vec();
             let mut nominations_iter = nominations.iter();
             // Take apart the patterns that do not nominate any constraints
-            let (patterns, skip_patterns): (BTreeSet<_>, BTreeSet<_>) = patterns
-                .into_iter()
-                .partition(|_| !nominations_iter.next().unwrap().is_empty());
+            let (patterns, skip_patterns): (PatternsInProgress<_>, PatternsInProgress<_>) =
+                patterns
+                    .into_iter()
+                    .partition(|_| !nominations_iter.next().unwrap().is_empty());
             let mut constraints = nominations.into_iter().flatten().collect_vec();
             constraints.sort_unstable();
             constraints.dedup();
@@ -216,7 +219,7 @@ where
             // Add epsilon transition to skip patterns
             if !skip_patterns.is_empty() {
                 if let Some(state) =
-                    self.add_child(state, skip_patterns.clone(), BTreeSet::default(), true)
+                    self.add_child(state, skip_patterns.clone(), Matches::default(), true)
                 {
                     let build_state = BuildState {
                         state,
@@ -291,8 +294,8 @@ where
 
 fn retain_non_empty<P: PatternLogic>(
     constraints: &mut Vec<<P as PatternLogic>::Constraint>,
-    next_patterns: &mut Vec<BTreeSet<(PatternID, P)>>,
-    next_matches: &mut Vec<BTreeSet<PatternID>>,
+    next_patterns: &mut Vec<PatternsInProgress<P>>,
+    next_matches: &mut Vec<Matches>,
 ) {
     let retain_transitions = next_patterns
         .iter()
@@ -313,10 +316,10 @@ fn retain_non_empty<P: PatternLogic>(
 }
 
 fn apply_transitions<P: PatternLogic>(
-    patterns: BTreeSet<(PatternID, P)>,
+    patterns: PatternsInProgress<P>,
     transitions: &[<P as PatternLogic>::Constraint],
     known_constraints: &BTreeSet<<P as PatternLogic>::Constraint>,
-) -> (Vec<BTreeSet<(PatternID, P)>>, Vec<BTreeSet<PatternID>>) {
+) -> (Vec<PatternsInProgress<P>>, Vec<Matches>) {
     let mut next_patterns = vec![BTreeSet::default(); transitions.len()];
     let mut next_matches = vec![BTreeSet::default(); transitions.len()];
     for (id, pattern) in patterns {
@@ -371,8 +374,8 @@ fn select_best_class<'p, P: PatternLogic + 'p>(
 }
 
 fn partition_completed_patterns<P: PatternLogic>(
-    patterns: BTreeSet<(PatternID, P)>,
-) -> (BTreeSet<(PatternID, P)>, BTreeSet<(PatternID, P)>) {
+    patterns: PatternsInProgress<P>,
+) -> (PatternsInProgress<P>, PatternsInProgress<P>) {
     patterns
         .into_iter()
         .partition(|(_, p)| matches!(p.is_satisfiable(), Satisfiable::Tautology))

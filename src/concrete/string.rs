@@ -247,9 +247,9 @@ pub(super) mod tests {
         assert_eq!(result.len(), 0);
     }
 
-    const MATCHER_FACTORIES: &[fn(
-        Vec<StringPattern>,
-    ) -> Matcher<StringManyMatcher, StringNaiveManyMatcher>] = define_matcher_factories!(
+    type MatcherFactory =
+        fn(Vec<StringPattern>) -> Matcher<StringManyMatcher, StringNaiveManyMatcher>;
+    const MATCHER_FACTORIES: &[MatcherFactory] = define_matcher_factories!(
         StringPattern,
         StringIndexingScheme,
         StringManyMatcher,

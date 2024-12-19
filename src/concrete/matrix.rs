@@ -199,9 +199,9 @@ mod tests {
     use super::*;
     use rstest::rstest;
 
-    const MATCHER_FACTORIES: &[fn(
-        Vec<MatrixPattern>,
-    ) -> Matcher<MatrixManyMatcher, MatrixNaiveManyMatcher>] = define_matcher_factories!(
+    type MatcherFactory =
+        fn(Vec<MatrixPattern>) -> Matcher<MatrixManyMatcher, MatrixNaiveManyMatcher>;
+    const MATCHER_FACTORIES: &[MatcherFactory] = define_matcher_factories!(
         MatrixPattern,
         MatrixIndexingScheme,
         MatrixManyMatcher,
