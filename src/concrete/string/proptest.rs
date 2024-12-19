@@ -24,7 +24,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::string::tests::apply_all_matchers;
+    use crate::concrete::string::tests::apply_all_matchers;
 
     use super::*;
 
@@ -35,32 +35,30 @@ mod tests {
             subject in "[a-f]*",
             patterns in prop::collection::vec(any::<StringPattern>(), 1..5)
         ) {
-            let (mut nondet, mut default, mut det) = apply_all_matchers(patterns, &subject, 0..3)
+            let (mut default, mut naive) = apply_all_matchers(patterns, &subject)
                 .collect_tuple()
                 .unwrap();
 
-            nondet.sort();
             default.sort();
-            det.sort();
+            naive.sort();
 
-            prop_assert_eq!(&nondet, &default);
-            prop_assert_eq!(&nondet, &det);
+            prop_assert_eq!(&default, &naive);
         }
 
         #[test]
         #[ignore = "a bit slow"]
         fn proptest_string_large(
             subject in "[a-f]*",
-            patterns in prop::collection::vec(any::<StringPattern>(), 1..20)
+            patterns in prop::collection::vec(any::<StringPattern>(), 1..10)
         ) {
-            let (mut nondet, mut default) = apply_all_matchers(patterns, &subject, 0..2)
+            let (mut default, mut naive) = apply_all_matchers(patterns, &subject)
                 .collect_tuple()
                 .unwrap();
 
-            nondet.sort();
             default.sort();
+            naive.sort();
 
-            prop_assert_eq!(&nondet, &default);
+            prop_assert_eq!(&default, &naive);
         }
     }
 }

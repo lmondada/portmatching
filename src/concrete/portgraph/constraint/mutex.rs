@@ -1,6 +1,6 @@
 //! Logic to compute mutually exclusive PGConstraints.
 
-use crate::{constraint_tree::ConstraintTree, portgraph::predicate::PGPredicate};
+use crate::{concrete::portgraph::predicate::PGPredicate, constraint_tree::ConstraintTree};
 
 use super::PGConstraint;
 
@@ -64,7 +64,7 @@ mod tests {
     use insta::assert_debug_snapshot;
     use portgraph::PortOffset;
 
-    use crate::portgraph::indexing::PGIndexKey;
+    use crate::concrete::portgraph::indexing::PGIndexKey;
 
     use super::*;
 

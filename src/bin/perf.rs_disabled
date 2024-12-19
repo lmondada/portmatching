@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use itertools::Itertools;
 use portmatching::{
-    matrix::{MatrixManyMatcher, MatrixPattern, MatrixString},
+    concrete::matrix::{MatrixManyMatcher, MatrixPattern, MatrixString},
     PortMatcher,
 };
 

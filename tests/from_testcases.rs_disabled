@@ -7,9 +7,9 @@ use std::{
 use itertools::Itertools;
 use portgraph::{render::DotFormat, PortGraph};
 use portmatching::{
+    concrete::portgraph::{PGManyPatternMatcher, PGPattern},
     matcher::PortMatcher,
     pattern::ConcretePattern,
-    portgraph::{PGManyPatternMatcher, PGPattern},
     utils::test::SerialPatternMatch,
 };
 

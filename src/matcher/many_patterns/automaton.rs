@@ -1,35 +1,34 @@
 use std::fmt::{self, Debug};
-use std::hash::Hash;
 
 use itertools::Itertools;
 
-use crate::indexing::{DataBindMap, DataKey, IndexedData};
+use crate::automaton::BuildConfig;
+use crate::branch_selector::{CreateBranchSelector, DisplayBranchSelector, EvaluateBranchSelector};
+use crate::indexing::IndexedData;
+use crate::pattern::Pattern;
+use crate::IndexingScheme;
 use crate::{
     automaton::{AutomatonBuilder, ConstraintAutomaton},
-    constraint::Constraint,
-    constraint_tree::ToConstraintsTree,
     indexing::IndexKey,
     matcher::PatternMatch,
-    pattern::Pattern,
-    HashMap, PatternID, PortMatcher, Predicate,
+    HashMap, PatternID, PortMatcher,
 };
-use crate::{BindMap, DetHeuristic, IndexingScheme};
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ManyMatcher<PT, K: IndexKey, P, I> {
-    automaton: ConstraintAutomaton<K, P, I>,
+pub struct ManyMatcher<PT, K: IndexKey, B> {
+    automaton: ConstraintAutomaton<K, B>,
     patterns: HashMap<PatternID, PT>,
 }
 
-impl<PT, P, D> PortMatcher<D> for ManyMatcher<PT, DataKey<D>, P, D::IndexingScheme>
+impl<PT, D, B, K> PortMatcher<D> for ManyMatcher<PT, K, B>
 where
-    P: Predicate<D> + 'static,
-    PT: Pattern<Key = DataKey<D>, Predicate = P>,
-    D: IndexedData,
+    K: IndexKey,
+    D: IndexedData<K>,
+    B: EvaluateBranchSelector<D, D::Value, Key = K>,
 {
-    type Match = DataBindMap<D>;
+    type Match = D::BindMap;
 
     fn find_matches<'a>(
         &'a self,
@@ -49,81 +48,51 @@ pub enum PatternFallback {
     Fail,
 }
 
-impl<K: IndexKey, P, PT, I> ManyMatcher<PT, K, P, I>
-where
-    Constraint<K, P>: Eq + Clone + Hash,
-    P: ToConstraintsTree<K>,
-    PT: Pattern<Key = K, Predicate = P>,
-    I: IndexingScheme + Default,
-{
+impl<PT: Pattern + Clone, B> ManyMatcher<PT, PT::Key, B> {
     /// Create a new matcher from patterns.
     ///
     /// The patterns are converted to constraints. Uses the deterministic
     /// heuristic provided by the constraint type.
-    pub fn try_from_patterns<M>(
-        patterns: Vec<PT>,
-        fallback: PatternFallback,
-    ) -> Result<Self, PT::Error>
+    pub fn from_patterns<I>(patterns: Vec<PT>) -> Self
     where
-        I: IndexingScheme<BindMap = M>,
-        M: BindMap<Key = K>,
-        K: 'static,
-        P: 'static,
+        I: IndexingScheme<Key = PT::Key> + Default,
+        B: CreateBranchSelector<PT::Constraint, Key = PT::Key>,
     {
-        Self::try_from_patterns_with_det_heuristic(patterns, fallback, Default::default())
+        Self::from_patterns_with_det_heuristic(patterns, BuildConfig::<I>::default())
     }
 
     /// Create a new matcher from a vector of patterns, using a custom deterministic
     /// heuristic.
-    pub fn try_from_patterns_with_det_heuristic<M>(
+    pub fn from_patterns_with_det_heuristic(
         patterns: Vec<PT>,
-        fallback: PatternFallback,
-        det_heuristic: DetHeuristic<K, P>,
-    ) -> Result<Self, PT::Error>
+        config: BuildConfig<impl IndexingScheme<Key = PT::Key>>,
+    ) -> Self
     where
-        I: IndexingScheme<BindMap = M>,
-        M: BindMap<Key = K>,
-        K: 'static,
-        P: 'static,
+        B: CreateBranchSelector<PT::Constraint, Key = PT::Key>,
     {
-        let mut builder = AutomatonBuilder::new();
-        for (id, pattern) in patterns.iter().enumerate() {
-            let constraints = match fallback {
-                PatternFallback::Skip => {
-                    let Ok(constraints) = pattern.try_to_constraint_vec() else {
-                        continue;
-                    };
-                    constraints
-                }
-                PatternFallback::Fail => pattern.try_to_constraint_vec()?,
-            };
-            builder.add_pattern(
-                constraints,
-                id,
-                pattern.required_bindings().unwrap_or_default(),
-            );
-        }
-        let (automaton, pattern_ids) = builder.finish_with_det_heuristic(det_heuristic);
+        let builder = AutomatonBuilder::from_patterns(patterns.iter().cloned());
+        let (automaton, ids) = builder.build(config);
+
         let patterns = patterns
             .into_iter()
-            .enumerate()
-            .map(|(i, p)| (PatternID(i), p))
-            .filter(|(i, _)| pattern_ids.contains(i))
+            .zip(ids)
+            .map(|(p, id)| (id, p))
             .collect();
-        Ok(Self {
+
+        Self {
             automaton,
             patterns,
-        })
+        }
     }
 }
 
-impl<PT, K: IndexKey, P, I> Debug for ManyMatcher<PT, K, P, I> {
+impl<PT, K: IndexKey, B> Debug for ManyMatcher<PT, K, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ManyMatcher {{ {} patterns }}", self.patterns.len())
     }
 }
 
-impl<PT, K: IndexKey, P, I> ManyMatcher<PT, K, P, I> {
+impl<PT, K: IndexKey, B> ManyMatcher<PT, K, B> {
     /// Get a pattern by its ID.
     pub fn get_pattern(&self, id: PatternID) -> Option<&PT> {
         self.patterns.get(&id)
@@ -140,7 +109,7 @@ impl<PT, K: IndexKey, P, I> ManyMatcher<PT, K, P, I> {
     }
 }
 
-impl<PT, K: IndexKey, P: Debug, I> ManyMatcher<PT, K, P, I> {
+impl<PT, K: IndexKey, B: DisplayBranchSelector> ManyMatcher<PT, K, B> {
     /// A dotstring representation of the trie.
     pub fn dot_string(&self) -> String {
         self.automaton.dot_string()

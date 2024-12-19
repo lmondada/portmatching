@@ -11,17 +11,20 @@ use petgraph::dot::Dot;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::stable_graph::StableDiGraph;
 
+use crate::branch_selector::DisplayBranchSelector;
 use crate::HashMap;
+use std::collections::BTreeSet;
 use std::fmt::{self, Debug};
+use std::hash::Hash;
 
 use derive_more::{From, Into};
 
 use crate::indexing::IndexKey;
-use crate::{Constraint, PatternID};
+use crate::PatternID;
 pub use builder::AutomatonBuilder;
 
 /// The underlying petgraph type for the ConstraintAutomaton.
-type TransitionGraph<K, P> = StableDiGraph<State<K>, Transition<Constraint<K, P>>>;
+type TransitionGraph<K, B> = StableDiGraph<State<K, B>, ()>;
 
 /// An automaton-like datastructure to evaluate sets of constraints efficiently.
 ///
@@ -46,61 +49,62 @@ type TransitionGraph<K, P> = StableDiGraph<State<K>, Transition<Constraint<K, P>
 /// - I: Indexing scheme of the host data
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ConstraintAutomaton<K: IndexKey, P, I> {
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        deserialize = "K: Eq + Hash + serde::Deserialize<'de>, B: serde::Deserialize<'de>"
+    ))
+)]
+pub struct ConstraintAutomaton<K: Ord, B> {
     /// The transition graph
-    graph: TransitionGraph<K, P>,
+    graph: TransitionGraph<K, B>,
     /// The root of the transition graph
     root: StateID,
-    /// The indexing scheme used
-    host_indexing: I,
 }
 
-impl<K: IndexKey, P, I: Default> Default for ConstraintAutomaton<K, P, I> {
+impl<K: IndexKey, P> Default for ConstraintAutomaton<K, P> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
-    /// An empty constraint automaton with default indexing scheme.
+/// Configuration for building an automaton
+///
+/// This struct holds configuration parameters used during the automaton construction process.
+#[derive(Clone, Debug, Default)]
+pub struct BuildConfig<I> {
+    /// The indexing scheme to use for the automaton.
+    /// This determines how to index into host data through variable names (keys).
+    pub indexing_scheme: I,
+}
+
+impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
+    /// An empty constraint automaton.
     ///
     /// Use the [AutomatonBuilder] to construct an automaton from a list of
     /// constraints.
-    pub fn new() -> Self
-    where
-        I: Default,
-    {
-        Self::with_indexing_scheme(Default::default())
-    }
-
-    /// An empty constraint automaton, with the given indexing scheme
-    pub fn with_indexing_scheme(host_indexing: I) -> Self {
+    pub fn new() -> Self {
         let mut graph = TransitionGraph::new();
-        let root = graph.add_node(State::<K>::default());
+        let root = graph.add_node(State::default());
         Self {
             graph,
             root: root.into(),
-            host_indexing,
         }
     }
 
     /// Get its dot string representation
     pub fn dot_string(&self) -> String
     where
-        K: Debug,
-        P: Debug,
+        K: IndexKey,
+        B: DisplayBranchSelector,
     {
-        format!("{:?}", Dot::new(&self.graph))
+        let str_graph = self.graph.map(&fmt_node, &fmt_edge(&self.graph));
+        format!("{}", Dot::new(&str_graph))
     }
 
     /// Get the root state ID
     fn root(&self) -> StateID {
         self.root
-    }
-
-    /// Get the indexing scheme used by the automaton
-    pub fn host_indexing(&self) -> &I {
-        &self.host_indexing
     }
 
     /// Get the number of states in the automaton
@@ -109,7 +113,41 @@ impl<K: IndexKey, P, I> ConstraintAutomaton<K, P, I> {
     }
 }
 
-impl<K: IndexKey, P: Debug, I> Debug for ConstraintAutomaton<K, P, I> {
+fn fmt_node<K: IndexKey, B: DisplayBranchSelector>(_: NodeIndex, weight: &State<K, B>) -> String {
+    let br = weight
+        .branch_selector
+        .as_ref()
+        .map(|br| br.fmt_class())
+        .unwrap_or_default();
+    let matches = weight
+        .matches
+        .iter()
+        .map(|(id, bindings)| format!("{}: {:?}", id, bindings))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{br}\n{matches}")
+}
+
+fn fmt_edge<'t, K: IndexKey, B: DisplayBranchSelector + 't>(
+    graph: &TransitionGraph<K, B>,
+) -> impl Fn(EdgeIndex, &()) -> String + '_ {
+    |edge, &()| {
+        let edge_id = TransitionID(edge);
+        let src = graph.edge_endpoints(edge).unwrap().0;
+        let src_weight = graph.node_weight(src).unwrap();
+        if let Some(pos) = src_weight.edge_order.iter().position(|&e| e == edge_id) {
+            let br = src_weight
+                .branch_selector
+                .as_ref()
+                .expect("non trivial transition but no branch selector");
+            br.fmt_nth_constraint(pos).to_string()
+        } else {
+            "FAIL".to_string()
+        }
+    }
+}
+
+impl<K: IndexKey, P: DisplayBranchSelector> Debug for ConstraintAutomaton<K, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.dot_string())
     }
@@ -131,75 +169,49 @@ struct TransitionID(EdgeIndex);
 #[derive(Clone)]
 #[derive_where(Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct State<K: IndexKey> {
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        deserialize = "K: Eq + Hash + serde::Deserialize<'de>, B: serde::Deserialize<'de>"
+    ))
+)]
+struct State<K: Ord, B> {
     /// The pattern matches at current state, along with the bindings associated
     /// with each match.
     ///
     /// The requried bindings are stored topological order.
     matches: HashMap<PatternID, Vec<K>>,
-    /// Whether the state is deterministic
-    deterministic: bool,
+    /// The branch selector for the state
+    ///
+    /// None if the state has no child
+    branch_selector: Option<B>,
     /// The order of the outgoing contraint transitions. Must map one-to-one to
     /// the outgoing constraint edges, i.e. the edges with non-None weights.
-    constraint_order: Vec<TransitionID>,
+    edge_order: Vec<TransitionID>,
     /// The order of the outgoing epsilon transitions. Must map one-to-one to
     /// the outgoing epsilon edges, i.e. the edges with None weights.
-    epsilon_order: Vec<TransitionID>,
-    /// The required bindings to evaluate the constraints outgoing from the state.
+    epsilon: Option<TransitionID>,
+    /// The set of keys that must have been bound to process this state.
+    min_scope: Vec<K>,
+    /// Any key outside of this set can be forgotten.
     ///
-    /// Note that this could be a subset of the bindings required by a match
-    /// at the current state, so matches should be evaluated and returned
-    /// before discarding any bindings that may no longer be required.
-    ///
-    /// The bindings are given in a toposort order, i.e. it is guaranteed
-    /// that bindings [0..i] are sufficient to determine binding i.
-    required_bindings: Vec<K>,
+    /// The ordering of the keys is used for unique hashing.
+    max_scope: BTreeSet<K>,
 }
 
-impl<K: IndexKey> Debug for State<K> {
+impl<K: IndexKey, B> Debug for State<K, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.deterministic {
-            write!(f, "D")?;
-        } else {
-            write!(f, "ND")?;
-        }
         if !self.matches.is_empty() {
             write!(f, " {:?}", self.matches)?;
         }
         writeln!(f)?;
-        write!(f, "scope: {:?}", self.required_bindings)?;
+        writeln!(f, "max_scope: {:?}", self.max_scope)?;
+        writeln!(f, "min_scope: {:?}", self.min_scope)?;
         Ok(())
-    }
-}
-
-/// A transition from one state to another.
-///
-/// A transition has an optional constraint that must be satisfied for the
-/// transition to occur. A None constraint is either an "epsilon" or "FAIL"
-/// constraint, depending on the state's deterministic flag.
-#[derive(Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct Transition<C> {
-    constraint: Option<C>,
-}
-
-impl<C: Debug> Debug for Transition<C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(constraint) = &self.constraint {
-            write!(f, "{:?}", constraint)
-        } else {
-            write!(f, "ε")
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{indexing::tests::TestIndexingScheme, predicate::tests::TestPredicate};
-
-    use super::ConstraintAutomaton;
-
-    pub(crate) type TestAutomaton = ConstraintAutomaton<usize, TestPredicate, TestIndexingScheme>;
-
     pub(crate) use super::builder::tests::TestBuilder;
 }
