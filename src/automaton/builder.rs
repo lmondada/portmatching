@@ -186,8 +186,7 @@ where
 
             // 3. Apply all transition to each pattern. Track new patterns and
             // new matches
-            let (mut next_patterns, mut next_matches) =
-                apply_transitions(patterns, &constraints, &satisfied_constraints);
+            let (mut next_patterns, mut next_matches) = apply_transitions(patterns, &constraints);
 
             // Remove transitions that do not lead to a new child
             retain_non_empty(&mut constraints, &mut next_patterns, &mut next_matches);
@@ -318,12 +317,11 @@ fn retain_non_empty<P: PatternLogic>(
 fn apply_transitions<P: PatternLogic>(
     patterns: PatternsInProgress<P>,
     transitions: &[<P as PatternLogic>::Constraint],
-    known_constraints: &BTreeSet<<P as PatternLogic>::Constraint>,
 ) -> (Vec<PatternsInProgress<P>>, Vec<Matches>) {
     let mut next_patterns = vec![BTreeSet::default(); transitions.len()];
     let mut next_matches = vec![BTreeSet::default(); transitions.len()];
     for (id, pattern) in patterns {
-        let new_patterns = pattern.condition_on(transitions, known_constraints);
+        let new_patterns = pattern.apply_transitions(transitions);
         assert_eq!(transitions.len(), new_patterns.len());
         for (i, sat_p) in new_patterns.into_iter().enumerate() {
             let next_patterns = &mut next_patterns[i];
