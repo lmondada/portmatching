@@ -130,7 +130,7 @@ where
         };
 
         let constraints = pattern.nominate(&cls).into_iter().collect_vec();
-        let new_patterns = pattern.condition_on(&constraints, &known_constraints);
+        let new_patterns = pattern.apply_transitions(&constraints);
 
         // Only support patterns with a single nominated constraint per class
         let Ok(constraint) = constraints.into_iter().exactly_one() else {

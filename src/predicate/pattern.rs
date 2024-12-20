@@ -16,7 +16,8 @@ use super::ConstraintLogic;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Define the logic for matching patterns using predicates
 pub struct PredicateLogic<K, P> {
-    constraints: ConstraintSet<K, P>,
+    pattern_constraints: ConstraintSet<K, P>,
+    known_constraints: BTreeSet<Constraint<K, P>>,
 }
 
 impl<K, P> PredicateLogic<K, P>
@@ -27,12 +28,15 @@ where
     ///
     /// Every constraint must have a different class, otherwise this will panic.
     pub fn from_constraints_set(constraints: BTreeSet<Constraint<K, P>>) -> Self {
-        Self { constraints }
+        Self {
+            pattern_constraints: constraints,
+            known_constraints: Default::default(),
+        }
     }
 
     /// Get all unique branch classes from the constraints
     pub fn all_classes(&self) -> BTreeSet<P::BranchClass> {
-        self.constraints
+        self.pattern_constraints
             .iter()
             .flat_map(|p| p.get_classes())
             .collect()
@@ -46,7 +50,7 @@ where
         &'c self,
         cls: &'c P::BranchClass,
     ) -> impl Iterator<Item = &'c Constraint<K, P>> {
-        self.constraints
+        self.pattern_constraints
             .iter()
             .filter(|p| p.get_classes().contains(cls))
     }
@@ -62,7 +66,7 @@ where
     /// Condition pattern on a set of known constraints
     pub fn conditioned(
         &self,
-        known_constraints: &BTreeSet<Constraint<K, P>>,
+        known_constraints: BTreeSet<Constraint<K, P>>,
         prev_constraints: &[Constraint<K, P>],
     ) -> Satisfiable<Self>
     where
@@ -70,8 +74,8 @@ where
     {
         let mut new_constraints = BTreeSet::new();
 
-        for c in &self.constraints {
-            match c.condition_on(known_constraints, prev_constraints) {
+        for c in &self.pattern_constraints {
+            match c.condition_on(&known_constraints, prev_constraints) {
                 Satisfiable::Yes(new_c) => {
                     new_constraints.insert(new_c);
                 }
@@ -84,7 +88,10 @@ where
             return Satisfiable::Tautology;
         }
 
-        Satisfiable::Yes(Self::from_constraints(new_constraints))
+        Satisfiable::Yes(Self {
+            pattern_constraints: new_constraints,
+            known_constraints,
+        })
     }
 }
 
@@ -123,7 +130,7 @@ where
 
     fn required_bindings(&self) -> Vec<Self::Key> {
         self.0
-            .constraints
+            .pattern_constraints
             .iter()
             .flat_map(|p| p.required_bindings().iter().copied())
             .unique()
@@ -150,32 +157,28 @@ where
     }
 
     fn nominate(&self, cls: &Self::BranchClass) -> BTreeSet<Self::Constraint> {
-        self.constraints
+        self.pattern_constraints
             .iter()
             .filter(|c| c.get_classes().iter().any(|c| c == cls))
             .cloned()
             .collect()
     }
 
-    fn condition_on(
-        &self,
-        constraints: &[Self::Constraint],
-        known_constraints: &BTreeSet<Self::Constraint>,
-    ) -> Vec<Satisfiable<Self>> {
+    fn apply_transitions(&self, constraints: &[Self::Constraint]) -> Vec<Satisfiable<Self>> {
         let mut conditioned = Vec::with_capacity(constraints.len());
 
         for (i, c) in constraints.iter().enumerate() {
-            let mut known_constraints = known_constraints.clone();
+            let mut known_constraints = self.known_constraints.clone();
             known_constraints.insert(c.clone());
             let prev_constraints = &constraints[..i];
-            conditioned.push(self.conditioned(&known_constraints, prev_constraints));
+            conditioned.push(self.conditioned(known_constraints, prev_constraints));
         }
 
         conditioned
     }
 
     fn is_satisfiable(&self) -> Satisfiable {
-        if self.constraints.is_empty() {
+        if self.pattern_constraints.is_empty() {
             Satisfiable::Tautology
         } else {
             Satisfiable::Yes(())

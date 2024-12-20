@@ -82,12 +82,8 @@ pub trait PatternLogic: Ord + Clone {
     ///
     /// For each transition in `transitions`, return whether the pattern is
     /// still satisfiable and, if so, the pattern equivalent to `self` when
-    /// conditioned on that transition and `known_constraints`.
-    fn condition_on(
-        &self,
-        transitions: &[Self::Constraint],
-        known_constraints: &BTreeSet<Self::Constraint>,
-    ) -> Vec<Satisfiable<Self>>;
+    /// conditioned on that transition.
+    fn apply_transitions(&self, transitions: &[Self::Constraint]) -> Vec<Satisfiable<Self>>;
 
     /// Check whether the pattern is satisfiable.
     fn is_satisfiable(&self) -> Satisfiable;
