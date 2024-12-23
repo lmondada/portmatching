@@ -12,6 +12,7 @@ pub mod pattern;
 pub mod predicate;
 pub mod utils;
 
+pub use branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector};
 pub use constraint::{Constraint, DetHeuristic};
 pub use constraint_tree::{ConditionedPredicate, ConstraintTree, ToConstraintsTree};
 pub use indexing::{BindMap, IndexedData, IndexingScheme};
@@ -20,7 +21,7 @@ pub use matcher::{
     SinglePatternMatcher,
 };
 pub use pattern::{Pattern, PatternLogic};
-pub use predicate::{ArityPredicate, Predicate};
+pub use predicate::{ArityPredicate, ConstraintLogic, Predicate, PredicatePattern};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
