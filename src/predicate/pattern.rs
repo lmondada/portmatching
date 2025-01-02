@@ -152,7 +152,12 @@ where
 
     type BranchClass = P::BranchClass;
 
-    fn rank_classes(&self) -> impl Iterator<Item = (Self::BranchClass, ClassRank)> {
+    type Key = K;
+
+    fn rank_classes(
+        &self,
+        _: &[Self::Key],
+    ) -> impl Iterator<Item = (Self::BranchClass, ClassRank)> {
         self.all_classes().into_iter().map(|cls| (cls, 0.5))
     }
 

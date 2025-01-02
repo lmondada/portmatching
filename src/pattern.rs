@@ -41,7 +41,7 @@ pub trait Pattern {
     /// The type of variable names used in the pattern.
     type Key: IndexKey;
     /// The predicate evaluatation logic.
-    type Logic: PatternLogic<Constraint = Self::Constraint>;
+    type Logic: PatternLogic<Constraint = Self::Constraint, Key = Self::Key>;
     /// The type of constraints used in the pattern logic.
     type Constraint;
 
@@ -58,6 +58,8 @@ pub trait PatternLogic: Ord + Clone {
     type Constraint: Ord + Clone;
     /// A partition of all predicates into mutually exclusive sets.
     type BranchClass: Ord;
+    /// The constraint key type.
+    type Key: IndexKey;
 
     /// The branch classes most pertinent to the pattern, along with a rank.
     ///
@@ -68,8 +70,14 @@ pub trait PatternLogic: Ord + Clone {
     /// subset of constraints satisfied by the pattern A(P), then the rank of
     /// the branch class F is E_G[ | { A in F | A(P) and A(G) } | ].
     ///
+    /// The rank can take the `known_bindings` into account, to account for
+    /// the multiplicity of bindings that must yet be bound.
+    ///
     /// The class with lowest overall rank will be selected.
-    fn rank_classes(&self) -> impl Iterator<Item = (Self::BranchClass, ClassRank)>;
+    fn rank_classes(
+        &self,
+        known_bindings: &[Self::Key],
+    ) -> impl Iterator<Item = (Self::BranchClass, ClassRank)>;
 
     /// Get all constraints in a class that are useful for pattern matching
     /// `self`.

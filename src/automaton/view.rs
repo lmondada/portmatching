@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use petgraph::{algo::toposort, visit::EdgeRef, Direction};
+use petgraph::{visit::EdgeRef, Direction};
 
 use crate::{indexing::IndexKey, HashMap, PatternID};
 
@@ -58,11 +58,6 @@ pub(super) trait GraphView<K: IndexKey, B> {
 
     fn branch_selector(&self, state: StateID) -> Option<&B> {
         self.node_weight(state).branch_selector.as_ref()
-    }
-
-    fn all_states(&self) -> impl Iterator<Item = StateID> {
-        let nodes = toposort(self.underlying_graph(), Default::default()).unwrap();
-        nodes.into_iter().map(StateID)
     }
 
     fn min_scope<'a>(&'a self, state: StateID) -> &'a [K]

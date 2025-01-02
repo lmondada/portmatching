@@ -21,6 +21,8 @@ impl<P, K: IndexKey, B> AutomatonBuilder<P, K, B> {
     ///
     /// If the child state already exists, it will be reused and `None` will
     /// be returned. Otherwise, the new state will be returned
+    ///
+    /// Add `matches` to the new state
     pub(super) fn add_child(
         &mut self,
         parent: StateID,
