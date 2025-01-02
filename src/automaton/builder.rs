@@ -95,9 +95,9 @@ struct BuildState<P: PatternLogic> {
     satisfied_constraints: BTreeSet<P::Constraint>,
 }
 
-impl<P: PatternLogic, K: IndexKey, B> AutomatonBuilder<P, K, B>
+impl<P: PatternLogic, B> AutomatonBuilder<P, P::Key, B>
 where
-    B: CreateBranchSelector<P::Constraint, Key = K>,
+    B: CreateBranchSelector<P::Constraint, Key = P::Key>,
 {
     /// Construct the automaton.
     ///
@@ -111,13 +111,10 @@ where
     /// states are merged whenever possible.
     pub fn build(
         mut self,
-        config: BuildConfig<impl IndexingScheme<Key = K>>,
-    ) -> (ConstraintAutomaton<K, B>, Vec<PatternID>) {
+        config: BuildConfig<impl IndexingScheme<Key = P::Key>>,
+    ) -> (ConstraintAutomaton<P::Key, B>, Vec<PatternID>) {
         // Turn patterns into a transition graph
-        let pattern_ids = self.construct_graph();
-
-        // Compute the minimum scopes for each state.
-        self.populate_min_scopes(config.indexing_scheme);
+        let pattern_ids = self.construct_graph(config.indexing_scheme);
 
         // Compute the maximum scopes (must happen after min scopes).
         self.populate_max_scope();
@@ -132,7 +129,7 @@ where
     /// The main automaton construction function
     ///
     /// Given patterns, construct its constraint automaton.
-    fn construct_graph(&mut self) -> Vec<PatternID> {
+    fn construct_graph(&mut self, indexing: impl IndexingScheme<Key = P::Key>) -> Vec<PatternID> {
         // Drain all patterns into set
         let patterns: PatternsInProgress<_> = self
             .patterns
@@ -170,7 +167,9 @@ where
             }
 
             // 1. Vote: get the branch class that makes us progress the most
-            let cls = select_best_class(patterns.iter().map(|(_, p)| p)).unwrap();
+            let cls =
+                select_best_class(patterns.iter().map(|(_, p)| p), &self.known_bindings(state))
+                    .unwrap();
 
             // 2. Collect all constraints of interest to the patterns
             let nominations = patterns.iter().map(|(_, p)| p.nominate(&cls)).collect_vec();
@@ -191,7 +190,7 @@ where
             // Remove transitions that do not lead to a new child
             retain_non_empty(&mut constraints, &mut next_patterns, &mut next_matches);
 
-            // Add new children and queue them up when useful
+            // 4a. Add new children and queue them up when useful
             for (constraint, patterns, matches) in izip!(&constraints, next_patterns, next_matches)
             {
                 let Some(next_state) = self.add_child(state, patterns.clone(), matches, false)
@@ -211,11 +210,7 @@ where
                 }
             }
 
-            // Create the branch selector
-            let br = B::create_branch_selector(constraints);
-            self.set_branch_selector(state, br);
-
-            // Add epsilon transition to skip patterns
+            // 4b. Add epsilon transition to skip patterns
             if !skip_patterns.is_empty() {
                 if let Some(state) =
                     self.add_child(state, skip_patterns.clone(), Matches::default(), true)
@@ -228,31 +223,33 @@ where
                     bfs_queue.push_back(build_state);
                 }
             }
+
+            // 5. Consume constraints to create the branch selector
+            let br = B::create_branch_selector(constraints);
+            self.set_branch_selector(state, br);
+
+            // 6. Compute the minimum scope for the state (requires branch selector).
+            self.populate_min_scope(state, &indexing);
         }
 
         pattern_ids
     }
 
-    /// Populate the scope of each automaton state.
+    /// Populate the minimum scope of an automaton state.
     ///
-    /// The scope is the set of bindings that are "relevant" to the current
-    /// traversal. They are the set of bindings that
+    /// The minimum scope is the set of bindings that must be bound at the
+    /// state, for
     ///  - are in all paths from root to `state`, and
     ///  - appear in at least one pattern match in the future of `state`, or
     ///  - are required to evaluate outgoing constraints at `state`.
-    fn populate_min_scopes(&mut self, indexing: impl IndexingScheme<Key = K>) {
-        for state in self.all_states().collect_vec() {
-            let reqs = self.required_bindings(state);
-            let known_bindings = self.known_bindings(state);
-            let min_scope = indexing.all_missing_bindings(reqs, known_bindings);
-            self.set_min_scope(state, min_scope);
-        }
+    fn populate_min_scope(&mut self, state: StateID, indexing: &impl IndexingScheme<Key = P::Key>) {
+        let reqs = self.required_bindings(state);
+        let known_bindings = self.known_bindings(state);
+        let min_scope = indexing.all_missing_bindings(reqs, known_bindings);
+        self.set_min_scope(state, min_scope);
     }
 
-    fn populate_max_scope(&mut self)
-    where
-        K: IndexKey,
-    {
+    fn populate_max_scope(&mut self) {
         // Propagate max_scope from leaves to root (reverse topological sort)
         let topo = self.graph.nodes_iter().collect_vec();
 
@@ -280,7 +277,7 @@ where
         }
     }
 
-    fn required_bindings(&self, state: StateID) -> impl Iterator<Item = K> + '_ {
+    fn required_bindings(&self, state: StateID) -> impl Iterator<Item = P::Key> + '_ {
         if let Some(br) = self.branch_selector(state) {
             Some(br.required_bindings().iter().copied())
                 .into_iter()
@@ -346,6 +343,7 @@ fn approx_isize(f: f64) -> isize {
 
 fn select_best_class<'p, P: PatternLogic + 'p>(
     patterns: impl IntoIterator<IntoIter = impl ExactSizeIterator<Item = &'p P>>,
+    known_bindings: &[P::Key],
 ) -> Option<P::BranchClass> {
     let patterns = patterns.into_iter();
     let n_patterns = patterns.len() as f64;
@@ -355,7 +353,7 @@ fn select_best_class<'p, P: PatternLogic + 'p>(
         patterns
             .into_iter()
             .fold(BTreeMap::default(), |mut classes, pattern| {
-                for (cls, rank) in pattern.rank_classes() {
+                for (cls, rank) in pattern.rank_classes(known_bindings) {
                     *classes.entry(cls).or_insert(n_patterns) += rank - 1.;
                 }
                 classes

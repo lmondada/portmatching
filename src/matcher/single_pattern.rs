@@ -123,7 +123,7 @@ where
     let mut known_constraints = BTreeSet::new();
     loop {
         let Some((cls, _)) = pattern
-            .rank_classes()
+            .rank_classes(&[]) // TODO: keep track of known_bindings
             .max_by_key(|(_, rank)| approx_isize(*rank))
         else {
             return Vec::new();
