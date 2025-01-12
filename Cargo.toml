@@ -24,7 +24,9 @@ path = "src/lib.rs"
 [dependencies]
 bimap = "0.6.2"
 bitvec = "1.0.1"
-portgraph = { version = "0.12.2", features = ["petgraph"], optional = true }
+portgraph = { git = "https://github.com/CQCL/portgraph", rev = "b6e266c45f82fc378ad0ff3365a1f02b88d91693", features = [
+    "petgraph",
+], optional = true }
 serde = { version = "1.0.152", features = ["derive"], optional = true }
 smallvec = "1.10.0"
 itertools = "0.10.5"
@@ -69,7 +71,8 @@ auto_enums = "0.8.6"
 
 [dev-dependencies.portgraph]
 features = ["proptest", "serde"]
-version = "0.12.0"
+git = "https://github.com/CQCL/portgraph"
+rev = "b6e266c45f82fc378ad0ff3365a1f02b88d91693"
 
 [profile.dev.package]
 insta.opt-level = 3
