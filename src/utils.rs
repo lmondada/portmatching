@@ -1,13 +1,13 @@
 //! Utility functions.
 
-#[cfg(feature = "portgraph")]
-pub(crate) mod portgraph;
-#[cfg(all(feature = "portgraph", feature = "proptest"))]
-pub mod test;
+// #[cfg(feature = "portgraph")]
+// pub(crate) mod portgraph;
+// #[cfg(all(feature = "portgraph", feature = "proptest"))]
+// pub mod test;
 
 use itertools::Itertools;
-#[cfg(all(feature = "portgraph", feature = "proptest"))]
-pub use test::gen_portgraph_connected;
+// #[cfg(all(feature = "portgraph", feature = "proptest"))]
+// pub use test::gen_portgraph_connected;
 
 /// Sort a vector and return a vector of pairs of the original value and its position.
 #[allow(dead_code)]
