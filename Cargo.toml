@@ -69,7 +69,7 @@ auto_enums = "0.8.6"
 
 [dev-dependencies.portgraph]
 features = ["proptest", "serde"]
-version = "*"
+version = "0.13"
 
 [profile.dev.package]
 insta.opt-level = 3
