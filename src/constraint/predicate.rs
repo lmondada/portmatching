@@ -41,7 +41,8 @@ pub trait EvaluatePredicate<Data, Value>: ArityPredicate {
     fn check(&self, bindings: &[impl Borrow<Value>], data: &Data) -> bool;
 }
 
-/// Implement on a predicate to define its logic within [`super::ConstraintPattern`]s.
+/// Implement on a predicate to define its conditional logic within
+/// [`super::PartialConstraintPattern`]s.
 ///
 /// This trait defines how constraints simplify when conditioned on other constraints.
 pub trait ConditionalPredicate<K>: Clone + Ord + Sized {
@@ -111,14 +112,14 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use rstest::rstest;
 
-    use crate::constraint::{ConstraintPattern, ConstraintPatternLogic, EvaluatePredicate};
+    use crate::constraint::{ConstraintPattern, EvaluatePredicate, PartialConstraintPattern};
     use crate::indexing::tests::TestData;
 
     use super::ArityPredicate;
 
     pub type TestKey = &'static str;
     pub type TestPattern = ConstraintPattern<TestKey, TestPredicate>;
-    pub type TestLogic = ConstraintPatternLogic<TestKey, TestPredicate>;
+    pub type TestPartialPattern = PartialConstraintPattern<TestKey, TestPredicate>;
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub(crate) enum TestPredicate {

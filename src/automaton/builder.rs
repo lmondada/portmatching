@@ -8,7 +8,7 @@ use crate::{
     branch_selector::CreateBranchSelector,
     indexing::IndexKey,
     pattern::{Pattern, Satisfiable},
-    HashSet, IndexingScheme, PatternID, PatternLogic,
+    HashSet, IndexingScheme, PartialPattern, PatternID,
 };
 
 mod modify;
@@ -71,13 +71,13 @@ impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
 impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
     /// Construct an automaton builder from a list of patterns.
     pub fn from_patterns(
-        patterns: impl IntoIterator<Item = impl Pattern<Key = K, Logic = PT>>,
+        patterns: impl IntoIterator<Item = impl Pattern<Key = K, PartialPattern = PT>>,
     ) -> Self {
         let (patterns, pattern_scopes) = patterns
             .into_iter()
             .map(|p| {
                 let scope = HashSet::from_iter(p.required_bindings());
-                (p.into_logic(), scope)
+                (p.into_partial_pattern(), scope)
             })
             .unzip();
         Self {
@@ -89,13 +89,13 @@ impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
 }
 
 /// State of the builder at one particular state in the graph
-struct BuildState<P: PatternLogic> {
+struct BuildState<P: PartialPattern> {
     state: StateID,
     patterns: PatternsInProgress<P>,
     satisfied_constraints: BTreeSet<P::Constraint>,
 }
 
-impl<P: PatternLogic, B> AutomatonBuilder<P, P::Key, B>
+impl<P: PartialPattern, B> AutomatonBuilder<P, P::Key, B>
 where
     B: CreateBranchSelector<P::Constraint, Key = P::Key>,
 {
@@ -288,8 +288,8 @@ where
     }
 }
 
-fn retain_non_empty<P: PatternLogic>(
-    constraints: &mut Vec<<P as PatternLogic>::Constraint>,
+fn retain_non_empty<P: PartialPattern>(
+    constraints: &mut Vec<<P as PartialPattern>::Constraint>,
     next_patterns: &mut Vec<PatternsInProgress<P>>,
     next_matches: &mut Vec<Matches>,
 ) {
@@ -311,9 +311,9 @@ fn retain_non_empty<P: PatternLogic>(
     retain!(next_matches);
 }
 
-fn apply_transitions<P: PatternLogic>(
+fn apply_transitions<P: PartialPattern>(
     patterns: PatternsInProgress<P>,
-    transitions: &[<P as PatternLogic>::Constraint],
+    transitions: &[<P as PartialPattern>::Constraint],
 ) -> (Vec<PatternsInProgress<P>>, Vec<Matches>) {
     let mut next_patterns = vec![BTreeSet::default(); transitions.len()];
     let mut next_matches = vec![BTreeSet::default(); transitions.len()];
@@ -341,7 +341,7 @@ fn approx_isize(f: f64) -> isize {
     (f * 10000.) as isize
 }
 
-fn select_best_class<'p, P: PatternLogic + 'p>(
+fn select_best_class<'p, P: PartialPattern + 'p>(
     patterns: impl IntoIterator<IntoIter = impl ExactSizeIterator<Item = &'p P>>,
     known_bindings: &[P::Key],
 ) -> Option<P::BranchClass> {
@@ -369,7 +369,7 @@ fn select_best_class<'p, P: PatternLogic + 'p>(
     Some(min_rank)
 }
 
-fn partition_completed_patterns<P: PatternLogic>(
+fn partition_completed_patterns<P: PartialPattern>(
     patterns: PatternsInProgress<P>,
 ) -> (PatternsInProgress<P>, PatternsInProgress<P>) {
     patterns
@@ -383,7 +383,7 @@ impl<P, K: IndexKey, B> Default for AutomatonBuilder<P, K, B> {
     }
 }
 
-impl<PT: Pattern, B> FromIterator<PT> for AutomatonBuilder<PT::Logic, PT::Key, B> {
+impl<PT: Pattern, B> FromIterator<PT> for AutomatonBuilder<PT::PartialPattern, PT::Key, B> {
     fn from_iter<T: IntoIterator<Item = PT>>(iter: T) -> Self {
         Self::from_patterns(iter)
     }
@@ -395,7 +395,7 @@ pub(super) mod tests {
     use crate::{
         branch_selector::tests::TestBranchSelector,
         constraint::{
-            tests::{TestConstraint, TestKey, TestLogic, TestPattern, TestPredicate},
+            tests::{TestConstraint, TestKey, TestPartialPattern, TestPattern, TestPredicate},
             ConstraintPattern,
         },
         indexing::tests::TestStrIndexingScheme,
@@ -415,7 +415,7 @@ pub(super) mod tests {
 
     impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
         #[allow(unused)]
-        pub(crate) fn wrap_builder<P: PatternLogic>(
+        pub(crate) fn wrap_builder<P: PartialPattern>(
             self,
             with_builder: impl Fn(&mut AutomatonBuilder<P, K, B>),
         ) -> Self {
@@ -429,7 +429,7 @@ pub(super) mod tests {
         }
     }
 
-    pub(crate) type TestBuilder = AutomatonBuilder<TestLogic, TestKey, TestBranchSelector>;
+    pub(crate) type TestBuilder = AutomatonBuilder<TestPartialPattern, TestKey, TestBranchSelector>;
     pub(crate) type TestBuildConfig = BuildConfig<TestStrIndexingScheme>;
 
     #[test]

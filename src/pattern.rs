@@ -40,20 +40,23 @@ pub enum PredicateSelection<P> {
 pub trait Pattern {
     /// The type of variable names used in the pattern.
     type Key: IndexKey;
-    /// The predicate evaluatation logic.
-    type Logic: PatternLogic<Constraint = Self::Constraint, Key = Self::Key>;
-    /// The type of constraints used in the pattern logic.
+    /// The type for partially satisfied patterns.
+    type PartialPattern: PartialPattern<Constraint = Self::Constraint, Key = Self::Key>;
+    /// The constraint type used to express the pattern.
     type Constraint;
 
     /// List of required bindings to match the pattern.
     fn required_bindings(&self) -> Vec<Self::Key>;
 
-    /// Extract the pattern logic for further processing.
-    fn into_logic(self) -> Self::Logic;
+    /// Extract a partial pattern for further processing.
+    fn into_partial_pattern(self) -> Self::PartialPattern;
 }
 
-/// The evaluation logic for a type of pattern.
-pub trait PatternLogic: Ord + Clone {
+/// Partially satisfied patterns.
+///
+/// Provide the logic for constructing and simplifying patterns as constraints
+/// get applied to it.
+pub trait PartialPattern: Ord + Clone {
     /// The type of predicates used in the pattern.
     type Constraint: Ord + Clone;
     /// A partition of all predicates into mutually exclusive sets.

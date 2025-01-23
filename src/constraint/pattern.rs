@@ -7,7 +7,7 @@ use crate::{
     constraint::ConstraintSet,
     indexing::IndexKey,
     pattern::{ClassRank, Pattern, Satisfiable},
-    Constraint, PatternLogic,
+    Constraint, PartialPattern,
 };
 use std::{collections::BTreeSet, hash::Hash};
 
@@ -22,15 +22,15 @@ pub struct ConstraintPattern<K, P> {
     constraints: ConstraintSet<K, P>,
 }
 
-/// The logic for [`ConstraintPattern`].
+/// A partially satisfied [`ConstraintPattern`].
 ///
 /// This keeps track of constraints that are known to be satisfied, along
 /// with the remaining pattern constraints yet to be satisfied.
 ///
-/// Provides an implementation of [`PatternLogic`]. See [`PatternLogic`] for
+/// Provides an implementation of [`PartialPattern`]. See [`PartialPattern`] for
 /// more information.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ConstraintPatternLogic<K, P> {
+pub struct PartialConstraintPattern<K, P> {
     pattern_constraints: ConstraintSet<K, P>,
     known_constraints: BTreeSet<Constraint<K, P>>,
 }
@@ -55,16 +55,16 @@ where
     }
 }
 
-impl<K, P> Into<ConstraintPatternLogic<K, P>> for ConstraintPattern<K, P> {
-    fn into(self) -> ConstraintPatternLogic<K, P> {
-        ConstraintPatternLogic {
+impl<K, P> Into<PartialConstraintPattern<K, P>> for ConstraintPattern<K, P> {
+    fn into(self) -> PartialConstraintPattern<K, P> {
+        PartialConstraintPattern {
             pattern_constraints: self.constraints,
             known_constraints: BTreeSet::new(),
         }
     }
 }
 
-impl<K, P> ConstraintPatternLogic<K, P>
+impl<K, P> PartialConstraintPattern<K, P>
 where
     P: GetConstraintClass<K> + ConditionalPredicate<K>,
 {
@@ -158,7 +158,7 @@ where
 {
     type Key = K;
 
-    type Logic = ConstraintPatternLogic<K, P>;
+    type PartialPattern = PartialConstraintPattern<K, P>;
 
     type Constraint = Constraint<K, P>;
 
@@ -170,12 +170,12 @@ where
             .collect()
     }
 
-    fn into_logic(self) -> Self::Logic {
+    fn into_partial_pattern(self) -> Self::PartialPattern {
         self.into()
     }
 }
 
-impl<K, P> PatternLogic for ConstraintPatternLogic<K, P>
+impl<K, P> PartialPattern for PartialConstraintPattern<K, P>
 where
     K: IndexKey,
     P: ConditionalPredicate<K> + GetConstraintClass<K>,

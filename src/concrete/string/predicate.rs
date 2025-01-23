@@ -264,6 +264,6 @@ mod tests {
     #[test]
     fn test_to_constraints() {
         let p = StringPattern::parse_str("$c$d$eca$c$c$aaaba");
-        p.into_logic(); // TODO: turn into a Result.unwrap()
+        p.into_partial_pattern(); // TODO: turn into a Result.unwrap()
     }
 }

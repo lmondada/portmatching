@@ -9,7 +9,7 @@ use itertools::Itertools;
 use crate::{
     branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector},
     indexing::{bindings_hash, Binding, IndexKey, IndexedData},
-    pattern::{Pattern, PatternLogic, Satisfiable},
+    pattern::{PartialPattern, Pattern, Satisfiable},
     BindMap, HashSet, IndexingScheme, PatternID,
 };
 
@@ -72,7 +72,7 @@ impl<K, B> SinglePatternMatcher<K, B> {
         let required_bindings = BTreeSet::from_iter(pattern.required_bindings());
 
         // Break pattern into predicates
-        let constraints = decompose_constraints(pattern.into_logic());
+        let constraints = decompose_constraints(pattern.into_partial_pattern());
 
         // Turn predicates into branch selectors (with only one branch -- they
         // are just predicate evaluators in this case)
@@ -107,7 +107,7 @@ impl<K, B> SinglePatternMatcher<K, B> {
 
 fn decompose_constraints<P>(mut pattern: P) -> Vec<P::Constraint>
 where
-    P: PatternLogic,
+    P: PartialPattern,
 {
     fn approx_isize(f: f64) -> isize {
         (f * 10000.) as isize

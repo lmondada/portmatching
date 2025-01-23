@@ -1,7 +1,7 @@
 use std::{fmt, iter};
 
 use crate::concrete::string::CharVar;
-use crate::constraint::{ConstraintPattern, ConstraintPatternLogic};
+use crate::constraint::{ConstraintPattern, PartialConstraintPattern};
 use crate::{Constraint, HashMap, Pattern};
 
 use super::{CharacterPredicate, MatrixConstraint, MatrixPatternPosition};
@@ -126,7 +126,7 @@ impl MatrixPattern {
 
 impl Pattern for MatrixPattern {
     type Key = MatrixPatternPosition;
-    type Logic = ConstraintPatternLogic<MatrixPatternPosition, CharacterPredicate>;
+    type PartialPattern = PartialConstraintPattern<MatrixPatternPosition, CharacterPredicate>;
     type Constraint = MatrixConstraint;
 
     fn required_bindings(&self) -> Vec<Self::Key> {
@@ -137,7 +137,7 @@ impl Pattern for MatrixPattern {
             .collect()
     }
 
-    fn into_logic(self) -> Self::Logic {
+    fn into_partial_pattern(self) -> Self::PartialPattern {
         self.into_constraint_pattern().into()
     }
 }
