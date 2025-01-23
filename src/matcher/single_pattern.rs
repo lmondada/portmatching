@@ -232,9 +232,8 @@ mod tests {
 
     use crate::{
         branch_selector::tests::TestBranchSelector,
-        constraint::tests::TestConstraint,
+        constraint::tests::{TestConstraint, TestPattern, TestPredicate},
         indexing::tests::{TestData, TestStrIndexingScheme},
-        predicate::tests::{TestPattern, TestPredicate},
     };
 
     use super::*;

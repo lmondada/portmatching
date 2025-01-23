@@ -397,7 +397,7 @@ pub(crate) fn bindings_hash<S: BindMap>(
 pub(crate) mod tests {
     use itertools::Itertools;
 
-    use crate::predicate::tests::TestKey;
+    use crate::constraint::tests::TestKey;
 
     use super::*;
 

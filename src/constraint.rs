@@ -1,21 +1,40 @@
-//! A constraint is a triple (subj `pred obj).
+//! A [`Constraint`] type that can be used for pattern matching.
 //!
-//! Subject and object may be variables or values.
+//! This module provides an implementation of constraints that can be used
+//! to create patterns and build pattern matchers.
+//! It should cover most of the typical use cases for pattern matching.
 //!
-//! The predicate is either an AssignPredicate or a FilterPredicate.
+//! ## Predicates
+//! Constraints are built from a predicate and a set of keys. Provided
+//! bindings from keys to values, constraints can be evaluated to a boolean
+//! by evaluating the predicate on the values. Users that wish to use
+//! [`Constraint`] should define their own predicate type and implement
+//! (all or some of) the traits [`ArityPredicate`], [`EvaluatePredicate`],
+//! [`ConditionalPredicate`] and [`GetConstraintClass`].
+//!
+//! ## Patterns
+//! Given an implementation of predicates, users can choose to use
+//! [`ConstraintPattern`] to simplify the definition of patterns. These patterns
+//! are defined by a set of constraints.
+//!
+//! ## Branch selectors
+//! The types [`DefaultConstraintSelector`] and [`DeterministicConstraintSelector`]
+//! define simple branch selectors that can be provided to pattern matcher.
 
-use crate::{
-    indexing::{Binding, IndexKey, IndexedData},
-    predicate::ArityPredicate,
-};
+pub mod pattern;
+pub mod predicate;
+pub mod selector;
 
-use super::{
-    indexing::{BindMap, BindVariableError},
-    predicate::Predicate,
-};
+pub use pattern::{ConstraintPattern, ConstraintPatternLogic};
+pub use predicate::{ArityPredicate, ConditionalPredicate, EvaluatePredicate, GetConstraintClass};
+pub use selector::{DefaultConstraintSelector, DeterministicConstraintSelector};
+
+use std::{collections::BTreeSet, fmt::Debug};
+
 use itertools::Itertools;
-use std::{borrow::Borrow, cell::RefCell, collections::BTreeSet, fmt::Debug};
 use thiserror::Error;
+
+use crate::indexing::BindVariableError;
 
 /// A set of constraints
 pub type ConstraintSet<K, P> = BTreeSet<Constraint<K, P>>;
@@ -36,37 +55,6 @@ pub type ConstraintSet<K, P> = BTreeSet<Constraint<K, P>>;
 pub struct Constraint<K, P> {
     predicate: P,
     args: Vec<K>,
-}
-
-/// A heuristic whether a set of constraints should be turned into a deterministic
-/// transition.
-///
-/// More deterministic states will result in faster automaton runtimes, but at
-/// the cost of larger automata. A good heuristic is therefore important to
-/// find the best tradeoff.
-#[derive(Default)]
-pub enum DetHeuristic<K, P> {
-    /// Turn into deterministic state whenever indicated by the constraint tree
-    #[default]
-    Default,
-    /// Never turn into deterministic state
-    Never,
-    /// Use a custom heuristic that is ANDed with the constraint tree make_det flag
-    #[allow(clippy::type_complexity)]
-    Custom(RefCell<Box<dyn FnMut(&[&Constraint<K, P>]) -> bool>>),
-}
-
-impl<K, P> DetHeuristic<K, P> {
-    /// Whether the constraints should be turned into a deterministic transition.
-    ///
-    /// This cannot override the `make_det` flag in the constraint tree.
-    pub fn make_det(&self, constraints: &[&Constraint<K, P>]) -> bool {
-        match self {
-            DetHeuristic::Default => true,
-            DetHeuristic::Never => false,
-            DetHeuristic::Custom(f) => f.borrow_mut()(constraints),
-        }
-    }
 }
 
 /// Errors that occur when constructing constraints.
@@ -179,39 +167,6 @@ impl<K, P> Constraint<K, P> {
     pub fn predicate(&self) -> &P {
         &self.predicate
     }
-
-    /// Evaluate the constraint given the subject data and index map.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - The data against which the constraint is evaluated
-    /// * `known_bindings` - The current index map containing key-value bindings
-    ///
-    /// # Returns
-    ///
-    /// `Result<bool, InvalidConstraint>` - Ok(true) if the constraint is satisfied,
-    /// Ok(false) if it's not, or an Err if there's an invalid constraint.
-    pub fn is_satisfied<D: IndexedData<K>>(
-        &self,
-        data: &D,
-        known_bindings: &D::BindMap,
-    ) -> Result<bool, InvalidConstraint>
-    where
-        P: Predicate<D, D::Value>,
-        K: IndexKey,
-    {
-        let args = self
-            .args
-            .iter()
-            .map(|key| {
-                let Binding::Bound(value) = known_bindings.get_binding(key) else {
-                    return Err(InvalidConstraint::UnboundVariable(format!("{key:?}")));
-                };
-                Ok(value.borrow().clone())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(self.predicate.check(&args, data))
-    }
 }
 
 impl<K: Debug, P: Debug> Debug for Constraint<K, P> {
@@ -229,11 +184,11 @@ impl<K: Debug, P: Debug> Debug for Constraint<K, P> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{
-        indexing::tests::TestData,
-        predicate::tests::{TestKey, TestPredicate},
-        HashMap,
+    pub(crate) use super::predicate::tests::{
+        TestBranchClass, TestKey, TestLogic, TestPattern, TestPredicate,
     };
+
+    use crate::{indexing::tests::TestData, HashMap};
 
     use super::*;
     pub(crate) type TestConstraint = Constraint<TestKey, TestPredicate>;

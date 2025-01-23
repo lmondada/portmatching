@@ -228,9 +228,8 @@ where
 mod tests {
     use crate::{
         automaton::{builder::tests::TestBuildConfig, tests::TestBuilder},
-        constraint::tests::TestConstraint,
+        constraint::tests::{TestBranchClass, TestConstraint, TestPattern, TestPredicate},
         indexing::tests::TestData,
-        predicate::tests::{TestBranchClass, TestPattern, TestPredicate},
         HashSet,
     };
 
