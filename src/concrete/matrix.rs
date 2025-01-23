@@ -14,9 +14,9 @@ use itertools::Itertools;
 
 use crate::{
     concrete::string::CharacterPredicate,
+    constraint::{DeterministicConstraintSelector, EvaluatePredicate},
     indexing::{Binding, IndexedData},
-    predicate::DeterministicPredicatePatternSelector,
-    BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher, Predicate,
+    BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher,
 };
 
 pub use self::pattern::MatrixPattern;
@@ -45,8 +45,7 @@ impl<S: AsRef<str>> From<S> for MatrixString {
 /// indexing.
 pub type MatrixConstraint = crate::Constraint<MatrixPatternPosition, CharacterPredicate>;
 
-type BranchSelector =
-    DeterministicPredicatePatternSelector<MatrixPatternPosition, CharacterPredicate>;
+type BranchSelector = DeterministicConstraintSelector<MatrixPatternPosition, CharacterPredicate>;
 
 /// A matcher for 2D character matrices.
 pub type MatrixManyMatcher = ManyMatcher<MatrixPattern, MatrixPatternPosition, BranchSelector>;
@@ -55,7 +54,7 @@ pub type MatrixManyMatcher = ManyMatcher<MatrixPattern, MatrixPatternPosition, B
 /// Only use for testing, as it is too slow for practical purposes.
 pub type MatrixNaiveManyMatcher = NaiveManyMatcher<MatrixPatternPosition, BranchSelector>;
 
-impl Predicate<MatrixString, MatrixSubjectPosition> for CharacterPredicate {
+impl EvaluatePredicate<MatrixString, MatrixSubjectPosition> for CharacterPredicate {
     fn check(&self, args: &[impl Borrow<MatrixSubjectPosition>], data: &MatrixString) -> bool {
         match self {
             CharacterPredicate::BindingEq => {

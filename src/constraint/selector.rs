@@ -1,3 +1,11 @@
+//! Branch selectors based on a list of [`Constraint`]s.
+//!
+//! We currently provide two branch selectors:
+//!  - [`DefaultConstraintSelector`]: A non-deterministic selector that returns
+//!    all constraints that match.
+//!  - [`DeterministicConstraintSelector`]: A deterministic selector that returns
+//!    only the first constraint that matches.
+
 use std::collections::BTreeSet;
 
 use delegate::delegate;
@@ -8,20 +16,20 @@ use crate::{
     Constraint,
 };
 
-use super::{ConstraintLogic, Predicate};
+use super::{EvaluatePredicate, GetConstraintClass};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// A default selector for predicate-based patterns.
 ///
 /// This selector is non-deterministic, meaning it will return all constraints
 /// that match.
-pub struct PredicatePatternDefaultSelector<K, P>(InnerSelector<K, P>);
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DefaultConstraintSelector<K, P>(InnerSelector<K, P>);
+
 /// A deterministic selector for predicate-based patterns.
 ///
 /// This selector will return only the first constraint that matches.
-pub struct DeterministicPredicatePatternSelector<K, P>(InnerSelector<K, P>);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DeterministicConstraintSelector<K, P>(InnerSelector<K, P>);
 
 /// A helper struct to implement [`PredicatePatternDefaultSelector`] and
 /// [`DeterministicPredicatePatternSelector`].
@@ -42,7 +50,7 @@ struct InnerSelector<K, P> {
     deterministic: bool,
 }
 
-impl<K: IndexKey, P: Clone> PredicatePatternDefaultSelector<K, P> {
+impl<K: IndexKey, P: Clone> DefaultConstraintSelector<K, P> {
     /// Create a new selector from a set of constraints.
     ///
     /// The constraints are used to initialize the selector.
@@ -63,9 +71,9 @@ impl<K: IndexKey, P: Clone> PredicatePatternDefaultSelector<K, P> {
             /// Get the branch class for this selector.
             ///
             /// The branch class is determined by the predicates in the selector.
-            pub fn get_class(&self) -> Option<P::BranchClass>
+            pub fn get_class(&self) -> Option<P::ConstraintClass>
             where
-                P: ConstraintLogic<K>;
+                P: GetConstraintClass<K>;
 
             /// Get the predicates in this selector.
             ///
@@ -75,7 +83,7 @@ impl<K: IndexKey, P: Clone> PredicatePatternDefaultSelector<K, P> {
     }
 }
 
-impl<K: IndexKey, P: Clone> DeterministicPredicatePatternSelector<K, P> {
+impl<K: IndexKey, P: Clone> DeterministicConstraintSelector<K, P> {
     /// Create a new selector from a set of constraints.
     pub fn from_constraints<'c>(constraints: impl IntoIterator<Item = &'c Constraint<K, P>>) -> Self
     where
@@ -94,9 +102,9 @@ impl<K: IndexKey, P: Clone> DeterministicPredicatePatternSelector<K, P> {
             /// Get the branch class for this selector.
             ///
             /// The branch class is determined by the predicates in the selector.
-            pub fn get_class(&self) -> Option<P::BranchClass>
+            pub fn get_class(&self) -> Option<P::ConstraintClass>
             where
-                P: ConstraintLogic<K>;
+                P: GetConstraintClass<K>;
 
             /// Get the predicates in this selector.
             ///
@@ -107,7 +115,7 @@ impl<K: IndexKey, P: Clone> DeterministicPredicatePatternSelector<K, P> {
 }
 
 impl<K: IndexKey, P: Clone> CreateBranchSelector<Constraint<K, P>>
-    for PredicatePatternDefaultSelector<K, P>
+    for DefaultConstraintSelector<K, P>
 {
     fn create_branch_selector(constraints: Vec<Constraint<K, P>>) -> Self {
         Self::from_constraints(&constraints)
@@ -115,14 +123,14 @@ impl<K: IndexKey, P: Clone> CreateBranchSelector<Constraint<K, P>>
 }
 
 impl<K: IndexKey, P: Clone> CreateBranchSelector<Constraint<K, P>>
-    for DeterministicPredicatePatternSelector<K, P>
+    for DeterministicConstraintSelector<K, P>
 {
     fn create_branch_selector(constraints: Vec<Constraint<K, P>>) -> Self {
         Self::from_constraints(&constraints)
     }
 }
 
-impl<K, P> BranchSelector for PredicatePatternDefaultSelector<K, P>
+impl<K, P> BranchSelector for DefaultConstraintSelector<K, P>
 where
     K: IndexKey,
 {
@@ -135,7 +143,7 @@ where
     }
 }
 
-impl<K, P> BranchSelector for DeterministicPredicatePatternSelector<K, P>
+impl<K, P> BranchSelector for DeterministicConstraintSelector<K, P>
 where
     K: IndexKey,
 {
@@ -148,10 +156,9 @@ where
     }
 }
 
-impl<K, P, Data, Value> EvaluateBranchSelector<Data, Value>
-    for PredicatePatternDefaultSelector<K, P>
+impl<K, P, Data, Value> EvaluateBranchSelector<Data, Value> for DefaultConstraintSelector<K, P>
 where
-    P: Predicate<Data, Value>,
+    P: EvaluatePredicate<Data, Value>,
     K: IndexKey,
 {
     delegate! {
@@ -162,9 +169,9 @@ where
 }
 
 impl<K, P, Data, Value> EvaluateBranchSelector<Data, Value>
-    for DeterministicPredicatePatternSelector<K, P>
+    for DeterministicConstraintSelector<K, P>
 where
-    P: Predicate<Data, Value>,
+    P: EvaluatePredicate<Data, Value>,
     K: IndexKey,
 {
     delegate! {
@@ -225,9 +232,9 @@ impl<K: IndexKey, P: Clone> InnerSelector<K, P> {
             .collect()
     }
 
-    fn get_class(&self) -> Option<P::BranchClass>
+    fn get_class(&self) -> Option<P::ConstraintClass>
     where
-        P: ConstraintLogic<K>,
+        P: GetConstraintClass<K>,
     {
         let fst_pred = self.predicates.first()?;
         let fst_keys = self.keys(0);
@@ -265,7 +272,7 @@ where
 
 impl<K, P, Data, Value> EvaluateBranchSelector<Data, Value> for InnerSelector<K, P>
 where
-    P: Predicate<Data, Value>,
+    P: EvaluatePredicate<Data, Value>,
     K: IndexKey,
 {
     fn eval(&self, bindings: &[Option<Value>], data: &Data) -> Vec<usize> {

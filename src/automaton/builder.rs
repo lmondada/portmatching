@@ -394,12 +394,11 @@ pub(super) mod tests {
 
     use crate::{
         branch_selector::tests::TestBranchSelector,
-        constraint::tests::TestConstraint,
-        indexing::tests::TestStrIndexingScheme,
-        predicate::{
-            tests::{TestKey, TestLogic, TestPattern, TestPredicate},
-            PredicateLogic,
+        constraint::{
+            tests::{TestConstraint, TestKey, TestLogic, TestPattern, TestPredicate},
+            ConstraintPattern,
         },
+        indexing::tests::TestStrIndexingScheme,
     };
 
     use super::*;
@@ -435,12 +434,12 @@ pub(super) mod tests {
 
     #[test]
     fn test_build() {
-        let p1: TestPattern = PredicateLogic::from_constraints([
+        let p1: TestPattern = ConstraintPattern::from_constraints([
             TestConstraint::new(TestPredicate::AreEqualOne),
             TestConstraint::new(TestPredicate::AreEqualTwo),
         ])
         .into();
-        let p2: TestPattern = PredicateLogic::from_constraints([
+        let p2: TestPattern = ConstraintPattern::from_constraints([
             TestConstraint::new(TestPredicate::AreEqualOne),
             TestConstraint::new(TestPredicate::AlwaysTrueThree),
         ])

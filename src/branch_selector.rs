@@ -47,12 +47,12 @@ pub trait DisplayBranchSelector: BranchSelector {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::predicate::{
+    use crate::constraint::{
         tests::{TestBranchClass, TestKey, TestPredicate},
-        PredicatePatternDefaultSelector,
+        DefaultConstraintSelector,
     };
 
-    pub type TestBranchSelector = PredicatePatternDefaultSelector<TestKey, TestPredicate>;
+    pub type TestBranchSelector = DefaultConstraintSelector<TestKey, TestPredicate>;
 
     impl super::DisplayBranchSelector for TestBranchSelector {
         fn fmt_class(&self) -> String {

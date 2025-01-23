@@ -8,8 +8,10 @@ use itertools::Itertools;
 use petgraph::unionfind::UnionFind;
 
 use crate::{
-    indexing::IndexKey, pattern::Satisfiable, predicate::ConstraintLogic, ArityPredicate,
-    Constraint, Predicate,
+    constraint::{ArityPredicate, ConditionalPredicate, EvaluatePredicate, GetConstraintClass},
+    indexing::IndexKey,
+    pattern::Satisfiable,
+    Constraint,
 };
 
 use super::StringSubjectPosition;
@@ -35,7 +37,7 @@ impl ArityPredicate for CharacterPredicate {
     }
 }
 
-impl Predicate<String, StringSubjectPosition> for CharacterPredicate {
+impl EvaluatePredicate<String, StringSubjectPosition> for CharacterPredicate {
     fn check(&self, args: &[impl Borrow<StringSubjectPosition>], data: &String) -> bool {
         match self {
             CharacterPredicate::BindingEq => {
@@ -61,24 +63,7 @@ pub enum BranchClass<K> {
     Position(K),
 }
 
-impl<K: IndexKey> ConstraintLogic<K> for CharacterPredicate {
-    type BranchClass = BranchClass<K>;
-
-    fn get_classes(&self, keys: &[K]) -> Vec<Self::BranchClass> {
-        use CharacterPredicate::*;
-        assert_eq!(self.arity(), keys.len());
-
-        match self {
-            BindingEq => {
-                vec![
-                    BranchClass::Position(keys[0]),
-                    BranchClass::Position(keys[1]),
-                ]
-            }
-            ConstVal(_) => vec![BranchClass::Position(keys[0])],
-        }
-    }
-
+impl<K: IndexKey> ConditionalPredicate<K> for CharacterPredicate {
     fn condition_on(
         &self,
         keys: &[K],
@@ -99,6 +84,25 @@ impl<K: IndexKey> ConstraintLogic<K> for CharacterPredicate {
                 simplify_binding_eq(k0, k1, known_constraints)
             }
             ConstVal(val) => simplify_const_val(*val, keys[0], known_constraints),
+        }
+    }
+}
+
+impl<K: IndexKey> GetConstraintClass<K> for CharacterPredicate {
+    type ConstraintClass = BranchClass<K>;
+
+    fn get_classes(&self, keys: &[K]) -> Vec<Self::ConstraintClass> {
+        use CharacterPredicate::*;
+        assert_eq!(self.arity(), keys.len());
+
+        match self {
+            BindingEq => {
+                vec![
+                    BranchClass::Position(keys[0]),
+                    BranchClass::Position(keys[1]),
+                ]
+            }
+            ConstVal(_) => vec![BranchClass::Position(keys[0])],
         }
     }
 }

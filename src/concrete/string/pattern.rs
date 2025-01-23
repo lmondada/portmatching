@@ -1,6 +1,9 @@
 use std::{collections::hash_map::Entry, iter};
 
-use crate::{predicate::PredicateLogic, Constraint, HashMap, Pattern};
+use crate::{
+    constraint::{ConstraintPattern, ConstraintPatternLogic},
+    Constraint, HashMap, Pattern,
+};
 use derive_more::Display;
 
 use super::{predicate::CharacterPredicate, StringConstraint, StringPatternPosition};
@@ -69,19 +72,14 @@ impl StringPattern {
     fn len(&self) -> usize {
         self.0.len()
     }
-}
 
-impl Pattern for StringPattern {
-    type Key = StringPatternPosition;
-    type Logic = PredicateLogic<StringPatternPosition, CharacterPredicate>;
-
-    type Constraint = StringConstraint;
-
-    fn required_bindings(&self) -> Vec<Self::Key> {
-        (0..self.len()).map(StringPatternPosition).collect()
-    }
-
-    fn into_logic(self) -> Self::Logic {
+    /// Convert the string pattern into a constraint pattern.
+    ///
+    /// In effect, this decomposes the pattern string into a set of constraints
+    /// that must be matched.
+    fn into_constraint_pattern(
+        self,
+    ) -> ConstraintPattern<StringPatternPosition, CharacterPredicate> {
         // For a variable name, the first position it appears at
         let mut var_to_pos: HashMap<char, _> = Default::default();
         let mut constraints = Vec::new();
@@ -109,7 +107,22 @@ impl Pattern for StringPattern {
                 },
             }
         }
-        PredicateLogic::from_constraints(constraints)
+        ConstraintPattern::from_constraints(constraints)
+    }
+}
+
+impl Pattern for StringPattern {
+    type Key = StringPatternPosition;
+    type Logic = ConstraintPatternLogic<StringPatternPosition, CharacterPredicate>;
+
+    type Constraint = StringConstraint;
+
+    fn required_bindings(&self) -> Vec<Self::Key> {
+        (0..self.len()).map(StringPatternPosition).collect()
+    }
+
+    fn into_logic(self) -> Self::Logic {
+        self.into_constraint_pattern().into()
     }
 }
 

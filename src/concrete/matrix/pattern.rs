@@ -1,7 +1,7 @@
 use std::{fmt, iter};
 
 use crate::concrete::string::CharVar;
-use crate::predicate::PredicateLogic;
+use crate::constraint::{ConstraintPattern, ConstraintPatternLogic};
 use crate::{Constraint, HashMap, Pattern};
 
 use super::{CharacterPredicate, MatrixConstraint, MatrixPatternPosition};
@@ -72,22 +72,14 @@ impl MatrixPattern {
     fn n_cols(&self) -> usize {
         self.rows.iter().map(|row| row.len()).max().unwrap_or(0)
     }
-}
 
-impl Pattern for MatrixPattern {
-    type Key = MatrixPatternPosition;
-    type Logic = PredicateLogic<MatrixPatternPosition, CharacterPredicate>;
-    type Constraint = MatrixConstraint;
-
-    fn required_bindings(&self) -> Vec<Self::Key> {
-        (0..self.n_rows())
-            .flat_map(|row| {
-                (0..self.n_cols()).map(move |col| MatrixPatternPosition(row as isize, col as isize))
-            })
-            .collect()
-    }
-
-    fn into_logic(self) -> Self::Logic {
+    /// Convert the matrix pattern into a constraint pattern.
+    ///
+    /// In effect, this decomposes the pattern matrix into a set of constraints
+    /// that must be matched.
+    fn into_constraint_pattern(
+        self,
+    ) -> ConstraintPattern<MatrixPatternPosition, CharacterPredicate> {
         // For a variable name, the first position it appears at
         let mut var_to_pos: HashMap<char, _> = Default::default();
         let mut constraints = Vec::new();
@@ -128,7 +120,25 @@ impl Pattern for MatrixPattern {
             );
         }
 
-        Self::Logic::from_constraints(constraints)
+        ConstraintPattern::from_constraints(constraints)
+    }
+}
+
+impl Pattern for MatrixPattern {
+    type Key = MatrixPatternPosition;
+    type Logic = ConstraintPatternLogic<MatrixPatternPosition, CharacterPredicate>;
+    type Constraint = MatrixConstraint;
+
+    fn required_bindings(&self) -> Vec<Self::Key> {
+        (0..self.n_rows())
+            .flat_map(|row| {
+                (0..self.n_cols()).map(move |col| MatrixPatternPosition(row as isize, col as isize))
+            })
+            .collect()
+    }
+
+    fn into_logic(self) -> Self::Logic {
+        self.into_constraint_pattern().into()
     }
 }
 
