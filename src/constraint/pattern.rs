@@ -6,8 +6,8 @@ use itertools::Itertools;
 use crate::{
     constraint::ConstraintSet,
     indexing::IndexKey,
-    pattern::{ClassRank, Pattern, Satisfiable},
-    Constraint, PartialPattern,
+    pattern::{Pattern, Satisfiable},
+    Constraint, ConstraintClass, PartialPattern,
 };
 use std::{collections::BTreeSet, hash::Hash};
 
@@ -66,7 +66,7 @@ impl<K, P> Into<PartialConstraintPattern<K, P>> for ConstraintPattern<K, P> {
 
 impl<K, P> PartialConstraintPattern<K, P>
 where
-    P: GetConstraintClass<K> + ConditionalPredicate<K>,
+    P: ConditionalPredicate<K> + GetConstraintClass<K>,
 {
     /// Get all unique constraint classes from the constraints
     pub fn all_classes(&self) -> BTreeSet<P::ConstraintClass> {
@@ -127,7 +127,7 @@ impl<K, P> Constraint<K, P> {
     where
         P: GetConstraintClass<K>,
     {
-        self.predicate().get_classes(self.required_bindings())
+        P::ConstraintClass::get_classes(&self)
     }
 
     /// Condition this constraint on a set of known constraints
@@ -183,26 +183,24 @@ where
 {
     type Constraint = Constraint<K, P>;
 
-    type BranchClass = P::ConstraintClass;
+    type ConstraintClass = P::ConstraintClass;
 
     type Key = K;
 
-    fn rank_classes(
+    fn nominate(&self) -> impl Iterator<Item = Self::Constraint> + '_ {
+        self.pattern_constraints.iter().cloned()
+    }
+
+    fn apply_transitions(
         &self,
-        _: &[Self::Key],
-    ) -> impl Iterator<Item = (Self::BranchClass, ClassRank)> {
-        self.all_classes().into_iter().map(|cls| (cls, 0.5))
-    }
-
-    fn nominate(&self, cls: &Self::BranchClass) -> BTreeSet<Self::Constraint> {
-        self.pattern_constraints
-            .iter()
-            .filter(|c| c.get_classes().iter().any(|c| c == cls))
-            .cloned()
-            .collect()
-    }
-
-    fn apply_transitions(&self, constraints: &[Self::Constraint]) -> Vec<Satisfiable<Self>> {
+        constraints: &[Self::Constraint],
+        cls: &Self::ConstraintClass,
+    ) -> Vec<Satisfiable<Self>> {
+        if !self.all_classes().contains(cls) {
+            // If no pattern constraints are in this class, we skip the
+            // transition altogether
+            return vec![];
+        }
         let mut conditioned = Vec::with_capacity(constraints.len());
 
         for (i, c) in constraints.iter().enumerate() {
@@ -232,11 +230,12 @@ mod tests {
 
     use crate::{
         constraint::{
-            tests::{TestBranchClass, TestConstraint, TestKey, TestPattern, TestPredicate},
+            tests::{TestConstraint, TestConstraintClass, TestKey, TestPattern, TestPredicate},
             ArityPredicate, GetConstraintClass,
         },
+        constraint_class::ExpansionFactor,
         pattern::Satisfiable,
-        Constraint, Pattern,
+        Constraint, ConstraintClass, Pattern,
     };
 
     use super::ConditionalPredicate;
@@ -250,13 +249,13 @@ mod tests {
         ) -> Satisfiable<Constraint<TestKey, Self>> {
             let condition = known_constraints
                 .iter()
-                .find(|c| c.get_classes() == self.get_classes(keys));
+                .find(|c| c.get_classes() == self.try_get_classes(keys).unwrap());
             let Some(condition) = condition else {
                 let self_constraint = self.clone().try_into_constraint(keys.to_vec()).unwrap();
                 return Satisfiable::Yes(self_constraint);
             };
             assert_eq!(
-                self.get_classes(keys),
+                self.try_get_classes(keys).unwrap(),
                 condition.get_classes(),
                 "class mismatch in TestPredicate::condition_on"
             );
@@ -269,12 +268,18 @@ mod tests {
             if self == condition.predicate() {
                 return Satisfiable::Tautology;
             }
-            match self.get_classes(keys).into_iter().exactly_one().unwrap() {
-                TestBranchClass::One(_, _) => {
+            match self
+                .try_get_classes(keys)
+                .unwrap()
+                .into_iter()
+                .exactly_one()
+                .unwrap()
+            {
+                TestConstraintClass::One(_, _) => {
                     // predicates are mutually exclusive
                     Satisfiable::No
                 }
-                TestBranchClass::Two(_, _) => {
+                TestConstraintClass::Two(_, _) => {
                     if condition.predicate() == &TestPredicate::AlwaysTrueTwo {
                         // Does not teach us anything, leave unchanged
                         Satisfiable::Yes(self.clone().try_into_constraint(keys.to_vec()).unwrap())
@@ -282,7 +287,7 @@ mod tests {
                         Satisfiable::Tautology
                     }
                 }
-                TestBranchClass::Three => {
+                TestConstraintClass::Three => {
                     if condition.predicate() == &TestPredicate::AlwaysTrueThree {
                         // Does not teach us anything, leave unchanged
                         Satisfiable::Yes(self.clone().try_into_constraint(keys.to_vec()).unwrap())
@@ -295,25 +300,38 @@ mod tests {
     }
 
     impl GetConstraintClass<TestKey> for TestPredicate {
-        type ConstraintClass = TestBranchClass;
+        type ConstraintClass = TestConstraintClass;
+    }
 
-        fn get_classes(&self, keys: &[TestKey]) -> Vec<Self::ConstraintClass> {
-            assert_eq!(self.arity(), keys.len());
+    impl ConstraintClass<TestConstraint> for TestConstraintClass {
+        fn get_classes(constraint: &TestConstraint) -> Vec<TestConstraintClass> {
+            let keys = constraint.required_bindings();
+            assert_eq!(constraint.arity(), keys.len());
 
             let args = keys.iter().cloned().collect_tuple();
 
             use TestPredicate::*;
-            match self {
+            match constraint.predicate() {
                 AreEqualOne | NotEqualOne => {
                     let (a, b) = args.unwrap();
-                    vec![TestBranchClass::One(a, b)]
+                    vec![TestConstraintClass::One(a, b)]
                 }
                 AreEqualTwo | AlwaysTrueTwo => {
                     let (a, b) = args.unwrap();
-                    vec![TestBranchClass::Two(a, b)]
+                    vec![TestConstraintClass::Two(a, b)]
                 }
-                NeverTrueThree | AlwaysTrueThree => vec![TestBranchClass::Three],
+                NeverTrueThree | AlwaysTrueThree => vec![TestConstraintClass::Three],
             }
+        }
+
+        fn expansion_factor<'c>(
+            &self,
+            _constraints: impl IntoIterator<Item = &'c TestConstraint>,
+        ) -> ExpansionFactor
+        where
+            TestConstraint: 'c,
+        {
+            4
         }
     }
 

@@ -48,7 +48,7 @@ pub trait DisplayBranchSelector: BranchSelector {
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::constraint::{
-        tests::{TestBranchClass, TestKey, TestPredicate},
+        tests::{TestConstraintClass, TestKey, TestPredicate},
         DefaultConstraintSelector,
     };
 
@@ -60,9 +60,9 @@ pub(crate) mod tests {
                 return String::new();
             };
             match cls {
-                TestBranchClass::One(a, b) => format!("One({a}, {b})"),
-                TestBranchClass::Two(a, b) => format!("Two({a}, {b})"),
-                TestBranchClass::Three => "Three".to_string(),
+                TestConstraintClass::One(a, b) => format!("One({a}, {b})"),
+                TestConstraintClass::Two(a, b) => format!("Two({a}, {b})"),
+                TestConstraintClass::Three => "Three".to_string(),
             }
         }
 

@@ -228,30 +228,30 @@ where
 mod tests {
     use crate::{
         automaton::{builder::tests::TestBuildConfig, tests::TestBuilder},
-        constraint::tests::{TestBranchClass, TestConstraint, TestPattern, TestPredicate},
+        constraint::tests::{TestConstraint, TestConstraintClass, TestPattern, TestPredicate},
         indexing::tests::TestData,
         HashSet,
     };
 
-    fn true_constraint(cls: TestBranchClass) -> TestConstraint {
+    fn true_constraint(cls: TestConstraintClass) -> TestConstraint {
         match cls {
-            TestBranchClass::One(_, _) => TestConstraint::new(TestPredicate::NotEqualOne),
-            TestBranchClass::Two(_, _) => TestConstraint::new(TestPredicate::AlwaysTrueTwo),
-            TestBranchClass::Three => TestConstraint::new(TestPredicate::AlwaysTrueThree),
+            TestConstraintClass::One(_, _) => TestConstraint::new(TestPredicate::NotEqualOne),
+            TestConstraintClass::Two(_, _) => TestConstraint::new(TestPredicate::AlwaysTrueTwo),
+            TestConstraintClass::Three => TestConstraint::new(TestPredicate::AlwaysTrueThree),
         }
     }
 
-    fn false_constraint(cls: TestBranchClass) -> TestConstraint {
+    fn false_constraint(cls: TestConstraintClass) -> TestConstraint {
         match cls {
-            TestBranchClass::One(_, _) => TestConstraint::new(TestPredicate::AreEqualOne),
-            TestBranchClass::Two(_, _) => panic!("no always false constraint for two"),
-            TestBranchClass::Three => TestConstraint::new(TestPredicate::NeverTrueThree),
+            TestConstraintClass::One(_, _) => TestConstraint::new(TestPredicate::AreEqualOne),
+            TestConstraintClass::Two(_, _) => panic!("no always false constraint for two"),
+            TestConstraintClass::Three => TestConstraint::new(TestPredicate::NeverTrueThree),
         }
     }
 
     #[test]
     fn run_automaton() {
-        use TestBranchClass::*;
+        use TestConstraintClass::*;
         let one = One("", "");
         let two = Two("", "");
         let three = Three;

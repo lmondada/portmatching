@@ -185,7 +185,7 @@ impl<K: Debug, P: Debug> Debug for Constraint<K, P> {
 #[cfg(test)]
 pub(crate) mod tests {
     pub(crate) use super::predicate::tests::{
-        TestBranchClass, TestKey, TestPartialPattern, TestPattern, TestPredicate,
+        TestConstraintClass, TestKey, TestPartialPattern, TestPattern, TestPredicate,
     };
 
     use crate::{indexing::tests::TestData, HashMap};

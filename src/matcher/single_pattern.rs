@@ -2,12 +2,16 @@
 //!
 //! This matcher is used as a baseline in benchmarking by repeating
 //! the matching process for each pattern separately.
-use std::{borrow::Borrow, collections::BTreeSet};
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use itertools::Itertools;
 
 use crate::{
     branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector},
+    constraint_class::ConstraintClass,
     indexing::{bindings_hash, Binding, IndexKey, IndexedData},
     pattern::{PartialPattern, Pattern, Satisfiable},
     BindMap, HashSet, IndexingScheme, PatternID,
@@ -109,10 +113,6 @@ fn decompose_constraints<P>(mut pattern: P) -> Vec<P::Constraint>
 where
     P: PartialPattern,
 {
-    fn approx_isize(f: f64) -> isize {
-        (f * 10000.) as isize
-    }
-
     match pattern.is_satisfiable() {
         Satisfiable::Yes(()) => {}
         Satisfiable::No => panic!("Pattern is not satisfiable"),
@@ -122,20 +122,16 @@ where
     let mut all_constraints = vec![];
     let mut known_constraints = BTreeSet::new();
     loop {
-        let Some((cls, _)) = pattern
-            .rank_classes(&[]) // TODO: keep track of known_bindings
-            .max_by_key(|(_, rank)| approx_isize(*rank))
-        else {
-            return Vec::new();
-        };
-
-        let constraints = pattern.nominate(&cls).into_iter().collect_vec();
-        let new_patterns = pattern.apply_transitions(&constraints);
-
-        // Only support patterns with a single nominated constraint per class
-        let Ok(constraint) = constraints.into_iter().exactly_one() else {
+        let Some(constraint) = find_best_constraint(&pattern) else {
             unimplemented!("SinglePatternMatcher currently only supports patterns that nominate a single constraint per class");
         };
+        let cls = P::ConstraintClass::get_classes(&constraint)
+            .into_iter()
+            .next()
+            .unwrap();
+        let new_patterns = pattern.apply_transitions(&[constraint.clone()], &cls);
+
+        // Only support patterns with a single nominated constraint per class
         let new_pattern = new_patterns
             .into_iter()
             .exactly_one()
@@ -155,6 +151,23 @@ where
     }
 
     all_constraints
+}
+
+fn find_best_constraint<P: PartialPattern>(pattern: &P) -> Option<P::Constraint> {
+    let mut class_to_constraints: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+    for c in pattern.nominate() {
+        for cls in P::ConstraintClass::get_classes(&c) {
+            class_to_constraints
+                .entry(cls)
+                .or_default()
+                .insert(c.clone());
+        }
+    }
+    class_to_constraints.retain(|_, constraints| constraints.len() == 1);
+    let (_, best_constraints) = class_to_constraints
+        .into_iter()
+        .min_by_key(|(cls, constraints)| cls.expansion_factor(constraints.iter()))?;
+    best_constraints.into_iter().exactly_one().ok()
 }
 
 impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {

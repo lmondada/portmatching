@@ -16,7 +16,7 @@ use crate::{
     Constraint,
 };
 
-use super::{EvaluatePredicate, GetConstraintClass};
+use super::{ArityPredicate, EvaluatePredicate, GetConstraintClass};
 
 /// A default selector for predicate-based patterns.
 ///
@@ -73,7 +73,7 @@ impl<K: IndexKey, P: Clone> DefaultConstraintSelector<K, P> {
             /// The branch class is determined by the predicates in the selector.
             pub fn get_class(&self) -> Option<P::ConstraintClass>
             where
-                P: GetConstraintClass<K>;
+                P: GetConstraintClass<K> + ArityPredicate;
 
             /// Get the predicates in this selector.
             ///
@@ -104,7 +104,7 @@ impl<K: IndexKey, P: Clone> DeterministicConstraintSelector<K, P> {
             /// The branch class is determined by the predicates in the selector.
             pub fn get_class(&self) -> Option<P::ConstraintClass>
             where
-                P: GetConstraintClass<K>;
+                P: GetConstraintClass<K> + ArityPredicate;
 
             /// Get the predicates in this selector.
             ///
@@ -234,16 +234,16 @@ impl<K: IndexKey, P: Clone> InnerSelector<K, P> {
 
     fn get_class(&self) -> Option<P::ConstraintClass>
     where
-        P: GetConstraintClass<K>,
+        P: GetConstraintClass<K> + ArityPredicate,
     {
         let fst_pred = self.predicates.first()?;
         let fst_keys = self.keys(0);
-        let mut classes = BTreeSet::from_iter(fst_pred.get_classes(&fst_keys));
+        let mut classes = BTreeSet::from_iter(fst_pred.try_get_classes(&fst_keys).unwrap());
 
         for i in 1..self.predicates.len() {
             let pred = &self.predicates[i];
             let keys = self.keys(i);
-            let new_classes = BTreeSet::from_iter(pred.get_classes(&keys));
+            let new_classes = BTreeSet::from_iter(pred.try_get_classes(&keys).unwrap());
             classes.retain(|cls| new_classes.contains(cls));
         }
 

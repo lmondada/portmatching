@@ -6,6 +6,7 @@ use petgraph::acyclic::Acyclic;
 use crate::{
     automaton::{ConstraintAutomaton, StateID},
     branch_selector::CreateBranchSelector,
+    constraint_class::ConstraintClass,
     indexing::IndexKey,
     pattern::{Pattern, Satisfiable},
     HashSet, IndexingScheme, PartialPattern, PatternID,
@@ -166,32 +167,38 @@ where
                 continue;
             }
 
-            // 1. Vote: get the branch class that makes us progress the most
-            let cls =
-                select_best_class(patterns.iter().map(|(_, p)| p), &self.known_bindings(state))
-                    .unwrap();
+            // 1. Gather all nominated constraints, group by class and find
+            // best class
+            let nominated_constraints = patterns.iter().flat_map(|(_, p)| p.nominate());
+            let mut class_to_constraints: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+            for c in nominated_constraints {
+                for cls in P::ConstraintClass::get_classes(&c) {
+                    class_to_constraints
+                        .entry(cls)
+                        .or_default()
+                        .insert(c.clone());
+                }
+            }
+            let Some((best_class, best_constraints)) = class_to_constraints
+                .into_iter()
+                .min_by_key(|(cls, constraints)| cls.expansion_factor(constraints.iter()))
+            else {
+                // No constraints nominated by any pattern
+                panic!("No constraints nominated by any pattern");
+            };
+            let mut best_constraints = Vec::from_iter(best_constraints);
 
-            // 2. Collect all constraints of interest to the patterns
-            let nominations = patterns.iter().map(|(_, p)| p.nominate(&cls)).collect_vec();
-            let mut nominations_iter = nominations.iter();
-            // Take apart the patterns that do not nominate any constraints
-            let (patterns, skip_patterns): (PatternsInProgress<_>, PatternsInProgress<_>) =
-                patterns
-                    .into_iter()
-                    .partition(|_| !nominations_iter.next().unwrap().is_empty());
-            let mut constraints = nominations.into_iter().flatten().collect_vec();
-            constraints.sort_unstable();
-            constraints.dedup();
-
-            // 3. Apply all transition to each pattern. Track new patterns and
-            // new matches
-            let (mut next_patterns, mut next_matches) = apply_transitions(patterns, &constraints);
+            // 2. Apply all transition to each pattern. Track new patterns,
+            // new matches and patterns to skip
+            let (mut next_patterns, mut next_matches, skip_patterns) =
+                apply_transitions(patterns, &best_constraints, &best_class);
 
             // Remove transitions that do not lead to a new child
-            retain_non_empty(&mut constraints, &mut next_patterns, &mut next_matches);
+            retain_non_empty(&mut best_constraints, &mut next_patterns, &mut next_matches);
 
-            // 4a. Add new children and queue them up when useful
-            for (constraint, patterns, matches) in izip!(&constraints, next_patterns, next_matches)
+            // 3a. Add new children and queue them up when useful
+            for (constraint, patterns, matches) in
+                izip!(&best_constraints, next_patterns, next_matches)
             {
                 let Some(next_state) = self.add_child(state, patterns.clone(), matches, false)
                 else {
@@ -210,7 +217,7 @@ where
                 }
             }
 
-            // 4b. Add epsilon transition to skip patterns
+            // 3b. Add epsilon transition to skip patterns
             if !skip_patterns.is_empty() {
                 if let Some(state) =
                     self.add_child(state, skip_patterns.clone(), Matches::default(), true)
@@ -224,11 +231,11 @@ where
                 }
             }
 
-            // 5. Consume constraints to create the branch selector
-            let br = B::create_branch_selector(constraints);
+            // 4. Consume constraints to create the branch selector
+            let br = B::create_branch_selector(best_constraints);
             self.set_branch_selector(state, br);
 
-            // 6. Compute the minimum scope for the state (requires branch selector).
+            // 5. Compute the minimum scope for the state (requires branch selector).
             self.populate_min_scope(state, &indexing);
         }
 
@@ -314,12 +321,23 @@ fn retain_non_empty<P: PartialPattern>(
 fn apply_transitions<P: PartialPattern>(
     patterns: PatternsInProgress<P>,
     transitions: &[<P as PartialPattern>::Constraint],
-) -> (Vec<PatternsInProgress<P>>, Vec<Matches>) {
+    cls: &P::ConstraintClass,
+) -> (
+    Vec<PatternsInProgress<P>>,
+    Vec<Matches>,
+    PatternsInProgress<P>,
+) {
+    debug_assert!(transitions.len() > 0);
+
     let mut next_patterns = vec![BTreeSet::default(); transitions.len()];
     let mut next_matches = vec![BTreeSet::default(); transitions.len()];
+    let mut skip_patterns = BTreeSet::default();
     for (id, pattern) in patterns {
-        let new_patterns = pattern.apply_transitions(transitions);
-        assert_eq!(transitions.len(), new_patterns.len());
+        let new_patterns = pattern.apply_transitions(transitions, cls);
+        if new_patterns.is_empty() {
+            skip_patterns.insert((id, pattern));
+            continue;
+        }
         for (i, sat_p) in new_patterns.into_iter().enumerate() {
             let next_patterns = &mut next_patterns[i];
             let next_matches = &mut next_matches[i];
@@ -334,39 +352,7 @@ fn apply_transitions<P: PartialPattern>(
             }
         }
     }
-    (next_patterns, next_matches)
-}
-
-fn approx_isize(f: f64) -> isize {
-    (f * 10000.) as isize
-}
-
-fn select_best_class<'p, P: PartialPattern + 'p>(
-    patterns: impl IntoIterator<IntoIter = impl ExactSizeIterator<Item = &'p P>>,
-    known_bindings: &[P::Key],
-) -> Option<P::BranchClass> {
-    let patterns = patterns.into_iter();
-    let n_patterns = patterns.len() as f64;
-
-    // Collect all classes that are relevant to at least one pattern
-    let classes: BTreeMap<P::BranchClass, f64> =
-        patterns
-            .into_iter()
-            .fold(BTreeMap::default(), |mut classes, pattern| {
-                for (cls, rank) in pattern.rank_classes(known_bindings) {
-                    *classes.entry(cls).or_insert(n_patterns) += rank - 1.;
-                }
-                classes
-            });
-
-    // The sum of the ranks is the expected number of patterns that will
-    // be selected. Select the class that minimizes it.
-    let min_rank = classes
-        .into_iter()
-        // We approximate with an int so that we get an Ord
-        .min_by_key(|(_, rank)| approx_isize(*rank))?
-        .0;
-    Some(min_rank)
+    (next_patterns, next_matches, skip_patterns)
 }
 
 fn partition_completed_patterns<P: PartialPattern>(

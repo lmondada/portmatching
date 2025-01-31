@@ -9,6 +9,7 @@ use petgraph::unionfind::UnionFind;
 
 use crate::{
     constraint::{ArityPredicate, ConditionalPredicate, EvaluatePredicate, GetConstraintClass},
+    constraint_class::{ConstraintClass, ExpansionFactor},
     indexing::IndexKey,
     pattern::Satisfiable,
     Constraint,
@@ -90,20 +91,32 @@ impl<K: IndexKey> ConditionalPredicate<K> for CharacterPredicate {
 
 impl<K: IndexKey> GetConstraintClass<K> for CharacterPredicate {
     type ConstraintClass = BranchClass<K>;
+}
 
-    fn get_classes(&self, keys: &[K]) -> Vec<Self::ConstraintClass> {
+impl<K: IndexKey> ConstraintClass<Constraint<K, CharacterPredicate>> for BranchClass<K> {
+    fn get_classes(constraint: &Constraint<K, CharacterPredicate>) -> Vec<Self> {
         use CharacterPredicate::*;
-        assert_eq!(self.arity(), keys.len());
+        assert_eq!(constraint.arity(), constraint.required_bindings().len());
 
-        match self {
+        match constraint.predicate() {
             BindingEq => {
                 vec![
-                    BranchClass::Position(keys[0]),
-                    BranchClass::Position(keys[1]),
+                    BranchClass::Position(constraint.required_bindings()[0]),
+                    BranchClass::Position(constraint.required_bindings()[1]),
                 ]
             }
-            ConstVal(_) => vec![BranchClass::Position(keys[0])],
+            ConstVal(_) => vec![BranchClass::Position(constraint.required_bindings()[0])],
         }
+    }
+
+    fn expansion_factor<'c>(
+        &self,
+        _constraints: impl IntoIterator<Item = &'c Constraint<K, CharacterPredicate>>,
+    ) -> ExpansionFactor
+    where
+        Constraint<K, CharacterPredicate>: 'c,
+    {
+        1
     }
 }
 
