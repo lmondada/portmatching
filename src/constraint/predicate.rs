@@ -4,6 +4,7 @@ use std::{borrow::Borrow, collections::BTreeSet};
 
 use crate::{
     constraint::InvalidConstraint,
+    constraint_class::ConstraintClass,
     indexing::{Binding, IndexKey},
     pattern::Satisfiable,
     BindMap, Constraint, IndexedData,
@@ -41,7 +42,8 @@ pub trait EvaluatePredicate<Data, Value>: ArityPredicate {
     fn check(&self, bindings: &[impl Borrow<Value>], data: &Data) -> bool;
 }
 
-/// Implement on a predicate to define its logic within [`super::ConstraintPattern`]s.
+/// Implement on a predicate to define its conditional logic within
+/// [`super::PartialConstraintPattern`]s.
 ///
 /// This trait defines how constraints simplify when conditioned on other constraints.
 pub trait ConditionalPredicate<K>: Clone + Ord + Sized {
@@ -61,12 +63,23 @@ pub trait ConditionalPredicate<K>: Clone + Ord + Sized {
 
 /// Implement on a predicate to define the constraint classes that constraints
 /// belongs to
-pub trait GetConstraintClass<K> {
+///
+/// Implementing this will automatically provide an implementation of
+/// [`ConstraintClass`] for the constraint class type.
+pub trait GetConstraintClass<K>: Sized {
     /// Sets of constraints that can be evaluated together form branch classes.
-    type ConstraintClass: Ord;
+    type ConstraintClass: ConstraintClass<Constraint<K, Self>>;
 
-    /// All classes the constraint made of `self` and `keys` belongs to
-    fn get_classes(&self, keys: &[K]) -> Vec<Self::ConstraintClass>;
+    /// Get the classes of this predicate
+    fn try_get_classes(&self, keys: &[K]) -> Result<Vec<Self::ConstraintClass>, InvalidConstraint>
+    where
+        Self: ArityPredicate,
+        K: Clone,
+    {
+        // TODO: refactor this somehow to avoid cloning
+        let constraint = self.clone().try_into_constraint(keys.to_vec())?;
+        Ok(Self::ConstraintClass::get_classes(&constraint))
+    }
 }
 
 impl<K, P> Constraint<K, P> {
@@ -111,30 +124,30 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use rstest::rstest;
 
-    use crate::constraint::{ConstraintPattern, ConstraintPatternLogic, EvaluatePredicate};
+    use crate::constraint::{ConstraintPattern, EvaluatePredicate, PartialConstraintPattern};
     use crate::indexing::tests::TestData;
 
     use super::ArityPredicate;
 
     pub type TestKey = &'static str;
     pub type TestPattern = ConstraintPattern<TestKey, TestPredicate>;
-    pub type TestLogic = ConstraintPatternLogic<TestKey, TestPredicate>;
+    pub type TestPartialPattern = PartialConstraintPattern<TestKey, TestPredicate>;
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub(crate) enum TestPredicate {
-        // BranchClass One
+        // ConstraintClass One
         AreEqualOne,
         NotEqualOne,
-        // BranchClass Two
+        // ConstraintClass Two
         AreEqualTwo,
         AlwaysTrueTwo,
-        // BranchClass Three
+        // ConstraintClass Three
         NeverTrueThree,  // take one arg
         AlwaysTrueThree, // take one arg
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub(crate) enum TestBranchClass {
+    pub(crate) enum TestConstraintClass {
         One(TestKey, TestKey),
         Two(TestKey, TestKey),
         Three,

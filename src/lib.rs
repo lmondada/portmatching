@@ -5,6 +5,7 @@ pub mod automaton;
 pub mod branch_selector;
 pub mod concrete;
 pub mod constraint;
+pub mod constraint_class;
 pub mod indexing;
 pub mod matcher;
 pub mod pattern;
@@ -14,12 +15,13 @@ pub use branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSe
 pub use constraint::{
     ArityPredicate, ConditionalPredicate, Constraint, EvaluatePredicate, GetConstraintClass,
 };
+pub use constraint_class::ConstraintClass;
 pub use indexing::{BindMap, IndexedData, IndexingScheme};
 pub use matcher::{
     ManyMatcher, NaiveManyMatcher, PatternFallback, PatternID, PatternMatch, PortMatcher,
     SinglePatternMatcher,
 };
-pub use pattern::{Pattern, PatternLogic};
+pub use pattern::{PartialPattern, Pattern};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 

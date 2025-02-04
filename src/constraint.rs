@@ -25,7 +25,7 @@ pub mod pattern;
 pub mod predicate;
 pub mod selector;
 
-pub use pattern::{ConstraintPattern, ConstraintPatternLogic};
+pub use pattern::{ConstraintPattern, PartialConstraintPattern};
 pub use predicate::{ArityPredicate, ConditionalPredicate, EvaluatePredicate, GetConstraintClass};
 pub use selector::{DefaultConstraintSelector, DeterministicConstraintSelector};
 
@@ -185,7 +185,7 @@ impl<K: Debug, P: Debug> Debug for Constraint<K, P> {
 #[cfg(test)]
 pub(crate) mod tests {
     pub(crate) use super::predicate::tests::{
-        TestBranchClass, TestKey, TestLogic, TestPattern, TestPredicate,
+        TestConstraintClass, TestKey, TestPartialPattern, TestPattern, TestPredicate,
     };
 
     use crate::{indexing::tests::TestData, HashMap};

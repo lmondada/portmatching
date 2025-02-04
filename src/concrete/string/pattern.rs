@@ -1,7 +1,7 @@
 use std::{collections::hash_map::Entry, iter};
 
 use crate::{
-    constraint::{ConstraintPattern, ConstraintPatternLogic},
+    constraint::{ConstraintPattern, PartialConstraintPattern},
     Constraint, HashMap, Pattern,
 };
 use derive_more::Display;
@@ -113,7 +113,7 @@ impl StringPattern {
 
 impl Pattern for StringPattern {
     type Key = StringPatternPosition;
-    type Logic = ConstraintPatternLogic<StringPatternPosition, CharacterPredicate>;
+    type PartialPattern = PartialConstraintPattern<StringPatternPosition, CharacterPredicate>;
 
     type Constraint = StringConstraint;
 
@@ -121,7 +121,7 @@ impl Pattern for StringPattern {
         (0..self.len()).map(StringPatternPosition).collect()
     }
 
-    fn into_logic(self) -> Self::Logic {
+    fn into_partial_pattern(self) -> Self::PartialPattern {
         self.into_constraint_pattern().into()
     }
 }

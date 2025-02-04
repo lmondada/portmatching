@@ -5,11 +5,11 @@ expression: matches.first().unwrap()
 PatternMatch {
     pattern: 0,
     match_data: {
-        "key100": Some(
-            100,
-        ),
         "key2": Some(
             2,
+        ),
+        "key100": Some(
+            100,
         ),
         "key1": Some(
             1,

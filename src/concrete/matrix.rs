@@ -216,9 +216,9 @@ mod tests {
             .iter()
             .map(|matcher_factory| {
                 let matcher = matcher_factory(patterns.clone());
-                if let Matcher::Many(matcher) = &matcher {
-                    println!("{}", matcher.dot_string());
-                }
+                // if let Matcher::Many(matcher) = &matcher {
+                //     println!("{}", matcher.dot_string());
+                // }
                 matcher.find_matches(subject).collect_vec()
             })
             .collect_vec();
@@ -265,7 +265,6 @@ mod tests {
 
         let [default, naive] = apply_all_matchers(patterns, &subject);
 
-        dbg!(&default);
         let mut default = get_start_pos(&default);
         let mut naive = get_start_pos(&naive);
 

@@ -7,9 +7,7 @@
 //! - The `ConcretePattern` trait, for patterns that can themselves be matched on.
 //! - Error types related to pattern matching operations.
 
-use std::collections::BTreeSet;
-
-use crate::indexing::IndexKey;
+use crate::{constraint_class::ConstraintClass, indexing::IndexKey};
 
 /// A rank value used to prioritize branch classes.
 ///
@@ -40,59 +38,52 @@ pub enum PredicateSelection<P> {
 pub trait Pattern {
     /// The type of variable names used in the pattern.
     type Key: IndexKey;
-    /// The predicate evaluatation logic.
-    type Logic: PatternLogic<Constraint = Self::Constraint, Key = Self::Key>;
-    /// The type of constraints used in the pattern logic.
+    /// The type for partially satisfied patterns.
+    type PartialPattern: PartialPattern<Constraint = Self::Constraint, Key = Self::Key>;
+    /// The constraint type used to express the pattern.
     type Constraint;
 
     /// List of required bindings to match the pattern.
     fn required_bindings(&self) -> Vec<Self::Key>;
 
-    /// Extract the pattern logic for further processing.
-    fn into_logic(self) -> Self::Logic;
+    /// Extract a partial pattern for further processing.
+    fn into_partial_pattern(self) -> Self::PartialPattern;
 }
 
-/// The evaluation logic for a type of pattern.
-pub trait PatternLogic: Ord + Clone {
+/// Partially satisfied patterns.
+///
+/// Provide the logic for constructing and simplifying patterns as constraints
+/// get applied to it.
+pub trait PartialPattern: Ord + Clone {
     /// The type of predicates used in the pattern.
     type Constraint: Ord + Clone;
     /// A partition of all predicates into mutually exclusive sets.
-    type BranchClass: Ord;
+    type ConstraintClass: ConstraintClass<Self::Constraint>;
     /// The constraint key type.
     type Key: IndexKey;
 
-    /// The branch classes most pertinent to the pattern, along with a rank.
-    ///
-    /// The rank estimates the expected number of constraints in the class that
-    /// are satisfied in both the pattern and random input data.
-    ///
-    /// i.e. if F is the set of constrains in a branch class and A c F is the
-    /// subset of constraints satisfied by the pattern A(P), then the rank of
-    /// the branch class F is E_G[ | { A in F | A(P) and A(G) } | ].
-    ///
-    /// The rank can take the `known_bindings` into account, to account for
-    /// the multiplicity of bindings that must yet be bound.
-    ///
-    /// The class with lowest overall rank will be selected.
-    fn rank_classes(
-        &self,
-        known_bindings: &[Self::Key],
-    ) -> impl Iterator<Item = (Self::BranchClass, ClassRank)>;
-
-    /// Get all constraints in a class that are useful for pattern matching
-    /// `self`.
-    ///
-    /// If the set is empty, then the pattern will be excluded from this
-    /// class evaluation and be attached to the epsilon transition instead.
-    fn nominate(&self, cls: &Self::BranchClass) -> BTreeSet<Self::Constraint>;
+    /// Get all constraints that are useful for pattern matching `self`.
+    fn nominate(&self) -> impl Iterator<Item = Self::Constraint> + '_;
 
     /// Simplify patterns conditioned on which transitions are taken.
+    ///
+    /// All transitions belong to the `cls` class.
     ///
     /// For each transition in `transitions`, return whether the pattern is
     /// still satisfiable and, if so, the pattern equivalent to `self` when
     /// conditioned on that transition.
-    fn apply_transitions(&self, transitions: &[Self::Constraint]) -> Vec<Satisfiable<Self>>;
+    ///
+    /// If the returned vector is empty, the pattern will skip this round of
+    /// constraint evaluation and be added to the "fail" transition instead.
+    ///
+    /// The input `transitions` is never empty. The return value should have
+    /// the same length as `transitions`, or be empty.
+    fn apply_transitions(
+        &self,
+        transitions: &[Self::Constraint],
+        cls: &Self::ConstraintClass,
+    ) -> Vec<Satisfiable<Self>>;
 
-    /// Check whether the pattern is satisfiable.
+    /// Check whether the partial pattern is satisfiable.
     fn is_satisfiable(&self) -> Satisfiable;
 }
