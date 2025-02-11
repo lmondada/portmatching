@@ -186,11 +186,14 @@ pub(super) mod tests {
             use crate::concrete::string::tests::Matcher;
 
             fn many_matcher(patterns: Vec<$Pattern>) -> Matcher<$ManyMatcher, $NaiveMatcher> {
-                Matcher::Many(<$ManyMatcher>::from_patterns::<$Scheme>(patterns))
+                Matcher::Many(
+                    <$ManyMatcher>::try_from_patterns::<$Scheme>(patterns, Default::default())
+                        .unwrap(),
+                )
             }
 
             fn naive_matcher(patterns: Vec<$Pattern>) -> Matcher<$ManyMatcher, $NaiveMatcher> {
-                Matcher::Naive(<$NaiveMatcher>::from_patterns::<$Scheme, _>(patterns))
+                Matcher::Naive(<$NaiveMatcher>::try_from_patterns::<$Scheme, _>(patterns).unwrap())
             }
 
             &[many_matcher, naive_matcher]
@@ -204,7 +207,11 @@ pub(super) mod tests {
         let p1 = StringPattern::parse_str("ab$xcd$x");
         let p2 = StringPattern::parse_str("abcc");
 
-        let matcher = StringManyMatcher::from_patterns::<StringIndexingScheme>(vec![p1, p2]);
+        let matcher = StringManyMatcher::try_from_patterns::<StringIndexingScheme>(
+            vec![p1, p2],
+            Default::default(),
+        )
+        .unwrap();
 
         let result = matcher.find_matches(&"abccdc".to_string()).collect_vec();
 
@@ -215,7 +222,11 @@ pub(super) mod tests {
     fn test_dummy_len_3_string_matching() {
         let p1 = StringPattern::parse_str("$x$y$z");
 
-        let matcher = StringManyMatcher::from_patterns::<StringIndexingScheme>(vec![p1]);
+        let matcher = StringManyMatcher::try_from_patterns::<StringIndexingScheme>(
+            vec![p1],
+            Default::default(),
+        )
+        .unwrap();
 
         let result = matcher.find_matches(&"ab".to_string()).collect_vec();
 
@@ -226,7 +237,11 @@ pub(super) mod tests {
     fn test_empty_pattern() {
         let p1 = StringPattern::parse_str("");
 
-        let matcher = StringManyMatcher::from_patterns::<StringIndexingScheme>(vec![p1]);
+        let matcher = StringManyMatcher::try_from_patterns::<StringIndexingScheme>(
+            vec![p1],
+            Default::default(),
+        )
+        .unwrap();
 
         let result = matcher.find_matches(&"ab".to_string()).collect_vec();
 
@@ -237,7 +252,11 @@ pub(super) mod tests {
     fn test_pattern_with_dummy_end() {
         let p1 = StringPattern::parse_str("$x$x$z");
 
-        let matcher = StringManyMatcher::from_patterns::<StringIndexingScheme>(vec![p1]);
+        let matcher = StringManyMatcher::try_from_patterns::<StringIndexingScheme>(
+            vec![p1],
+            Default::default(),
+        )
+        .unwrap();
 
         let result = matcher.find_matches(&"aa".to_string()).collect_vec();
 

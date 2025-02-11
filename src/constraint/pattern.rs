@@ -53,6 +53,11 @@ where
     {
         Self::from_constraints_set(constraints.into_iter().collect())
     }
+
+    /// Get the constraints in the pattern
+    pub fn constraints(&self) -> &ConstraintSet<K, P> {
+        &self.constraints
+    }
 }
 
 impl<K, P> Into<PartialConstraintPattern<K, P>> for ConstraintPattern<K, P> {
@@ -157,10 +162,9 @@ where
     P::ConstraintClass: Hash + Clone,
 {
     type Key = K;
-
     type PartialPattern = PartialConstraintPattern<K, P>;
-
     type Constraint = Constraint<K, P>;
+    type Error = ();
 
     fn required_bindings(&self) -> Vec<Self::Key> {
         self.constraints
@@ -170,8 +174,8 @@ where
             .collect()
     }
 
-    fn into_partial_pattern(self) -> Self::PartialPattern {
-        self.into()
+    fn try_into_partial_pattern(self) -> Result<Self::PartialPattern, ()> {
+        Ok(self.into())
     }
 }
 

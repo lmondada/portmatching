@@ -114,15 +114,15 @@ impl StringPattern {
 impl Pattern for StringPattern {
     type Key = StringPatternPosition;
     type PartialPattern = PartialConstraintPattern<StringPatternPosition, CharacterPredicate>;
-
     type Constraint = StringConstraint;
+    type Error = ();
 
     fn required_bindings(&self) -> Vec<Self::Key> {
         (0..self.len()).map(StringPatternPosition).collect()
     }
 
-    fn into_partial_pattern(self) -> Self::PartialPattern {
-        self.into_constraint_pattern().into()
+    fn try_into_partial_pattern(self) -> Result<Self::PartialPattern, ()> {
+        Ok(self.into_constraint_pattern().into())
     }
 }
 

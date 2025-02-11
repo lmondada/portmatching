@@ -21,7 +21,9 @@ impl<K, B> NaiveManyMatcher<K, B> {
     /// Create a new naive matcher from patterns.
     ///
     /// Use [`IndexingScheme::default`] as the indexing scheme.
-    pub fn from_patterns<I, PT>(patterns: impl IntoIterator<Item = PT>) -> Self
+    pub fn try_from_patterns<I, PT>(
+        patterns: impl IntoIterator<Item = PT>,
+    ) -> Result<Self, PT::Error>
     where
         PT: Pattern<Key = K>,
         B: CreateBranchSelector<PT::Constraint, Key = K>,
@@ -30,16 +32,16 @@ impl<K, B> NaiveManyMatcher<K, B> {
     {
         let matchers = patterns
             .into_iter()
-            .map(|p| SinglePatternMatcher::from_pattern::<I, PT>(p))
-            .collect();
-        Self { matchers }
+            .map(|p| SinglePatternMatcher::try_from_pattern::<I, PT>(p))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { matchers })
     }
 
     /// Create a new naive matcher from patterns, using a custom indexing scheme.
-    pub fn from_patterns_with_indexing<PT>(
+    pub fn try_from_patterns_with_indexing<PT>(
         patterns: impl IntoIterator<Item = PT>,
         host_indexing: &impl IndexingScheme<Key = K>,
-    ) -> Self
+    ) -> Result<Self, PT::Error>
     where
         PT: Pattern<Key = K>,
         B: CreateBranchSelector<PT::Constraint, Key = K>,
@@ -47,9 +49,9 @@ impl<K, B> NaiveManyMatcher<K, B> {
     {
         let matchers = patterns
             .into_iter()
-            .map(|p| SinglePatternMatcher::from_pattern_with_indexing(p, host_indexing))
-            .collect();
-        Self { matchers }
+            .map(|p| SinglePatternMatcher::try_from_pattern_with_indexing(p, host_indexing))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { matchers })
     }
 }
 

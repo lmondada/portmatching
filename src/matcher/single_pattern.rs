@@ -52,21 +52,21 @@ impl<K, B> SinglePatternMatcher<K, B> {
     /// Create a matcher from a vector of constraints.
     ///
     /// The host indexing scheme is the type's default.
-    pub fn from_pattern<I, PT>(pattern: PT) -> Self
+    pub fn try_from_pattern<I, PT>(pattern: PT) -> Result<Self, PT::Error>
     where
         PT: Pattern<Key = K>,
         B: CreateBranchSelector<PT::Constraint, Key = K>,
         K: IndexKey,
         I: IndexingScheme<Key = K> + Default,
     {
-        Self::from_pattern_with_indexing(pattern, &I::default())
+        Self::try_from_pattern_with_indexing(pattern, &I::default())
     }
 
     /// Create a matcher from a vector of constraints with specified host indexing scheme.
-    pub fn from_pattern_with_indexing<PT>(
+    pub fn try_from_pattern_with_indexing<PT>(
         pattern: PT,
         indexing: &impl IndexingScheme<Key = K>,
-    ) -> Self
+    ) -> Result<Self, PT::Error>
     where
         PT: Pattern<Key = K>,
         B: CreateBranchSelector<PT::Constraint, Key = K>,
@@ -76,7 +76,7 @@ impl<K, B> SinglePatternMatcher<K, B> {
         let required_bindings = BTreeSet::from_iter(pattern.required_bindings());
 
         // Break pattern into predicates
-        let constraints = decompose_constraints(pattern.into_partial_pattern());
+        let constraints = decompose_constraints(pattern.try_into_partial_pattern()?);
 
         // Turn predicates into branch selectors (with only one branch -- they
         // are just predicate evaluators in this case)
@@ -101,11 +101,11 @@ impl<K, B> SinglePatternMatcher<K, B> {
             indexing.all_missing_bindings(required_bindings.iter().copied(), known_bindings);
         scopes.push(new_keys);
 
-        Self {
+        Ok(Self {
             branch_selectors,
             required_bindings,
             scopes,
-        }
+        })
     }
 }
 
@@ -261,7 +261,7 @@ mod tests {
         let c3 = TestConstraint::try_binary_from_triple("key1", TestPredicate::NotEqualOne, "key2")
             .unwrap();
         let pattern = TestPattern::from_constraints(vec![c1, c2, c3]);
-        let matcher = TestMatcher::from_pattern::<TestStrIndexingScheme, _>(pattern);
+        let matcher = TestMatcher::try_from_pattern::<TestStrIndexingScheme, _>(pattern).unwrap();
 
         let matches = matcher.find_matches(&TestData).collect_vec();
 

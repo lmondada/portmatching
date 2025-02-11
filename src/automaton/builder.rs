@@ -9,7 +9,7 @@ use crate::{
     constraint_class::ConstraintClass,
     indexing::IndexKey,
     pattern::{Pattern, Satisfiable},
-    HashSet, IndexingScheme, PartialPattern, PatternID,
+    HashSet, IndexingScheme, PartialPattern, PatternFallback, PatternID,
 };
 
 mod modify;
@@ -71,21 +71,34 @@ impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
 
 impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
     /// Construct an automaton builder from a list of patterns.
-    pub fn from_patterns(
-        patterns: impl IntoIterator<Item = impl Pattern<Key = K, PartialPattern = PT>>,
-    ) -> Self {
-        let (patterns, pattern_scopes) = patterns
-            .into_iter()
-            .map(|p| {
-                let scope = HashSet::from_iter(p.required_bindings());
-                (p.into_partial_pattern(), scope)
-            })
-            .unzip();
-        Self {
-            patterns,
+    pub fn try_from_patterns<P: Pattern<Key = K, PartialPattern = PT>>(
+        patterns: impl IntoIterator<Item = P>,
+        fallback: PatternFallback,
+    ) -> Result<Self, P::Error> {
+        let patterns = patterns.into_iter();
+        let mut patterns_vec = Vec::<PT>::with_capacity(patterns.size_hint().0);
+        let mut pattern_scopes = Vec::with_capacity(patterns.size_hint().0);
+        for p in patterns {
+            let scope = HashSet::from_iter(p.required_bindings());
+            let partial = p.try_into_partial_pattern();
+            match fallback {
+                PatternFallback::Skip => {
+                    if let Ok(partial) = partial {
+                        patterns_vec.push(partial);
+                        pattern_scopes.push(scope);
+                    }
+                }
+                PatternFallback::Fail => {
+                    patterns_vec.push(partial?);
+                    pattern_scopes.push(scope);
+                }
+            }
+        }
+        Ok(Self {
+            patterns: patterns_vec,
             pattern_scopes,
             ..Self::new()
-        }
+        })
     }
 }
 
@@ -369,12 +382,6 @@ impl<P, K: IndexKey, B> Default for AutomatonBuilder<P, K, B> {
     }
 }
 
-impl<PT: Pattern, B> FromIterator<PT> for AutomatonBuilder<PT::PartialPattern, PT::Key, B> {
-    fn from_iter<T: IntoIterator<Item = PT>>(iter: T) -> Self {
-        Self::from_patterns(iter)
-    }
-}
-
 #[cfg(test)]
 pub(super) mod tests {
 
@@ -430,7 +437,7 @@ pub(super) mod tests {
             TestConstraint::new(TestPredicate::AlwaysTrueThree),
         ])
         .into();
-        let builder = TestBuilder::from_patterns([p1, p2]);
+        let builder = TestBuilder::try_from_patterns([p1, p2], Default::default()).unwrap();
         let (matcher, pattern_ids) = builder.build(BuildConfig::<TestStrIndexingScheme>::default());
         assert_eq!(matcher.graph.node_count(), 5);
         assert_eq!(pattern_ids, vec![PatternID(0), PatternID(1)]);

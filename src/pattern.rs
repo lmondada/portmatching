@@ -42,12 +42,14 @@ pub trait Pattern {
     type PartialPattern: PartialPattern<Constraint = Self::Constraint, Key = Self::Key>;
     /// The constraint type used to express the pattern.
     type Constraint;
+    /// Error for conversion to partial pattern failure
+    type Error: std::fmt::Debug;
 
     /// List of required bindings to match the pattern.
     fn required_bindings(&self) -> Vec<Self::Key>;
 
     /// Extract a partial pattern for further processing.
-    fn into_partial_pattern(self) -> Self::PartialPattern;
+    fn try_into_partial_pattern(self) -> Result<Self::PartialPattern, Self::Error>;
 }
 
 /// Partially satisfied patterns.
