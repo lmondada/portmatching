@@ -121,7 +121,7 @@ pub trait IndexedData<K: IndexKey> {
     ///
     /// If `known_bindings` does not contain all the required bindings or the
     /// binding is not possible, return the empty list.
-    fn list_bind_options(&self, key: &K, known_bindings: &Self::BindMap) -> Vec<Self::Value>;
+    fn bind_options(&self, key: &K, known_bindings: &Self::BindMap) -> Vec<Self::Value>;
 
     /// Return all ways to extend `bindings` by binding all keys in `new_keys`,
     /// in order.
@@ -138,7 +138,7 @@ pub trait IndexedData<K: IndexKey> {
             for mut bindings in all_bindings {
                 if bindings.get_binding(&key).is_unbound() {
                     // Key is not bound yet, try to bind it
-                    let valid_bindings = self.list_bind_options(&key, &bindings);
+                    let valid_bindings = self.bind_options(&key, &bindings);
                     if valid_bindings.is_empty() {
                         // Mark the key as impossible to bind
                         bindings.bind_failed(key);
@@ -441,7 +441,7 @@ pub(crate) mod tests {
         type Value = <Self::IndexingScheme as IndexingScheme>::Value;
         type BindMap = <Self::IndexingScheme as IndexingScheme>::BindMap;
 
-        fn list_bind_options(&self, key: &TestKey, _: &Self::BindMap) -> Vec<Self::Value> {
+        fn bind_options(&self, key: &TestKey, _: &Self::BindMap) -> Vec<Self::Value> {
             let key_suffix: usize = key[3..].parse().unwrap_or(0);
             vec![key_suffix]
         }
@@ -449,11 +449,7 @@ pub(crate) mod tests {
     impl IndexedData<usize> for TestData {
         type IndexingScheme = TestUsizeIndexingScheme;
 
-        fn list_bind_options(
-            &self,
-            key: &usize,
-            known_bindings: &Self::BindMap,
-        ) -> Vec<Self::Value> {
+        fn bind_options(&self, key: &usize, known_bindings: &Self::BindMap) -> Vec<Self::Value> {
             if *key == 0 || known_bindings.get(&(key - 1)).is_some() {
                 // All previous keys were assigned, we can (dummy) bind the key
                 vec![*key]

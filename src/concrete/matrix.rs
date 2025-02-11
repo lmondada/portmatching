@@ -108,7 +108,7 @@ impl IndexedData<MatrixPatternPosition> for MatrixString {
     type Value = <Self::IndexingScheme as IndexingScheme>::Value;
     type BindMap = <Self::IndexingScheme as IndexingScheme>::BindMap;
 
-    fn list_bind_options(
+    fn bind_options(
         &self,
         key: &MatrixPatternPosition,
         known_bindings: &MatrixBindMap,

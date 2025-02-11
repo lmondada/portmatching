@@ -94,7 +94,7 @@ impl IndexedData<StringPatternPosition> for String {
     type Value = <Self::IndexingScheme as IndexingScheme>::Value;
     type BindMap = <Self::IndexingScheme as IndexingScheme>::BindMap;
 
-    fn list_bind_options(
+    fn bind_options(
         &self,
         key: &StringPatternPosition,
         known_bindings: &Self::BindMap,

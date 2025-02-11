@@ -74,7 +74,7 @@ impl IndexedData<PGIndexKey> for PortGraph {
     type Value = NodeIndex;
     type BindMap = HashMap<PGIndexKey, Option<NodeIndex>>;
 
-    fn list_bind_options(
+    fn bind_options(
         &self,
         key: &PGIndexKey,
         known_bindings: &<PGIndexingScheme as IndexingScheme>::BindMap,
@@ -117,12 +117,12 @@ impl<M> IndexedData<PGIndexKey> for (&PortGraph, &M) {
     type Value = NodeIndex;
     type BindMap = HashMap<PGIndexKey, Option<NodeIndex>>;
 
-    fn list_bind_options(
+    fn bind_options(
         &self,
         key: &PGIndexKey,
         known_bindings: &<Self::IndexingScheme as IndexingScheme>::BindMap,
     ) -> Vec<NodeIndex> {
-        self.0.list_bind_options(key, known_bindings)
+        self.0.bind_options(key, known_bindings)
     }
 }
 
@@ -262,7 +262,7 @@ mod tests {
 
         while let Some((root_index, bindings)) = curr_bindings.pop() {
             let root_key = PGIndexKey::PathRoot { index: root_index };
-            let candidates = graph.list_bind_options(&root_key, &bindings);
+            let candidates = graph.bind_options(&root_key, &bindings);
             if candidates.is_empty() {
                 final_bindings.push(bindings.into_iter().map(|(k, v)| (k, v.unwrap())).collect());
                 continue;
@@ -278,7 +278,7 @@ mod tests {
                             path_start_port: port,
                             path_length,
                         };
-                        let candidates = graph.list_bind_options(&key, &new_bindings);
+                        let candidates = graph.bind_options(&key, &new_bindings);
                         let binding = candidates.into_iter().exactly_one().unwrap();
                         new_bindings.bind(key, binding).unwrap();
                     }
