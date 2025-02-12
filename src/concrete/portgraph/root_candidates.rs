@@ -8,16 +8,18 @@
 //! the previous roots that have been assigned. We can then figure out where
 //! the spanning tree can be extended to add new roots.
 
+use std::borrow::Borrow;
+
 use itertools::Itertools;
 use portgraph::{NodeIndex, PortGraph, PortIndex, PortOffset, PortView};
 
-use crate::{HashMap, HashSet};
+use crate::{indexing::Binding, BindMap, HashMap, HashSet};
 
 use super::indexing::{walk_path, PGIndexKey};
 
 pub(super) fn find_root_candidates(
     graph: &PortGraph,
-    bindings: &HashMap<PGIndexKey, NodeIndex>,
+    bindings: &HashMap<PGIndexKey, Option<NodeIndex>>,
 ) -> Vec<NodeIndex> {
     let tree = RootSpanningTree::new(graph, bindings);
 
@@ -30,7 +32,7 @@ pub(super) fn find_root_candidates(
         let max_offset_used = root
             .neighbours
             .iter()
-            .filter(|(_, v)| matches!(v, NeighbourType::KnownRoot(_)))
+            .filter(|(_, v)| matches!(v, NeighbourType::KnownRoot))
             .map(|(&offset, _)| offset)
             .max();
         root_candidates.extend(root.neighbours.into_iter().filter_map(|(k, v)| {
@@ -54,7 +56,7 @@ struct RootSpanningNode {
 #[derive(Clone, Debug)]
 enum NeighbourType {
     Parent,
-    KnownRoot(usize),
+    KnownRoot,
     NewRoot(NodeIndex),
 }
 
@@ -71,13 +73,20 @@ struct RootSpanningTree {
 }
 
 impl RootSpanningTree {
-    fn new(graph: &PortGraph, bindings: &HashMap<PGIndexKey, NodeIndex>) -> Self {
+    fn new(graph: &PortGraph, bindings: &HashMap<PGIndexKey, Option<NodeIndex>>) -> Self {
         let known_roots = (0..)
-            .map(|i| bindings.get(&PGIndexKey::PathRoot { index: i }).map(|v| *v))
+            .map(|i| {
+                if let Binding::Bound(v) = bindings.get_binding(&PGIndexKey::PathRoot { index: i })
+                {
+                    Some(*v.borrow())
+                } else {
+                    None
+                }
+            })
             .while_some()
             .collect_vec();
         let known_roots_inv: HashMap<_, _> = known_roots.iter().copied().zip(0..).collect();
-        let known_nodes = bindings.iter().map(|(_, &v)| v).collect_vec();
+        let known_nodes = bindings.values().flatten().copied().collect_vec();
         let nodes_with_free_ports = nodes_with_free_ports(graph, bindings);
 
         let mut tree_nodes = vec![RootSpanningNode::default(); known_roots.len()];
@@ -138,7 +147,7 @@ fn traverse_path_neighbour_type(
             } else if root == current_root && Some(port) > incoming_offset {
                 return Some(NeighbourType::Parent);
             } else if seen_roots.insert(root) {
-                return Some(NeighbourType::KnownRoot(root));
+                return Some(NeighbourType::KnownRoot);
             } else {
                 break;
             }
@@ -153,22 +162,22 @@ fn traverse_path_neighbour_type(
 /// For each node the ports that have not been traversed.
 fn free_ports(
     graph: &PortGraph,
-    bindings: &HashMap<PGIndexKey, NodeIndex>,
+    bindings: &HashMap<PGIndexKey, Option<NodeIndex>>,
 ) -> HashMap<NodeIndex, Vec<PortIndex>> {
     // Find the paths that have already been traversed
     // Map from (root, root_offset) to the length of the path traversed
     let mut paths = HashMap::<_, usize>::default();
     let mut roots = HashSet::default();
-    for (key, node) in bindings.iter() {
+    for (key, node) in bindings.iter().filter_map(|(&k, &v)| Some((k, v?))) {
         if let PGIndexKey::AlongPath {
             path_root,
             path_start_port,
             path_length,
         } = key
         {
-            let path_id = (*path_root, *path_start_port);
+            let path_id = (path_root, path_start_port);
             let prev_len = paths.entry(path_id).or_default();
-            *prev_len = (*path_length).max(*prev_len);
+            *prev_len = path_length.max(*prev_len);
         } else {
             roots.insert(node);
         }
@@ -178,10 +187,10 @@ fn free_ports(
     let mut free_ports = HashMap::default();
     for (&(root, root_offset), &length) in paths.iter() {
         let root = PGIndexKey::PathRoot { index: root };
-        let &root_node = bindings
-            .get(&root)
-            .expect("A PGIndexKey::AlongPath binding references an unbound root");
-        for (p1, node, p2) in walk_path(graph, root_node, root_offset).take(length + 1) {
+        let Binding::Bound(root_node) = bindings.get_binding(&root) else {
+            panic!("A PGIndexKey::AlongPath binding references an unbound root");
+        };
+        for (p1, node, p2) in walk_path(graph, *root_node.borrow(), root_offset).take(length + 1) {
             if roots.contains(&node) {
                 continue;
             }
@@ -204,7 +213,7 @@ fn free_ports(
 /// TODO: This is outrageously inefficient.
 fn nodes_with_free_ports(
     graph: &PortGraph,
-    bindings: &HashMap<PGIndexKey, NodeIndex>,
+    bindings: &HashMap<PGIndexKey, Option<NodeIndex>>,
 ) -> HashSet<NodeIndex> {
     let free_ports = free_ports(graph, bindings);
     free_ports
@@ -245,17 +254,17 @@ mod tests {
     }
 
     #[fixture]
-    fn bindings() -> HashMap<PGIndexKey, NodeIndex> {
+    fn bindings() -> HashMap<PGIndexKey, Option<NodeIndex>> {
         let (n0, n1, n2, n3) = nodes();
         HashMap::from_iter([
-            (PGIndexKey::PathRoot { index: 0 }, n0),
+            (PGIndexKey::PathRoot { index: 0 }, Some(n0)),
             (
                 PGIndexKey::AlongPath {
                     path_root: 0,
                     path_start_port: PortOffset::Outgoing(0),
                     path_length: 1,
                 },
-                n1,
+                Some(n1),
             ),
             (
                 PGIndexKey::AlongPath {
@@ -263,7 +272,7 @@ mod tests {
                     path_start_port: PortOffset::Outgoing(0),
                     path_length: 2,
                 },
-                n2,
+                Some(n2),
             ),
             (
                 PGIndexKey::AlongPath {
@@ -271,13 +280,13 @@ mod tests {
                     path_start_port: PortOffset::Incoming(0),
                     path_length: 1,
                 },
-                n3,
+                Some(n3),
             ),
         ])
     }
 
     #[rstest]
-    fn test_free_ports(small_graph: PortGraph, bindings: HashMap<PGIndexKey, NodeIndex>) {
+    fn test_free_ports(small_graph: PortGraph, bindings: HashMap<PGIndexKey, Option<NodeIndex>>) {
         let free_ports = free_ports(&small_graph, &bindings);
         let (_, n1, n2, n3) = nodes();
         let exp_free_ports: HashMap<_, Vec<_>> = [
@@ -300,7 +309,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_find_root_candidates(small_graph: PortGraph, bindings: HashMap<PGIndexKey, NodeIndex>) {
+    fn test_find_root_candidates(
+        small_graph: PortGraph,
+        bindings: HashMap<PGIndexKey, Option<NodeIndex>>,
+    ) {
         let (_, _, n2, n3) = (0..4)
             .map(|i| i.try_into().unwrap())
             .collect_tuple()
@@ -310,10 +322,15 @@ mod tests {
     }
 
     #[rstest]
-    fn test_spanning_tree(small_graph: PortGraph, mut bindings: HashMap<PGIndexKey, NodeIndex>) {
+    fn test_spanning_tree(
+        small_graph: PortGraph,
+        mut bindings: HashMap<PGIndexKey, Option<NodeIndex>>,
+    ) {
         let tree = RootSpanningTree::new(&small_graph, &bindings);
         assert_debug_snapshot!("RootSpanningTree_one_root", tree);
-        bindings.insert(PGIndexKey::PathRoot { index: 1 }, nodes().2);
+        bindings
+            .bind(PGIndexKey::PathRoot { index: 1 }, nodes().2)
+            .unwrap();
         let tree = RootSpanningTree::new(&small_graph, &bindings);
         assert_debug_snapshot!("RootSpanningTree_two_roots", tree);
     }

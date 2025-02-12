@@ -3,13 +3,13 @@
 //! This binds every node in a port graph to a name, that we use as a
 //! key during pattern matching.
 
-use std::{cmp, fmt::Debug, iter};
+use std::{borrow::Borrow, cmp, fmt::Debug, iter};
 
 use portgraph::{LinkView, NodeIndex, PortGraph, PortIndex, PortOffset, PortView};
 
 use crate::{
-    indexing::{IndexedData, Key, Value},
-    HashMap, IndexingScheme,
+    indexing::{Binding, IndexedData},
+    BindMap, HashMap, IndexingScheme,
 };
 
 use super::root_candidates::find_root_candidates;
@@ -49,9 +49,11 @@ pub enum PGIndexKey {
 }
 
 impl IndexingScheme for PGIndexingScheme {
-    type BindMap = HashMap<PGIndexKey, NodeIndex>;
+    type BindMap = HashMap<PGIndexKey, Option<NodeIndex>>;
+    type Key = PGIndexKey;
+    type Value = NodeIndex;
 
-    fn required_bindings(&self, key: &Key<Self>) -> Vec<Key<Self>> {
+    fn required_bindings(&self, key: &Self::Key) -> Vec<Self::Key> {
         match *key {
             PGIndexKey::PathRoot { index } => {
                 if index == 0 {
@@ -67,16 +69,18 @@ impl IndexingScheme for PGIndexingScheme {
     }
 }
 
-impl IndexedData for PortGraph {
+impl IndexedData<PGIndexKey> for PortGraph {
     type IndexingScheme = PGIndexingScheme;
+    type Value = NodeIndex;
+    type BindMap = HashMap<PGIndexKey, Option<NodeIndex>>;
 
-    fn list_bind_options(
+    fn bind_options(
         &self,
         key: &PGIndexKey,
         known_bindings: &<PGIndexingScheme as IndexingScheme>::BindMap,
     ) -> Vec<NodeIndex> {
-        if let Some(val) = known_bindings.get(key) {
-            return vec![val.clone()];
+        if let Binding::Bound(val) = known_bindings.get_binding(key) {
+            return vec![val.borrow().clone()];
         }
         match *key {
             PGIndexKey::PathRoot { index: 0 } => self.nodes_iter().collect(),
@@ -96,10 +100,10 @@ impl IndexedData for PortGraph {
                 path_length,
             } => {
                 let path_root = PGIndexKey::PathRoot { index: path_root };
-                let Some(&root_binding) = known_bindings.get(&path_root) else {
+                let Binding::Bound(root_binding) = known_bindings.get_binding(&path_root) else {
                     return vec![];
                 };
-                walk_path_nodes(self, root_binding, path_start_port)
+                walk_path_nodes(self, *root_binding.borrow(), path_start_port)
                     .nth(path_length)
                     .into_iter()
                     .collect()
@@ -108,15 +112,17 @@ impl IndexedData for PortGraph {
     }
 }
 
-impl<M> IndexedData for (&PortGraph, &M) {
+impl<M> IndexedData<PGIndexKey> for (&PortGraph, &M) {
     type IndexingScheme = PGIndexingScheme;
+    type Value = NodeIndex;
+    type BindMap = HashMap<PGIndexKey, Option<NodeIndex>>;
 
-    fn list_bind_options(
+    fn bind_options(
         &self,
-        key: &Key<Self::IndexingScheme>,
+        key: &PGIndexKey,
         known_bindings: &<Self::IndexingScheme as IndexingScheme>::BindMap,
-    ) -> Vec<Value<Self::IndexingScheme>> {
-        self.0.list_bind_options(key, known_bindings)
+    ) -> Vec<NodeIndex> {
+        self.0.bind_options(key, known_bindings)
     }
 }
 
@@ -256,14 +262,14 @@ mod tests {
 
         while let Some((root_index, bindings)) = curr_bindings.pop() {
             let root_key = PGIndexKey::PathRoot { index: root_index };
-            let candidates = graph.list_bind_options(&root_key, &bindings);
+            let candidates = graph.bind_options(&root_key, &bindings);
             if candidates.is_empty() {
-                final_bindings.push(bindings);
+                final_bindings.push(bindings.into_iter().map(|(k, v)| (k, v.unwrap())).collect());
                 continue;
             }
             for root_binding in candidates {
                 let mut new_bindings = bindings.clone();
-                new_bindings.insert(root_key, root_binding);
+                new_bindings.bind(root_key, root_binding).unwrap();
                 for port in graph.all_port_offsets(root_binding) {
                     let path_len = walk_path_nodes(graph, root_binding, port).count();
                     for path_length in 1..path_len {
@@ -272,9 +278,9 @@ mod tests {
                             path_start_port: port,
                             path_length,
                         };
-                        let candidates = graph.list_bind_options(&key, &new_bindings);
+                        let candidates = graph.bind_options(&key, &new_bindings);
                         let binding = candidates.into_iter().exactly_one().unwrap();
-                        new_bindings.insert(key, binding);
+                        new_bindings.bind(key, binding).unwrap();
                     }
                 }
                 curr_bindings.push((root_index + 1, new_bindings));

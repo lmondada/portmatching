@@ -7,9 +7,8 @@ use std::{
 use itertools::Itertools;
 use portgraph::{render::DotFormat, PortGraph};
 use portmatching::{
-    concrete::portgraph::{PGManyPatternMatcher, PGPattern},
+    concrete::portgraph::{indexing::PGIndexingScheme, PGManyPatternMatcher, PGPattern},
     matcher::PortMatcher,
-    pattern::ConcretePattern,
     utils::test::SerialPatternMatch,
 };
 
@@ -35,11 +34,11 @@ fn load_patterns(dir: &Path) -> io::Result<Vec<PGPattern<PortGraph>>>
         .collect();
     all_patterns.sort_unstable();
     for path in all_patterns {
-        let p: PGPattern<_> = serde_json::from_reader(fs::File::open(&path)?).unwrap();
+        let p: PGPattern<PortGraph> = serde_json::from_reader(fs::File::open(&path)?).unwrap();
         if DBG_DUMP_FILES {
             let mut path = path;
             path.set_extension("gv");
-            fs::write(path, p.as_host().dot_string()).unwrap();
+            fs::write(path, p.graph().dot_string()).unwrap();
         }
         patterns.push(p);
     }
@@ -99,8 +98,11 @@ fn test(test_path: &Path)
     //     cnt += 1;
     //     cnt <= 6
     // });
-    let matcher =
-        PGManyPatternMatcher::try_from_patterns(patterns.clone(), Default::default()).unwrap();
+    let matcher = PGManyPatternMatcher::try_from_patterns::<PGIndexingScheme>(
+        patterns.clone(),
+        Default::default(),
+    )
+    .unwrap();
     if DBG_DUMP_FILES {
         let mut path = test_path.to_owned();
         path.push("trie.gv");

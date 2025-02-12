@@ -53,24 +53,28 @@ impl<PT: Pattern + Clone, B> ManyMatcher<PT, PT::Key, B> {
     ///
     /// The patterns are converted to constraints. Uses the deterministic
     /// heuristic provided by the constraint type.
-    pub fn from_patterns<I>(patterns: Vec<PT>) -> Self
+    pub fn try_from_patterns<I>(
+        patterns: Vec<PT>,
+        fallback: PatternFallback,
+    ) -> Result<Self, PT::Error>
     where
         I: IndexingScheme<Key = PT::Key> + Default,
         B: CreateBranchSelector<PT::Constraint, Key = PT::Key>,
     {
-        Self::from_patterns_with_det_heuristic(patterns, BuildConfig::<I>::default())
+        Self::try_from_patterns_with_config(patterns, BuildConfig::<I>::default(), fallback)
     }
 
     /// Create a new matcher from a vector of patterns, using a custom deterministic
     /// heuristic.
-    pub fn from_patterns_with_det_heuristic(
+    pub fn try_from_patterns_with_config(
         patterns: Vec<PT>,
         config: BuildConfig<impl IndexingScheme<Key = PT::Key>>,
-    ) -> Self
+        fallback: PatternFallback,
+    ) -> Result<Self, PT::Error>
     where
         B: CreateBranchSelector<PT::Constraint, Key = PT::Key>,
     {
-        let builder = AutomatonBuilder::from_patterns(patterns.iter().cloned());
+        let builder = AutomatonBuilder::try_from_patterns(patterns.iter().cloned(), fallback)?;
         let (automaton, ids) = builder.build(config);
 
         let patterns = patterns
@@ -79,10 +83,10 @@ impl<PT: Pattern + Clone, B> ManyMatcher<PT, PT::Key, B> {
             .map(|(p, id)| (id, p))
             .collect();
 
-        Self {
+        Ok(Self {
             automaton,
             patterns,
-        }
+        })
     }
 }
 

@@ -272,7 +272,7 @@ mod tests {
             false_constraint(three),
         ]);
 
-        let builder = TestBuilder::from_patterns([p1, p2, p3, p4]);
+        let builder = TestBuilder::try_from_patterns([p1, p2, p3, p4], Default::default()).unwrap();
         let (automaton, ids) = builder.build(TestBuildConfig::default());
         let matches: HashSet<_> = automaton.run(&TestData).map(|(id, _)| id).collect();
         assert_eq!(matches, HashSet::from_iter([ids[1], ids[2]]));

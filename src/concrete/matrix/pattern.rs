@@ -128,6 +128,7 @@ impl Pattern for MatrixPattern {
     type Key = MatrixPatternPosition;
     type PartialPattern = PartialConstraintPattern<MatrixPatternPosition, CharacterPredicate>;
     type Constraint = MatrixConstraint;
+    type Error = ();
 
     fn required_bindings(&self) -> Vec<Self::Key> {
         (0..self.n_rows())
@@ -137,8 +138,8 @@ impl Pattern for MatrixPattern {
             .collect()
     }
 
-    fn into_partial_pattern(self) -> Self::PartialPattern {
-        self.into_constraint_pattern().into()
+    fn try_into_partial_pattern(self) -> Result<Self::PartialPattern, ()> {
+        Ok(self.into_constraint_pattern().into())
     }
 }
 
