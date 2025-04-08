@@ -16,7 +16,7 @@ use crate::{
     Constraint,
 };
 
-use super::{ArityPredicate, EvaluatePredicate, GetConstraintClass};
+use super::{ArityPredicate, ConstraintTag, EvaluatePredicate};
 
 /// A default selector for predicate-based patterns.
 ///
@@ -68,12 +68,12 @@ impl<K: IndexKey, P: Clone> DefaultConstraintSelector<K, P> {
             /// The position is used to index into the `binding_indices` vector.
             pub fn keys(&self, pos: usize) -> Vec<K>;
 
-            /// Get the branch class for this selector.
+            /// Get the constraint tag for this selector.
             ///
-            /// The branch class is determined by the predicates in the selector.
-            pub fn get_class(&self) -> Option<P::ConstraintClass>
+            /// The constraint tag is determined by the predicates in the selector.
+            pub fn get_tag(&self) -> Option<P::Tag>
             where
-                P: GetConstraintClass<K> + ArityPredicate;
+                P: ConstraintTag<K> + ArityPredicate;
 
             /// Get the predicates in this selector.
             ///
@@ -99,12 +99,12 @@ impl<K: IndexKey, P: Clone> DeterministicConstraintSelector<K, P> {
             /// The position is used to index into the `binding_indices` vector.
             pub fn keys(&self, pos: usize) -> Vec<K>;
 
-            /// Get the branch class for this selector.
+            /// Get the constraint tag for this selector.
             ///
-            /// The branch class is determined by the predicates in the selector.
-            pub fn get_class(&self) -> Option<P::ConstraintClass>
+            /// The constraint tag is determined by the predicates in the selector.
+            pub fn get_tag(&self) -> Option<P::Tag>
             where
-                P: GetConstraintClass<K> + ArityPredicate;
+                P: ConstraintTag<K> + ArityPredicate;
 
             /// Get the predicates in this selector.
             ///
@@ -232,26 +232,26 @@ impl<K: IndexKey, P: Clone> InnerSelector<K, P> {
             .collect()
     }
 
-    fn get_class(&self) -> Option<P::ConstraintClass>
+    fn get_tag(&self) -> Option<P::Tag>
     where
-        P: GetConstraintClass<K> + ArityPredicate,
+        P: ConstraintTag<K> + ArityPredicate,
     {
         let fst_pred = self.predicates.first()?;
         let fst_keys = self.keys(0);
-        let mut classes = BTreeSet::from_iter(fst_pred.try_get_classes(&fst_keys).unwrap());
+        let mut tags = BTreeSet::from_iter(fst_pred.get_tags(&fst_keys));
 
         for i in 1..self.predicates.len() {
             let pred = &self.predicates[i];
             let keys = self.keys(i);
-            let new_classes = BTreeSet::from_iter(pred.try_get_classes(&keys).unwrap());
-            classes.retain(|cls| new_classes.contains(cls));
+            let new_tags = BTreeSet::from_iter(pred.get_tags(&keys));
+            tags.retain(|cls| new_tags.contains(cls));
         }
 
-        let Some(cls) = classes.pop_first() else {
-            panic!("All predicates in a pattern must share a class")
+        let Some(tag) = tags.pop_first() else {
+            panic!("All predicates in a selector must share a tag")
         };
 
-        Some(cls)
+        Some(tag)
     }
 
     fn predicates(&self) -> &[P] {

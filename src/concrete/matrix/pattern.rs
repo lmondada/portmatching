@@ -4,7 +4,7 @@ use crate::concrete::string::CharVar;
 use crate::constraint::{ConstraintPattern, PartialConstraintPattern};
 use crate::{Constraint, HashMap, Pattern};
 
-use super::{CharacterPredicate, MatrixConstraint, MatrixPatternPosition};
+use super::{CharacterPredicate, MatrixPatternPosition};
 
 /// A pattern for matching a matrix of characters.
 ///
@@ -127,7 +127,7 @@ impl MatrixPattern {
 impl Pattern for MatrixPattern {
     type Key = MatrixPatternPosition;
     type PartialPattern = PartialConstraintPattern<MatrixPatternPosition, CharacterPredicate>;
-    type Constraint = MatrixConstraint;
+    type Predicate = CharacterPredicate;
     type Error = ();
 
     fn required_bindings(&self) -> Vec<Self::Key> {

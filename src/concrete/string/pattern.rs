@@ -6,7 +6,7 @@ use crate::{
 };
 use derive_more::Display;
 
-use super::{predicate::CharacterPredicate, StringConstraint, StringPatternPosition};
+use super::{predicate::CharacterPredicate, StringPatternPosition};
 
 /// A pattern for matching on strings.
 ///
@@ -114,7 +114,7 @@ impl StringPattern {
 impl Pattern for StringPattern {
     type Key = StringPatternPosition;
     type PartialPattern = PartialConstraintPattern<StringPatternPosition, CharacterPredicate>;
-    type Constraint = StringConstraint;
+    type Predicate = CharacterPredicate;
     type Error = ();
 
     fn required_bindings(&self) -> Vec<Self::Key> {

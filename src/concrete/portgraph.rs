@@ -21,8 +21,8 @@ use self::indexing::PGIndexKey;
 type BranchSelector = DeterministicConstraintSelector<PGIndexKey, PGPredicate>;
 
 impl DisplayBranchSelector for BranchSelector {
-    fn fmt_class(&self) -> String {
-        format!("{:?}", self.get_class().unwrap())
+    fn fmt_tag(&self) -> String {
+        format!("{:?}", self.get_tag().unwrap())
     }
 
     fn fmt_nth_constraint(&self, n: usize) -> String {
@@ -508,7 +508,6 @@ mod tests {
 
         let mut matches = matcher
             .find_matches(&g)
-            .into_iter()
             .map(|m| {
                 m.match_data
                     .values()

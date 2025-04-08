@@ -26,7 +26,7 @@ pub struct PGPattern<G> {
 
 impl Pattern for PGPattern<PortGraph> {
     type Key = PGIndexKey;
-    type Constraint = PGConstraint;
+    type Predicate = PGPredicate;
     type PartialPattern = PartialConstraintPattern<PGIndexKey, PGPredicate>;
     type Error = PGPatternError;
 
@@ -139,7 +139,7 @@ fn constraint_vec(graph: &PortGraph, root: NodeIndex) -> Result<Vec<PGConstraint
     let mut constraints = Vec::new();
     let mut node_to_key = HashMap::from_iter([(root, PGIndexKey::root(0))]);
     let mut node_to_root_ind = HashMap::from_iter([(root, 0)]);
-    for line in line_partition(&graph, root) {
+    for line in line_partition(graph, root) {
         let root = graph.port_node(line[0].0).unwrap();
         let n_roots = node_to_root_ind.len();
         let root_index = *node_to_root_ind.entry(root).or_insert(n_roots);
@@ -180,8 +180,7 @@ fn constraint_vec(graph: &PortGraph, root: NodeIndex) -> Result<Vec<PGConstraint
                     PGPredicate::IsConnected {
                         left_port,
                         right_port,
-                    }
-                    .into(),
+                    },
                     vec![left_key, right_key],
                 )
                 .unwrap(),

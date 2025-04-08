@@ -4,7 +4,6 @@ use std::{borrow::Borrow, collections::BTreeSet};
 
 use crate::{
     constraint::InvalidConstraint,
-    constraint_class::ConstraintClass,
     indexing::{Binding, IndexKey},
     pattern::Satisfiable,
     BindMap, Constraint, IndexedData,
@@ -48,7 +47,7 @@ pub trait EvaluatePredicate<Data, Value>: ArityPredicate {
 /// This trait defines how constraints simplify when conditioned on other constraints.
 pub trait ConditionalPredicate<K>: Clone + Ord + Sized {
     /// Compute equivalent constraint when conditioned on an other constraint
-    /// of the same class.
+    /// of the same tag.
     ///
     /// `prev_constraints` is the set of constraints that have been evaluated
     /// so far (useful for a deterministic branch selector, in which case this
@@ -59,27 +58,6 @@ pub trait ConditionalPredicate<K>: Clone + Ord + Sized {
         known_constraints: &BTreeSet<Constraint<K, Self>>,
         prev_constraints: &[Constraint<K, Self>],
     ) -> Satisfiable<Constraint<K, Self>>;
-}
-
-/// Implement on a predicate to define the constraint classes that constraints
-/// belongs to
-///
-/// Implementing this will automatically provide an implementation of
-/// [`ConstraintClass`] for the constraint class type.
-pub trait GetConstraintClass<K>: Sized {
-    /// Sets of constraints that can be evaluated together form branch classes.
-    type ConstraintClass: ConstraintClass<Constraint<K, Self>>;
-
-    /// Get the classes of this predicate
-    fn try_get_classes(&self, keys: &[K]) -> Result<Vec<Self::ConstraintClass>, InvalidConstraint>
-    where
-        Self: ArityPredicate,
-        K: Clone,
-    {
-        // TODO: refactor this somehow to avoid cloning
-        let constraint = self.clone().try_into_constraint(keys.to_vec())?;
-        Ok(Self::ConstraintClass::get_classes(&constraint))
-    }
 }
 
 impl<K, P> Constraint<K, P> {
@@ -135,19 +113,19 @@ pub(crate) mod tests {
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub(crate) enum TestPredicate {
-        // ConstraintClass One
+        // Tag One
         AreEqualOne,
         NotEqualOne,
-        // ConstraintClass Two
+        // Tag Two
         AreEqualTwo,
         AlwaysTrueTwo,
-        // ConstraintClass Three
+        // Tag Three
         NeverTrueThree,  // take one arg
         AlwaysTrueThree, // take one arg
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub(crate) enum TestConstraintClass {
+    pub(crate) enum TestConstraintTag {
         One(TestKey, TestKey),
         Two(TestKey, TestKey),
         Three,

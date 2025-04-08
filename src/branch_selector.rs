@@ -38,8 +38,8 @@ pub trait CreateBranchSelector<C>: BranchSelector + Sized {
 
 /// Extend `BranchSelector` with the ability to be formatted for display.
 pub trait DisplayBranchSelector: BranchSelector {
-    /// A string representation of the selector's branch class
-    fn fmt_class(&self) -> String;
+    /// A string representation of the selector's branch tag
+    fn fmt_tag(&self) -> String;
 
     /// A string representation of the n-th constraint
     fn fmt_nth_constraint(&self, n: usize) -> String;
@@ -48,21 +48,21 @@ pub trait DisplayBranchSelector: BranchSelector {
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::constraint::{
-        tests::{TestConstraintClass, TestKey, TestPredicate},
+        tests::{TestConstraintTag, TestKey, TestPredicate},
         DefaultConstraintSelector,
     };
 
     pub type TestBranchSelector = DefaultConstraintSelector<TestKey, TestPredicate>;
 
     impl super::DisplayBranchSelector for TestBranchSelector {
-        fn fmt_class(&self) -> String {
-            let Some(cls) = self.get_class() else {
+        fn fmt_tag(&self) -> String {
+            let Some(cls) = self.get_tag() else {
                 return String::new();
             };
             match cls {
-                TestConstraintClass::One(a, b) => format!("One({a}, {b})"),
-                TestConstraintClass::Two(a, b) => format!("Two({a}, {b})"),
-                TestConstraintClass::Three => "Three".to_string(),
+                TestConstraintTag::One(a, b) => format!("One({a}, {b})"),
+                TestConstraintTag::Two(a, b) => format!("Two({a}, {b})"),
+                TestConstraintTag::Three => "Three".to_string(),
             }
         }
 

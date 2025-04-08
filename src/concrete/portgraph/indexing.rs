@@ -80,7 +80,7 @@ impl IndexedData<PGIndexKey> for PortGraph {
         known_bindings: &<PGIndexingScheme as IndexingScheme>::BindMap,
     ) -> Vec<NodeIndex> {
         if let Binding::Bound(val) = known_bindings.get_binding(key) {
-            return vec![val.borrow().clone()];
+            return vec![*val.borrow()];
         }
         match *key {
             PGIndexKey::PathRoot { index: 0 } => self.nodes_iter().collect(),
@@ -182,11 +182,11 @@ impl Debug for PGIndexKey {
 /// If `start_offset` is a PortOffset::Incoming port, then the path is traversed
 /// in reverse, and thus the first port in the triple will be an outgoing port
 /// and the last port will be an incoming port.
-pub(super) fn walk_path<'g>(
-    graph: &'g PortGraph,
+pub(super) fn walk_path(
+    graph: &PortGraph,
     start: NodeIndex,
     start_offset: PortOffset,
-) -> impl Iterator<Item = (Option<PortIndex>, NodeIndex, Option<PortIndex>)> + 'g {
+) -> impl Iterator<Item = (Option<PortIndex>, NodeIndex, Option<PortIndex>)> + '_ {
     let mut next_port = graph.port_index(start, start_offset);
     iter::once((None, start, next_port)).chain(iter::from_fn(move || {
         let prev_port = graph.port_link(next_port?);
@@ -203,11 +203,11 @@ pub(super) fn walk_path<'g>(
     }))
 }
 
-pub(super) fn walk_path_nodes<'g>(
-    graph: &'g PortGraph,
+pub(super) fn walk_path_nodes(
+    graph: &PortGraph,
     start: NodeIndex,
     start_offset: PortOffset,
-) -> impl Iterator<Item = NodeIndex> + 'g {
+) -> impl Iterator<Item = NodeIndex> + '_ {
     walk_path(graph, start, start_offset).map(|(_, node, _)| node)
 }
 

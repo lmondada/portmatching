@@ -125,6 +125,7 @@ impl RootSpanningTree {
 /// We handle path cycle by picking the direction of traversal that starts in a
 /// smaller offset as "finding a larger root", and the other direction as "finding
 /// a smaller root".
+#[allow(clippy::too_many_arguments)]
 fn traverse_path_neighbour_type(
     graph: &PortGraph,
     node: NodeIndex,
@@ -142,9 +143,7 @@ fn traverse_path_neighbour_type(
         }
         let incoming_offset = incoming_p.map(|p| graph.port_offset(p).unwrap());
         if let Some(&root) = known_roots_inv.get(&node) {
-            if root < current_root {
-                return Some(NeighbourType::Parent);
-            } else if root == current_root && Some(port) > incoming_offset {
+            if root < current_root || (root == current_root && Some(port) > incoming_offset) {
                 return Some(NeighbourType::Parent);
             } else if seen_roots.insert(root) {
                 return Some(NeighbourType::KnownRoot);
@@ -156,7 +155,7 @@ fn traverse_path_neighbour_type(
     }
     path.into_iter()
         .find(|n| nodes_with_free_ports.contains(n))
-        .map(|n| NeighbourType::NewRoot(n))
+        .map(NeighbourType::NewRoot)
 }
 
 /// For each node the ports that have not been traversed.

@@ -6,10 +6,10 @@ use petgraph::acyclic::Acyclic;
 use crate::{
     automaton::{ConstraintAutomaton, StateID},
     branch_selector::CreateBranchSelector,
-    constraint_class::ConstraintClass,
+    constraint::Tag,
     indexing::IndexKey,
-    pattern::{Pattern, Satisfiable},
-    HashSet, IndexingScheme, PartialPattern, PatternFallback, PatternID,
+    pattern::{PartialPatternConstraint, PartialPatternTag, Pattern, Satisfiable},
+    Constraint, HashSet, IndexingScheme, PartialPattern, PatternFallback, PatternID,
 };
 
 mod modify;
@@ -106,12 +106,12 @@ impl<PT, K: IndexKey, B> AutomatonBuilder<PT, K, B> {
 struct BuildState<P: PartialPattern> {
     state: StateID,
     patterns: PatternsInProgress<P>,
-    satisfied_constraints: BTreeSet<P::Constraint>,
+    satisfied_constraints: BTreeSet<Constraint<P::Key, P::Predicate>>,
 }
 
 impl<P: PartialPattern, B> AutomatonBuilder<P, P::Key, B>
 where
-    B: CreateBranchSelector<P::Constraint, Key = P::Key>,
+    B: CreateBranchSelector<Constraint<P::Key, P::Predicate>, Key = P::Key>,
 {
     /// Construct the automaton.
     ///
@@ -180,21 +180,18 @@ where
                 continue;
             }
 
-            // 1. Gather all nominated constraints, group by class and find
-            // best class
+            // 1. Gather all nominated constraints, group by tag and find
+            // best tag
             let nominated_constraints = patterns.iter().flat_map(|(_, p)| p.nominate());
-            let mut class_to_constraints: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+            let mut tag_to_constraints: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
             for c in nominated_constraints {
-                for cls in P::ConstraintClass::get_classes(&c) {
-                    class_to_constraints
-                        .entry(cls)
-                        .or_default()
-                        .insert(c.clone());
+                for tag in c.get_tags() {
+                    tag_to_constraints.entry(tag).or_default().insert(c.clone());
                 }
             }
-            let Some((best_class, best_constraints)) = class_to_constraints
+            let Some((best_tag, best_constraints)) = tag_to_constraints
                 .into_iter()
-                .min_by_key(|(cls, constraints)| cls.expansion_factor(constraints.iter()))
+                .min_by_key(|(tag, constraints)| tag.expansion_factor(constraints.iter()))
             else {
                 // No constraints nominated by any pattern
                 panic!("No constraints nominated by any pattern");
@@ -204,7 +201,7 @@ where
             // 2. Apply all transition to each pattern. Track new patterns,
             // new matches and patterns to skip
             let (mut next_patterns, mut next_matches, skip_patterns) =
-                apply_transitions(patterns, &best_constraints, &best_class);
+                apply_transitions(patterns, &best_constraints, &best_tag);
 
             // Remove transitions that do not lead to a new child
             retain_non_empty(&mut best_constraints, &mut next_patterns, &mut next_matches);
@@ -309,7 +306,7 @@ where
 }
 
 fn retain_non_empty<P: PartialPattern>(
-    constraints: &mut Vec<<P as PartialPattern>::Constraint>,
+    constraints: &mut Vec<PartialPatternConstraint<P>>,
     next_patterns: &mut Vec<PatternsInProgress<P>>,
     next_matches: &mut Vec<Matches>,
 ) {
@@ -333,14 +330,14 @@ fn retain_non_empty<P: PartialPattern>(
 
 fn apply_transitions<P: PartialPattern>(
     patterns: PatternsInProgress<P>,
-    transitions: &[<P as PartialPattern>::Constraint],
-    cls: &P::ConstraintClass,
+    transitions: &[PartialPatternConstraint<P>],
+    cls: &PartialPatternTag<P>,
 ) -> (
     Vec<PatternsInProgress<P>>,
     Vec<Matches>,
     PatternsInProgress<P>,
 ) {
-    debug_assert!(transitions.len() > 0);
+    debug_assert!(!transitions.is_empty());
 
     let mut next_patterns = vec![BTreeSet::default(); transitions.len()];
     let mut next_matches = vec![BTreeSet::default(); transitions.len()];
@@ -430,13 +427,11 @@ pub(super) mod tests {
         let p1: TestPattern = ConstraintPattern::from_constraints([
             TestConstraint::new(TestPredicate::AreEqualOne),
             TestConstraint::new(TestPredicate::AreEqualTwo),
-        ])
-        .into();
+        ]);
         let p2: TestPattern = ConstraintPattern::from_constraints([
             TestConstraint::new(TestPredicate::AreEqualOne),
             TestConstraint::new(TestPredicate::AlwaysTrueThree),
-        ])
-        .into();
+        ]);
         let builder = TestBuilder::try_from_patterns([p1, p2], Default::default()).unwrap();
         let (matcher, pattern_ids) = builder.build(BuildConfig::<TestStrIndexingScheme>::default());
         assert_eq!(matcher.graph.node_count(), 5);

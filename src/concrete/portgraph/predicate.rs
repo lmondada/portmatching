@@ -6,8 +6,12 @@ use itertools::Itertools;
 use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, SecondaryMap, UnmanagedDenseMap};
 
 use crate::{
-    constraint::ArityPredicate, pattern::Satisfiable, ConditionalPredicate, Constraint,
-    EvaluatePredicate, GetConstraintClass,
+    constraint::{
+        tag::{ConstraintTag, Tag},
+        ArityPredicate,
+    },
+    pattern::Satisfiable,
+    ConditionalPredicate, Constraint, EvaluatePredicate,
 };
 
 use super::{indexing::PGIndexKey, PGConstraint};
@@ -37,27 +41,27 @@ pub enum PGPredicate<NodeWeight = ()> {
     },
 }
 
-/// Organise constraints into classes for efficient constraint evaluation
+/// Label constraints with tags for efficient constraint evaluation
 /// and pattern matcher construction.
 ///
-/// Constraints within the same [`ConstraintClass::HasNodeWeight`] or
-/// [`ConstraintClass::IsConnected`] class are always mutually exclusive.
+/// Constraints labelled with the same [`PGTag::HasNodeWeight`] or
+/// [`PGTag::IsConnected`] tag are always mutually exclusive.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ConstraintClass {
-    /// Constraint class for [`PGPredicate::HasNodeWeight`] predicates.
+pub enum PGTag {
+    /// Constraint tag for [`PGPredicate::HasNodeWeight`] predicates.
     ///
     /// Any two [`PGPredicate::HasNodeWeight`] predicates on the same node
-    /// (i.e. in the same class) are mutually exclusive.
+    /// (i.e. with the same tag) are mutually exclusive.
     HasNodeWeight(PGIndexKey),
-    /// Constraint class for [`PGPredicate::IsConnected`] predicates.
+    /// Constraint tag for [`PGPredicate::IsConnected`] predicates.
     ///
     /// Any two [`PGPredicate::IsConnected`] predicates on the same port & node
-    /// (i.e. in the same class) are mutually exclusive.
+    /// (i.e. with the same tag) are mutually exclusive.
     IsConnected(PGIndexKey, PortOffset),
-    /// Constraint class for [`PGPredicate::IsNotEqual`] predicates.
+    /// Constraint tag for [`PGPredicate::IsNotEqual`] predicates.
     ///
     /// This is non-deterministic, i.e. no mutual exclusivity between constraints
-    /// within a class.
+    /// with the same tag.
     IsNotEqual(PGIndexKey),
 }
 
@@ -107,21 +111,21 @@ impl<W> PGPredicate<W> {
         }
     }
 
-    fn get_classes(&self, keys: &[PGIndexKey]) -> Vec<ConstraintClass> {
+    fn get_tags(&self, keys: &[PGIndexKey]) -> Vec<PGTag> {
         use PGPredicate::*;
         match self {
             HasNodeWeight(_) => {
-                vec![ConstraintClass::HasNodeWeight(keys[0])]
+                vec![PGTag::HasNodeWeight(keys[0])]
             }
             IsConnected {
                 left_port,
                 right_port,
             } => vec![
-                ConstraintClass::IsConnected(keys[0], *left_port),
-                ConstraintClass::IsConnected(keys[1], *right_port),
+                PGTag::IsConnected(keys[0], *left_port),
+                PGTag::IsConnected(keys[1], *right_port),
             ],
             IsNotEqual { .. } => {
-                vec![ConstraintClass::IsNotEqual(keys[0])]
+                vec![PGTag::IsNotEqual(keys[0])]
             }
         }
     }
@@ -162,11 +166,11 @@ impl<W: std::fmt::Debug + Ord + Clone> ConditionalPredicate<PGIndexKey> for PGPr
         known_constraints: &BTreeSet<Constraint<PGIndexKey, Self>>,
         _: &[Constraint<PGIndexKey, Self>],
     ) -> Satisfiable<Constraint<PGIndexKey, Self>> {
-        let self_classes = self.get_classes(keys);
-        // Only retain known constraints that are of the same class
+        let self_tags = self.get_tags(keys);
+        // Only retain known constraints that have the same tag
         let known_constraints = known_constraints
             .iter()
-            .filter(|c| c.get_classes().iter().any(|c| self_classes.contains(c)))
+            .filter(|c| c.get_tags().iter().any(|c| self_tags.contains(c)))
             .collect_vec();
         use PGPredicate::*;
         match self {
@@ -186,8 +190,8 @@ impl<W: std::fmt::Debug + Ord + Clone> ConditionalPredicate<PGIndexKey> for PGPr
                 let first_key = keys[0];
                 let mut keys: BTreeSet<_> = keys[1..].iter().copied().collect();
                 for s in known_constraints {
-                    for k in s.required_bindings()[1..].iter().copied() {
-                        keys.remove(&k);
+                    for k in s.required_bindings()[1..].iter() {
+                        keys.remove(k);
                     }
                 }
                 if keys.is_empty() {
@@ -204,25 +208,27 @@ impl<W: std::fmt::Debug + Ord + Clone> ConditionalPredicate<PGIndexKey> for PGPr
     }
 }
 
-impl<W: Ord + Clone> GetConstraintClass<PGIndexKey> for PGPredicate<W> {
-    type ConstraintClass = ConstraintClass;
+impl<W: Ord + Clone> ConstraintTag<PGIndexKey> for PGPredicate<W> {
+    type Tag = PGTag;
+
+    fn get_tags(&self, keys: &[PGIndexKey]) -> Vec<Self::Tag> {
+        self.get_tags(keys)
+    }
 }
 
-impl<W> crate::ConstraintClass<PGConstraint<W>> for ConstraintClass {
-    fn get_classes(constraint: &PGConstraint<W>) -> Vec<Self> {
-        constraint
-            .predicate()
-            .get_classes(&constraint.required_bindings())
-    }
+impl<W> Tag<PGIndexKey, PGPredicate<W>> for PGTag {
+    type ExpansionFactor = u64;
 
-    fn expansion_factor<'c>(
+    fn expansion_factor<'c, C>(
         &self,
-        constraints: impl IntoIterator<Item = &'c PGConstraint<W>>,
-    ) -> crate::constraint_class::ExpansionFactor
+        constraints: impl IntoIterator<Item = C>,
+    ) -> Self::ExpansionFactor
     where
-        PGConstraint<W>: 'c,
+        PGIndexKey: 'c,
+        PGPredicate<W>: 'c,
+        C: Into<(&'c PGPredicate<W>, &'c [PGIndexKey])>,
     {
-        use ConstraintClass::*;
+        use PGTag::*;
         match self {
             // Deterministic so very cheap
             HasNodeWeight(..) => 1,
@@ -261,11 +267,7 @@ fn has_edge<G: LinkView>(
     };
     graph
         .port_links(left_port)
-        .filter(|&(_, p)| {
-            graph.port_offset(p) == Some(right_port) && graph.port_node(p) == Some(right)
-        })
-        .next()
-        .is_some()
+        .any(|(_, p)| graph.port_offset(p) == Some(right_port) && graph.port_node(p) == Some(right))
 }
 
 #[cfg(test)]
@@ -298,8 +300,7 @@ mod tests {
             PGPredicate::IsConnected {
                 left_port,
                 right_port,
-            }
-            .into(),
+            },
             vec![
                 vname(left_root_id, left_root_port, left_node_index),
                 vname(right_root_id, right_root_port, right_node_index),

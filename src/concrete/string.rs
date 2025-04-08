@@ -32,20 +32,17 @@ use crate::{
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher,
 };
 pub use pattern::{CharVar, StringPattern};
-pub use predicate::{BranchClass, CharacterPredicate};
+pub use predicate::{CharacterPredicate, StringTag};
 
 type BranchSelector = DeterministicConstraintSelector<StringPatternPosition, CharacterPredicate>;
 
-/// A constraint for matching a string using [StringPredicate]s.
-type StringConstraint = crate::Constraint<StringPatternPosition, CharacterPredicate>;
-
 impl<K: IndexKey> DisplayBranchSelector for DeterministicConstraintSelector<K, CharacterPredicate> {
-    fn fmt_class(&self) -> String {
-        let Some(cls) = self.get_class() else {
+    fn fmt_tag(&self) -> String {
+        let Some(tag) = self.get_tag() else {
             return String::new();
         };
-        match cls {
-            BranchClass::Position(pos) => format!("Position({pos:?})"),
+        match tag {
+            StringTag::Position(pos) => format!("Position({pos:?})"),
         }
     }
 

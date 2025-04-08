@@ -42,10 +42,10 @@ mod tests {
         ) {
             let subject = MatrixString::from(&subject);
             // Skip the all deterministic matcher, too slow
-            let [mut default, mut naive] = apply_all_matchers(patterns, &subject);
+            let [default, naive] = apply_all_matchers(patterns, &subject);
 
-            let mut default = get_start_pos(&mut default);
-            let mut naive = get_start_pos(&mut naive);
+            let mut default = get_start_pos(&default);
+            let mut naive = get_start_pos(&naive);
 
             default.sort();
             naive.sort();
