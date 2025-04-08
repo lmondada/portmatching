@@ -119,7 +119,6 @@ impl<K: IndexKey> Tag<K, CharacterPredicate> for StringTag<K> {
         CharacterPredicate: 'c,
         C: Into<(&'c CharacterPredicate, &'c [K])>,
     {
-        
     }
 }
 
