@@ -35,7 +35,7 @@ proptest! {
             .collect_vec();
         if DBG_DUMP_FILES {
             for (i, p) in patterns.iter().enumerate() {
-                fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&p).unwrap()).unwrap();
+                fs::write(format!("pattern_{}.json", i), serde_json::to_vec(&p).unwrap()).unwrap();
             }
         }
         let naive = PGNaiveManyPatternMatcher::try_from_patterns::<PGIndexingScheme, _>(patterns.clone()).unwrap();
@@ -71,7 +71,7 @@ proptest! {
             .collect_vec();
         if DBG_DUMP_FILES {
             for (i, p) in patterns.iter().enumerate() {
-                fs::write(&format!("pattern_{}.json", i), serde_json::to_vec(&p).unwrap()).unwrap();
+                fs::write(format!("pattern_{}.json", i), serde_json::to_vec(&p).unwrap()).unwrap();
                 println!("==== pattern_{}.json ====", i);
                 println!("{}", serde_json::to_string(&p).unwrap());
             }

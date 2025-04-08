@@ -508,7 +508,6 @@ mod tests {
 
         let mut matches = matcher
             .find_matches(&g)
-            .into_iter()
             .map(|m| {
                 m.match_data
                     .values()

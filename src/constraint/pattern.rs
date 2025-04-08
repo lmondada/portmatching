@@ -60,10 +60,10 @@ where
     }
 }
 
-impl<K, P> Into<PartialConstraintPattern<K, P>> for ConstraintPattern<K, P> {
-    fn into(self) -> PartialConstraintPattern<K, P> {
+impl<K, P> From<ConstraintPattern<K, P>> for PartialConstraintPattern<K, P> {
+    fn from(val: ConstraintPattern<K, P>) -> Self {
         PartialConstraintPattern {
-            pattern_constraints: self.constraints,
+            pattern_constraints: val.constraints,
             known_constraints: BTreeSet::new(),
         }
     }
@@ -129,7 +129,7 @@ impl<K, P> Constraint<K, P> {
     where
         P: ConstraintTag<K>,
     {
-        P::get_tags(&self.predicate(), &self.args)
+        P::get_tags(self.predicate(), &self.args)
     }
 
     /// Condition this constraint on a set of known constraints

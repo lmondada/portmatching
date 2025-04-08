@@ -41,27 +41,27 @@ pub enum PGPredicate<NodeWeight = ()> {
     },
 }
 
-/// Organise constraints into classes for efficient constraint evaluation
+/// Label constraints with tags for efficient constraint evaluation
 /// and pattern matcher construction.
 ///
-/// Constraints within the same [`ConstraintClass::HasNodeWeight`] or
-/// [`ConstraintClass::IsConnected`] class are always mutually exclusive.
+/// Constraints labelled with the same [`PGTag::HasNodeWeight`] or
+/// [`PGTag::IsConnected`] tag are always mutually exclusive.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PGTag {
-    /// Constraint class for [`PGPredicate::HasNodeWeight`] predicates.
+    /// Constraint tag for [`PGPredicate::HasNodeWeight`] predicates.
     ///
     /// Any two [`PGPredicate::HasNodeWeight`] predicates on the same node
-    /// (i.e. in the same class) are mutually exclusive.
+    /// (i.e. with the same tag) are mutually exclusive.
     HasNodeWeight(PGIndexKey),
-    /// Constraint class for [`PGPredicate::IsConnected`] predicates.
+    /// Constraint tag for [`PGPredicate::IsConnected`] predicates.
     ///
     /// Any two [`PGPredicate::IsConnected`] predicates on the same port & node
-    /// (i.e. in the same class) are mutually exclusive.
+    /// (i.e. with the same tag) are mutually exclusive.
     IsConnected(PGIndexKey, PortOffset),
-    /// Constraint class for [`PGPredicate::IsNotEqual`] predicates.
+    /// Constraint tag for [`PGPredicate::IsNotEqual`] predicates.
     ///
     /// This is non-deterministic, i.e. no mutual exclusivity between constraints
-    /// within a class.
+    /// with the same tag.
     IsNotEqual(PGIndexKey),
 }
 
@@ -167,7 +167,7 @@ impl<W: std::fmt::Debug + Ord + Clone> ConditionalPredicate<PGIndexKey> for PGPr
         _: &[Constraint<PGIndexKey, Self>],
     ) -> Satisfiable<Constraint<PGIndexKey, Self>> {
         let self_tags = self.get_tags(keys);
-        // Only retain known constraints that are of the same class
+        // Only retain known constraints that have the same tag
         let known_constraints = known_constraints
             .iter()
             .filter(|c| c.get_tags().iter().any(|c| self_tags.contains(c)))
@@ -190,8 +190,8 @@ impl<W: std::fmt::Debug + Ord + Clone> ConditionalPredicate<PGIndexKey> for PGPr
                 let first_key = keys[0];
                 let mut keys: BTreeSet<_> = keys[1..].iter().copied().collect();
                 for s in known_constraints {
-                    for k in s.required_bindings()[1..].iter().copied() {
-                        keys.remove(&k);
+                    for k in s.required_bindings()[1..].iter() {
+                        keys.remove(k);
                     }
                 }
                 if keys.is_empty() {
@@ -267,11 +267,7 @@ fn has_edge<G: LinkView>(
     };
     graph
         .port_links(left_port)
-        .filter(|&(_, p)| {
-            graph.port_offset(p) == Some(right_port) && graph.port_node(p) == Some(right)
-        })
-        .next()
-        .is_some()
+        .any(|(_, p)| graph.port_offset(p) == Some(right_port) && graph.port_node(p) == Some(right))
 }
 
 #[cfg(test)]
@@ -304,8 +300,7 @@ mod tests {
             PGPredicate::IsConnected {
                 left_port,
                 right_port,
-            }
-            .into(),
+            },
             vec![
                 vname(left_root_id, left_root_port, left_node_index),
                 vname(right_root_id, right_root_port, right_node_index),

@@ -337,7 +337,7 @@ fn apply_transitions<P: PartialPattern>(
     Vec<Matches>,
     PatternsInProgress<P>,
 ) {
-    debug_assert!(transitions.len() > 0);
+    debug_assert!(!transitions.is_empty());
 
     let mut next_patterns = vec![BTreeSet::default(); transitions.len()];
     let mut next_matches = vec![BTreeSet::default(); transitions.len()];
@@ -427,13 +427,11 @@ pub(super) mod tests {
         let p1: TestPattern = ConstraintPattern::from_constraints([
             TestConstraint::new(TestPredicate::AreEqualOne),
             TestConstraint::new(TestPredicate::AreEqualTwo),
-        ])
-        .into();
+        ]);
         let p2: TestPattern = ConstraintPattern::from_constraints([
             TestConstraint::new(TestPredicate::AreEqualOne),
             TestConstraint::new(TestPredicate::AlwaysTrueThree),
-        ])
-        .into();
+        ]);
         let builder = TestBuilder::try_from_patterns([p1, p2], Default::default()).unwrap();
         let (matcher, pattern_ids) = builder.build(BuildConfig::<TestStrIndexingScheme>::default());
         assert_eq!(matcher.graph.node_count(), 5);
