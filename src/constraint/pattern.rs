@@ -137,7 +137,7 @@ impl<K, P> Constraint<K, P> {
     /// # Arguments
     /// * `known_constraints` - The set of known constraints
     /// * `prev_constraints` - The set of constraints that have been evaluated
-    ///                        so far
+    ///   so far
     pub fn condition_on(
         &self,
         known_constraints: &BTreeSet<Constraint<K, P>>,
