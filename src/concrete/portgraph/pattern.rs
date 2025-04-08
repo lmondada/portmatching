@@ -26,7 +26,7 @@ pub struct PGPattern<G> {
 
 impl Pattern for PGPattern<PortGraph> {
     type Key = PGIndexKey;
-    type Constraint = PGConstraint;
+    type Predicate = PGPredicate;
     type PartialPattern = PartialConstraintPattern<PGIndexKey, PGPredicate>;
     type Error = PGPatternError;
 

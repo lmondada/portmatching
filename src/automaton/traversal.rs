@@ -228,30 +228,30 @@ where
 mod tests {
     use crate::{
         automaton::{builder::tests::TestBuildConfig, tests::TestBuilder},
-        constraint::tests::{TestConstraint, TestConstraintClass, TestPattern, TestPredicate},
+        constraint::tests::{TestConstraint, TestConstraintTag, TestPattern, TestPredicate},
         indexing::tests::TestData,
         HashSet,
     };
 
-    fn true_constraint(cls: TestConstraintClass) -> TestConstraint {
+    fn true_constraint(cls: TestConstraintTag) -> TestConstraint {
         match cls {
-            TestConstraintClass::One(_, _) => TestConstraint::new(TestPredicate::NotEqualOne),
-            TestConstraintClass::Two(_, _) => TestConstraint::new(TestPredicate::AlwaysTrueTwo),
-            TestConstraintClass::Three => TestConstraint::new(TestPredicate::AlwaysTrueThree),
+            TestConstraintTag::One(_, _) => TestConstraint::new(TestPredicate::NotEqualOne),
+            TestConstraintTag::Two(_, _) => TestConstraint::new(TestPredicate::AlwaysTrueTwo),
+            TestConstraintTag::Three => TestConstraint::new(TestPredicate::AlwaysTrueThree),
         }
     }
 
-    fn false_constraint(cls: TestConstraintClass) -> TestConstraint {
+    fn false_constraint(cls: TestConstraintTag) -> TestConstraint {
         match cls {
-            TestConstraintClass::One(_, _) => TestConstraint::new(TestPredicate::AreEqualOne),
-            TestConstraintClass::Two(_, _) => panic!("no always false constraint for two"),
-            TestConstraintClass::Three => TestConstraint::new(TestPredicate::NeverTrueThree),
+            TestConstraintTag::One(_, _) => TestConstraint::new(TestPredicate::AreEqualOne),
+            TestConstraintTag::Two(_, _) => panic!("no always false constraint for two"),
+            TestConstraintTag::Three => TestConstraint::new(TestPredicate::NeverTrueThree),
         }
     }
 
     #[test]
     fn run_automaton() {
-        use TestConstraintClass::*;
+        use TestConstraintTag::*;
         let one = One("", "");
         let two = Two("", "");
         let three = Three;

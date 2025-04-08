@@ -2,7 +2,7 @@ use crate::{
     branch_selector::{CreateBranchSelector, EvaluateBranchSelector},
     indexing::{IndexKey, IndexedData},
     matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
-    pattern::Pattern,
+    pattern::{Pattern, PatternConstraint},
     IndexingScheme,
 };
 
@@ -26,7 +26,7 @@ impl<K, B> NaiveManyMatcher<K, B> {
     ) -> Result<Self, PT::Error>
     where
         PT: Pattern<Key = K>,
-        B: CreateBranchSelector<PT::Constraint, Key = K>,
+        B: CreateBranchSelector<PatternConstraint<PT>, Key = K>,
         K: IndexKey,
         I: IndexingScheme<Key = K> + Default,
     {
@@ -44,7 +44,7 @@ impl<K, B> NaiveManyMatcher<K, B> {
     ) -> Result<Self, PT::Error>
     where
         PT: Pattern<Key = K>,
-        B: CreateBranchSelector<PT::Constraint, Key = K>,
+        B: CreateBranchSelector<PatternConstraint<PT>, Key = K>,
         K: IndexKey,
     {
         let matchers = patterns

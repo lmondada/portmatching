@@ -24,10 +24,12 @@
 pub mod pattern;
 pub mod predicate;
 pub mod selector;
+pub mod tag;
 
 pub use pattern::{ConstraintPattern, PartialConstraintPattern};
-pub use predicate::{ArityPredicate, ConditionalPredicate, EvaluatePredicate, GetConstraintClass};
+pub use predicate::{ArityPredicate, ConditionalPredicate, EvaluatePredicate};
 pub use selector::{DefaultConstraintSelector, DeterministicConstraintSelector};
+pub use tag::{ConstraintTag, Tag};
 
 use std::{collections::BTreeSet, fmt::Debug};
 
@@ -167,6 +169,17 @@ impl<K, P> Constraint<K, P> {
     pub fn predicate(&self) -> &P {
         &self.predicate
     }
+
+    /// Convert the constraint to a tuple of predicate and arguments
+    pub fn as_tuple_ref(&self) -> (&P, &[K]) {
+        (&self.predicate, &self.args)
+    }
+}
+
+impl<'c, K, P> From<&'c Constraint<K, P>> for (&'c P, &'c [K]) {
+    fn from(constraint: &'c Constraint<K, P>) -> Self {
+        constraint.as_tuple_ref()
+    }
 }
 
 impl<K: Debug, P: Debug> Debug for Constraint<K, P> {
@@ -185,7 +198,7 @@ impl<K: Debug, P: Debug> Debug for Constraint<K, P> {
 #[cfg(test)]
 pub(crate) mod tests {
     pub(crate) use super::predicate::tests::{
-        TestConstraintClass, TestKey, TestPartialPattern, TestPattern, TestPredicate,
+        TestConstraintTag, TestKey, TestPartialPattern, TestPattern, TestPredicate,
     };
 
     use crate::{indexing::tests::TestData, HashMap};

@@ -117,7 +117,7 @@ fn fmt_node<K: IndexKey, B: DisplayBranchSelector>(_: NodeIndex, weight: &State<
     let br = weight
         .branch_selector
         .as_ref()
-        .map(|br| br.fmt_class())
+        .map(|br| br.fmt_tag())
         .unwrap_or_default();
     let matches = weight
         .matches

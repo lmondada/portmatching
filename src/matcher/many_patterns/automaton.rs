@@ -5,7 +5,7 @@ use itertools::Itertools;
 use crate::automaton::BuildConfig;
 use crate::branch_selector::{CreateBranchSelector, DisplayBranchSelector, EvaluateBranchSelector};
 use crate::indexing::IndexedData;
-use crate::pattern::Pattern;
+use crate::pattern::{Pattern, PatternConstraint};
 use crate::IndexingScheme;
 use crate::{
     automaton::{AutomatonBuilder, ConstraintAutomaton},
@@ -59,7 +59,7 @@ impl<PT: Pattern + Clone, B> ManyMatcher<PT, PT::Key, B> {
     ) -> Result<Self, PT::Error>
     where
         I: IndexingScheme<Key = PT::Key> + Default,
-        B: CreateBranchSelector<PT::Constraint, Key = PT::Key>,
+        B: CreateBranchSelector<PatternConstraint<PT>, Key = PT::Key>,
     {
         Self::try_from_patterns_with_config(patterns, BuildConfig::<I>::default(), fallback)
     }
@@ -72,7 +72,7 @@ impl<PT: Pattern + Clone, B> ManyMatcher<PT, PT::Key, B> {
         fallback: PatternFallback,
     ) -> Result<Self, PT::Error>
     where
-        B: CreateBranchSelector<PT::Constraint, Key = PT::Key>,
+        B: CreateBranchSelector<PatternConstraint<PT>, Key = PT::Key>,
     {
         let builder = AutomatonBuilder::try_from_patterns(patterns.iter().cloned(), fallback)?;
         let (automaton, ids) = builder.build(config);

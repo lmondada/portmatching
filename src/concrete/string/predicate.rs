@@ -8,8 +8,10 @@ use itertools::Itertools;
 use petgraph::unionfind::UnionFind;
 
 use crate::{
-    constraint::{ArityPredicate, ConditionalPredicate, EvaluatePredicate, GetConstraintClass},
-    constraint_class::{ConstraintClass, ExpansionFactor},
+    constraint::{
+        tag::{ConstraintTag, Tag},
+        ArityPredicate, ConditionalPredicate, EvaluatePredicate,
+    },
     indexing::IndexKey,
     pattern::Satisfiable,
     Constraint,
@@ -57,9 +59,9 @@ impl EvaluatePredicate<String, StringSubjectPosition> for CharacterPredicate {
     }
 }
 
-/// Branch classes for string pattern matching
+/// Constraint tags for string pattern matching
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum BranchClass<K> {
+pub enum StringTag<K> {
     /// A constraint on a position of the input string
     Position(K),
 }
@@ -89,34 +91,35 @@ impl<K: IndexKey> ConditionalPredicate<K> for CharacterPredicate {
     }
 }
 
-impl<K: IndexKey> GetConstraintClass<K> for CharacterPredicate {
-    type ConstraintClass = BranchClass<K>;
-}
+impl<K: IndexKey> ConstraintTag<K> for CharacterPredicate {
+    type Tag = StringTag<K>;
 
-impl<K: IndexKey> ConstraintClass<Constraint<K, CharacterPredicate>> for BranchClass<K> {
-    fn get_classes(constraint: &Constraint<K, CharacterPredicate>) -> Vec<Self> {
+    fn get_tags(&self, keys: &[K]) -> Vec<Self::Tag> {
         use CharacterPredicate::*;
-        assert_eq!(constraint.arity(), constraint.required_bindings().len());
+        assert_eq!(self.arity(), keys.len());
 
-        match constraint.predicate() {
+        match self {
             BindingEq => {
-                vec![
-                    BranchClass::Position(constraint.required_bindings()[0]),
-                    BranchClass::Position(constraint.required_bindings()[1]),
-                ]
+                vec![StringTag::Position(keys[0]), StringTag::Position(keys[1])]
             }
-            ConstVal(_) => vec![BranchClass::Position(constraint.required_bindings()[0])],
+            ConstVal(_) => vec![StringTag::Position(keys[0])],
         }
     }
+}
 
-    fn expansion_factor<'c>(
+impl<K: IndexKey> Tag<K, CharacterPredicate> for StringTag<K> {
+    type ExpansionFactor = ();
+
+    fn expansion_factor<'c, C>(
         &self,
-        _constraints: impl IntoIterator<Item = &'c Constraint<K, CharacterPredicate>>,
-    ) -> ExpansionFactor
+        _constraints: impl IntoIterator<Item = C>,
+    ) -> Self::ExpansionFactor
     where
-        Constraint<K, CharacterPredicate>: 'c,
+        K: 'c,
+        CharacterPredicate: 'c,
+        C: Into<(&'c CharacterPredicate, &'c [K])>,
     {
-        1
+        ()
     }
 }
 

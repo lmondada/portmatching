@@ -6,12 +6,12 @@ use itertools::Itertools;
 use crate::{
     constraint::ConstraintSet,
     indexing::IndexKey,
-    pattern::{Pattern, Satisfiable},
-    Constraint, ConstraintClass, PartialPattern,
+    pattern::{PartialPatternTag, Pattern, Satisfiable},
+    Constraint, PartialPattern,
 };
 use std::{collections::BTreeSet, hash::Hash};
 
-use super::{ConditionalPredicate, GetConstraintClass};
+use super::{ConditionalPredicate, ConstraintTag};
 
 /// A pattern that is defined by a set of constraints.
 ///
@@ -41,7 +41,7 @@ where
 {
     /// Create a new [`ConstraintPattern`] from a set of constraints
     ///
-    /// Every constraint must have a different class, otherwise this will panic.
+    /// Every constraint must have a different tag, otherwise this will panic.
     pub fn from_constraints_set(constraints: BTreeSet<Constraint<K, P>>) -> Self {
         Self { constraints }
     }
@@ -71,27 +71,24 @@ impl<K, P> Into<PartialConstraintPattern<K, P>> for ConstraintPattern<K, P> {
 
 impl<K, P> PartialConstraintPattern<K, P>
 where
-    P: ConditionalPredicate<K> + GetConstraintClass<K>,
+    P: ConditionalPredicate<K> + ConstraintTag<K>,
 {
-    /// Get all unique constraint classes from the constraints
-    pub fn all_classes(&self) -> BTreeSet<P::ConstraintClass> {
+    /// Get all unique constraint tags from the constraints
+    pub fn all_tags(&self) -> BTreeSet<P::Tag> {
         self.pattern_constraints
             .iter()
-            .flat_map(|p| p.get_classes())
+            .flat_map(|p| p.get_tags())
             .collect()
     }
 
-    /// Get constraints that match a specific constraint class
+    /// Get constraints that match a specific constraint tag
     ///
     /// # Arguments
-    /// * `cls` - The constraint class to match
-    pub fn get_by_class<'c>(
-        &'c self,
-        cls: &'c P::ConstraintClass,
-    ) -> impl Iterator<Item = &'c Constraint<K, P>> {
+    /// * `tag` - The constraint tag to match
+    pub fn get_by_tag<'c>(&'c self, tag: &'c P::Tag) -> impl Iterator<Item = &'c Constraint<K, P>> {
         self.pattern_constraints
             .iter()
-            .filter(|p| p.get_classes().contains(cls))
+            .filter(|p| p.get_tags().contains(tag))
     }
 
     /// Condition pattern on a set of known constraints
@@ -127,12 +124,12 @@ where
 }
 
 impl<K, P> Constraint<K, P> {
-    /// Get the constraint classes that this constraint belongs to
-    pub fn get_classes(&self) -> Vec<P::ConstraintClass>
+    /// Get the constraint tags that this constraint belongs to
+    pub fn get_tags(&self) -> Vec<P::Tag>
     where
-        P: GetConstraintClass<K>,
+        P: ConstraintTag<K>,
     {
-        P::ConstraintClass::get_classes(&self)
+        P::get_tags(&self.predicate(), &self.args)
     }
 
     /// Condition this constraint on a set of known constraints
@@ -158,12 +155,12 @@ impl<K, P> Constraint<K, P> {
 impl<K, P> Pattern for ConstraintPattern<K, P>
 where
     K: IndexKey,
-    P: GetConstraintClass<K> + ConditionalPredicate<K>,
-    P::ConstraintClass: Hash + Clone,
+    P: ConstraintTag<K> + ConditionalPredicate<K>,
+    P::Tag: Hash + Clone,
 {
     type Key = K;
     type PartialPattern = PartialConstraintPattern<K, P>;
-    type Constraint = Constraint<K, P>;
+    type Predicate = P;
     type Error = ();
 
     fn required_bindings(&self) -> Vec<Self::Key> {
@@ -182,26 +179,23 @@ where
 impl<K, P> PartialPattern for PartialConstraintPattern<K, P>
 where
     K: IndexKey,
-    P: ConditionalPredicate<K> + GetConstraintClass<K>,
-    P::ConstraintClass: Hash + Clone,
+    P: ConditionalPredicate<K> + ConstraintTag<K>,
+    P::Tag: Hash + Clone,
 {
-    type Constraint = Constraint<K, P>;
-
-    type ConstraintClass = P::ConstraintClass;
-
     type Key = K;
+    type Predicate = P;
 
-    fn nominate(&self) -> impl Iterator<Item = Self::Constraint> + '_ {
+    fn nominate(&self) -> impl Iterator<Item = Constraint<Self::Key, Self::Predicate>> + '_ {
         self.pattern_constraints.iter().cloned()
     }
 
     fn apply_transitions(
         &self,
-        constraints: &[Self::Constraint],
-        cls: &Self::ConstraintClass,
+        constraints: &[Constraint<Self::Key, Self::Predicate>],
+        cls: &PartialPatternTag<Self>,
     ) -> Vec<Satisfiable<Self>> {
-        if !self.all_classes().contains(cls) {
-            // If no pattern constraints are in this class, we skip the
+        if !self.all_tags().contains(cls) {
+            // If no pattern constraints are in this tag, we skip the
             // transition altogether
             return vec![];
         }
@@ -234,12 +228,11 @@ mod tests {
 
     use crate::{
         constraint::{
-            tests::{TestConstraint, TestConstraintClass, TestKey, TestPattern, TestPredicate},
-            ArityPredicate, GetConstraintClass,
+            tests::{TestConstraint, TestConstraintTag, TestKey, TestPattern, TestPredicate},
+            ArityPredicate, ConstraintTag, Tag,
         },
-        constraint_class::ExpansionFactor,
         pattern::Satisfiable,
-        Constraint, ConstraintClass, Pattern,
+        Constraint, Pattern,
     };
 
     use super::ConditionalPredicate;
@@ -253,37 +246,31 @@ mod tests {
         ) -> Satisfiable<Constraint<TestKey, Self>> {
             let condition = known_constraints
                 .iter()
-                .find(|c| c.get_classes() == self.try_get_classes(keys).unwrap());
+                .find(|c| c.get_tags() == self.get_tags(keys));
             let Some(condition) = condition else {
                 let self_constraint = self.clone().try_into_constraint(keys.to_vec()).unwrap();
                 return Satisfiable::Yes(self_constraint);
             };
             assert_eq!(
-                self.try_get_classes(keys).unwrap(),
-                condition.get_classes(),
-                "class mismatch in TestPredicate::condition_on"
+                self.get_tags(keys),
+                condition.get_tags(),
+                "tag mismatch in TestPredicate::condition_on"
             );
             assert_eq!(
                 keys,
                 condition.required_bindings(),
-                "Cannot be in same class if keys are not the same"
+                "Cannot be in same tag if keys are not the same"
             );
 
             if self == condition.predicate() {
                 return Satisfiable::Tautology;
             }
-            match self
-                .try_get_classes(keys)
-                .unwrap()
-                .into_iter()
-                .exactly_one()
-                .unwrap()
-            {
-                TestConstraintClass::One(_, _) => {
+            match self.get_tags(keys).into_iter().exactly_one().unwrap() {
+                TestConstraintTag::One(_, _) => {
                     // predicates are mutually exclusive
                     Satisfiable::No
                 }
-                TestConstraintClass::Two(_, _) => {
+                TestConstraintTag::Two(_, _) => {
                     if condition.predicate() == &TestPredicate::AlwaysTrueTwo {
                         // Does not teach us anything, leave unchanged
                         Satisfiable::Yes(self.clone().try_into_constraint(keys.to_vec()).unwrap())
@@ -291,7 +278,7 @@ mod tests {
                         Satisfiable::Tautology
                     }
                 }
-                TestConstraintClass::Three => {
+                TestConstraintTag::Three => {
                     if condition.predicate() == &TestPredicate::AlwaysTrueThree {
                         // Does not teach us anything, leave unchanged
                         Satisfiable::Yes(self.clone().try_into_constraint(keys.to_vec()).unwrap())
@@ -303,37 +290,40 @@ mod tests {
         }
     }
 
-    impl GetConstraintClass<TestKey> for TestPredicate {
-        type ConstraintClass = TestConstraintClass;
-    }
+    impl ConstraintTag<TestKey> for TestPredicate {
+        type Tag = TestConstraintTag;
 
-    impl ConstraintClass<TestConstraint> for TestConstraintClass {
-        fn get_classes(constraint: &TestConstraint) -> Vec<TestConstraintClass> {
-            let keys = constraint.required_bindings();
-            assert_eq!(constraint.arity(), keys.len());
+        fn get_tags(&self, keys: &[TestKey]) -> Vec<Self::Tag> {
+            assert_eq!(self.arity(), keys.len());
 
             let args = keys.iter().cloned().collect_tuple();
 
             use TestPredicate::*;
-            match constraint.predicate() {
+            match self {
                 AreEqualOne | NotEqualOne => {
                     let (a, b) = args.unwrap();
-                    vec![TestConstraintClass::One(a, b)]
+                    vec![TestConstraintTag::One(a, b)]
                 }
                 AreEqualTwo | AlwaysTrueTwo => {
                     let (a, b) = args.unwrap();
-                    vec![TestConstraintClass::Two(a, b)]
+                    vec![TestConstraintTag::Two(a, b)]
                 }
-                NeverTrueThree | AlwaysTrueThree => vec![TestConstraintClass::Three],
+                NeverTrueThree | AlwaysTrueThree => vec![TestConstraintTag::Three],
             }
         }
+    }
 
-        fn expansion_factor<'c>(
+    impl Tag<TestKey, TestPredicate> for TestConstraintTag {
+        type ExpansionFactor = u64;
+
+        fn expansion_factor<'c, C>(
             &self,
-            _constraints: impl IntoIterator<Item = &'c TestConstraint>,
-        ) -> ExpansionFactor
+            _constraints: impl IntoIterator<Item = C>,
+        ) -> Self::ExpansionFactor
         where
-            TestConstraint: 'c,
+            TestKey: 'c,
+            TestPredicate: 'c,
+            C: Into<(&'c TestPredicate, &'c [TestKey])>,
         {
             4
         }

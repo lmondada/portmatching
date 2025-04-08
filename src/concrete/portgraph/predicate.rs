@@ -6,8 +6,12 @@ use itertools::Itertools;
 use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, SecondaryMap, UnmanagedDenseMap};
 
 use crate::{
-    constraint::ArityPredicate, pattern::Satisfiable, ConditionalPredicate, Constraint,
-    EvaluatePredicate, GetConstraintClass,
+    constraint::{
+        tag::{ConstraintTag, Tag},
+        ArityPredicate,
+    },
+    pattern::Satisfiable,
+    ConditionalPredicate, Constraint, EvaluatePredicate,
 };
 
 use super::{indexing::PGIndexKey, PGConstraint};
@@ -43,7 +47,7 @@ pub enum PGPredicate<NodeWeight = ()> {
 /// Constraints within the same [`ConstraintClass::HasNodeWeight`] or
 /// [`ConstraintClass::IsConnected`] class are always mutually exclusive.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ConstraintClass {
+pub enum PGTag {
     /// Constraint class for [`PGPredicate::HasNodeWeight`] predicates.
     ///
     /// Any two [`PGPredicate::HasNodeWeight`] predicates on the same node
@@ -107,21 +111,21 @@ impl<W> PGPredicate<W> {
         }
     }
 
-    fn get_classes(&self, keys: &[PGIndexKey]) -> Vec<ConstraintClass> {
+    fn get_tags(&self, keys: &[PGIndexKey]) -> Vec<PGTag> {
         use PGPredicate::*;
         match self {
             HasNodeWeight(_) => {
-                vec![ConstraintClass::HasNodeWeight(keys[0])]
+                vec![PGTag::HasNodeWeight(keys[0])]
             }
             IsConnected {
                 left_port,
                 right_port,
             } => vec![
-                ConstraintClass::IsConnected(keys[0], *left_port),
-                ConstraintClass::IsConnected(keys[1], *right_port),
+                PGTag::IsConnected(keys[0], *left_port),
+                PGTag::IsConnected(keys[1], *right_port),
             ],
             IsNotEqual { .. } => {
-                vec![ConstraintClass::IsNotEqual(keys[0])]
+                vec![PGTag::IsNotEqual(keys[0])]
             }
         }
     }
@@ -162,11 +166,11 @@ impl<W: std::fmt::Debug + Ord + Clone> ConditionalPredicate<PGIndexKey> for PGPr
         known_constraints: &BTreeSet<Constraint<PGIndexKey, Self>>,
         _: &[Constraint<PGIndexKey, Self>],
     ) -> Satisfiable<Constraint<PGIndexKey, Self>> {
-        let self_classes = self.get_classes(keys);
+        let self_tags = self.get_tags(keys);
         // Only retain known constraints that are of the same class
         let known_constraints = known_constraints
             .iter()
-            .filter(|c| c.get_classes().iter().any(|c| self_classes.contains(c)))
+            .filter(|c| c.get_tags().iter().any(|c| self_tags.contains(c)))
             .collect_vec();
         use PGPredicate::*;
         match self {
@@ -204,25 +208,27 @@ impl<W: std::fmt::Debug + Ord + Clone> ConditionalPredicate<PGIndexKey> for PGPr
     }
 }
 
-impl<W: Ord + Clone> GetConstraintClass<PGIndexKey> for PGPredicate<W> {
-    type ConstraintClass = ConstraintClass;
+impl<W: Ord + Clone> ConstraintTag<PGIndexKey> for PGPredicate<W> {
+    type Tag = PGTag;
+
+    fn get_tags(&self, keys: &[PGIndexKey]) -> Vec<Self::Tag> {
+        self.get_tags(keys)
+    }
 }
 
-impl<W> crate::ConstraintClass<PGConstraint<W>> for ConstraintClass {
-    fn get_classes(constraint: &PGConstraint<W>) -> Vec<Self> {
-        constraint
-            .predicate()
-            .get_classes(&constraint.required_bindings())
-    }
+impl<W> Tag<PGIndexKey, PGPredicate<W>> for PGTag {
+    type ExpansionFactor = u64;
 
-    fn expansion_factor<'c>(
+    fn expansion_factor<'c, C>(
         &self,
-        constraints: impl IntoIterator<Item = &'c PGConstraint<W>>,
-    ) -> crate::constraint_class::ExpansionFactor
+        constraints: impl IntoIterator<Item = C>,
+    ) -> Self::ExpansionFactor
     where
-        PGConstraint<W>: 'c,
+        PGIndexKey: 'c,
+        PGPredicate<W>: 'c,
+        C: Into<(&'c PGPredicate<W>, &'c [PGIndexKey])>,
     {
-        use ConstraintClass::*;
+        use PGTag::*;
         match self {
             // Deterministic so very cheap
             HasNodeWeight(..) => 1,
