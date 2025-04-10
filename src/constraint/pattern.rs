@@ -6,12 +6,12 @@ use itertools::Itertools;
 use crate::{
     constraint::ConstraintSet,
     indexing::IndexKey,
-    pattern::{PartialPatternTag, Pattern, Satisfiable},
+    pattern::{Pattern, Satisfiable},
     Constraint, PartialPattern,
 };
 use std::{collections::BTreeSet, hash::Hash};
 
-use super::{ConditionalPredicate, ConstraintTag};
+use super::{ConditionalPredicate, ConstraintTag, Tag};
 
 /// A pattern that is defined by a set of constraints.
 ///
@@ -158,10 +158,13 @@ where
     P: ConstraintTag<K> + ConditionalPredicate<K>,
     P::Tag: Hash + Clone,
 {
-    type Key = K;
     type PartialPattern = PartialConstraintPattern<K, P>;
-    type Predicate = P;
     type Error = ();
+
+    type Key = K;
+    type Predicate = P;
+    type Tag = P::Tag;
+    type Evaluator = <Self::Tag as Tag<Self::Key, Self::Predicate>>::Evaluator;
 
     fn required_bindings(&self) -> Vec<Self::Key> {
         self.constraints
@@ -185,6 +188,9 @@ where
     type Key = K;
     type Predicate = P;
 
+    type Tag = P::Tag;
+    type Evaluator = <Self::Tag as Tag<K, P>>::Evaluator;
+
     fn nominate(&self) -> impl Iterator<Item = Constraint<Self::Key, Self::Predicate>> + '_ {
         self.pattern_constraints.iter().cloned()
     }
@@ -192,9 +198,9 @@ where
     fn apply_transitions(
         &self,
         constraints: &[Constraint<Self::Key, Self::Predicate>],
-        cls: &PartialPatternTag<Self>,
+        tag: &Self::Tag,
     ) -> Vec<Satisfiable<Self>> {
-        if !self.all_tags().contains(cls) {
+        if !self.all_tags().contains(tag) {
             // If no pattern constraints are in this tag, we skip the
             // transition altogether
             return vec![];
@@ -228,6 +234,7 @@ mod tests {
 
     use crate::{
         constraint::{
+            evaluator::tests::TestConstraintEvaluator,
             tests::{TestConstraint, TestConstraintTag, TestKey, TestPattern, TestPredicate},
             ArityPredicate, ConstraintTag, Tag,
         },
@@ -316,6 +323,8 @@ mod tests {
     impl Tag<TestKey, TestPredicate> for TestConstraintTag {
         type ExpansionFactor = u64;
 
+        type Evaluator = TestConstraintEvaluator;
+
         fn expansion_factor<'c, C>(
             &self,
             _constraints: impl IntoIterator<Item = C>,
@@ -326,6 +335,19 @@ mod tests {
             C: Into<(&'c TestPredicate, &'c [TestKey])>,
         {
             4
+        }
+
+        fn compile_evaluator<'c, C>(
+            &self,
+            constraints: impl IntoIterator<Item = C>,
+        ) -> Self::Evaluator
+        where
+            TestKey: 'c,
+            TestPredicate: 'c,
+            C: Into<(&'c TestPredicate, &'c [TestKey])>,
+        {
+            let constraints = constraints.into_iter().map_into();
+            TestConstraintEvaluator::from_constraints(constraints)
         }
     }
 

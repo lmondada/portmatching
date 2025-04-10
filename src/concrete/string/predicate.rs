@@ -17,7 +17,7 @@ use crate::{
     Constraint,
 };
 
-use super::StringSubjectPosition;
+use super::{ConstraintSelector, StringPatternPosition, StringSubjectPosition};
 
 /// Predicate used when matching strings.
 ///
@@ -91,10 +91,10 @@ impl<K: IndexKey> ConditionalPredicate<K> for CharacterPredicate {
     }
 }
 
-impl<K: IndexKey> ConstraintTag<K> for CharacterPredicate {
-    type Tag = StringTag<K>;
+impl ConstraintTag<StringPatternPosition> for CharacterPredicate {
+    type Tag = StringTag<StringPatternPosition>;
 
-    fn get_tags(&self, keys: &[K]) -> Vec<Self::Tag> {
+    fn get_tags(&self, keys: &[StringPatternPosition]) -> Vec<Self::Tag> {
         use CharacterPredicate::*;
         assert_eq!(self.arity(), keys.len());
 
@@ -107,18 +107,26 @@ impl<K: IndexKey> ConstraintTag<K> for CharacterPredicate {
     }
 }
 
-impl<K: IndexKey> Tag<K, CharacterPredicate> for StringTag<K> {
+impl Tag<StringPatternPosition, CharacterPredicate> for StringTag<StringPatternPosition> {
     type ExpansionFactor = ();
+
+    type Evaluator = ConstraintSelector;
 
     fn expansion_factor<'c, C>(
         &self,
         _constraints: impl IntoIterator<Item = C>,
     ) -> Self::ExpansionFactor
     where
-        K: 'c,
-        CharacterPredicate: 'c,
-        C: Into<(&'c CharacterPredicate, &'c [K])>,
+        C: Into<(&'c CharacterPredicate, &'c [StringPatternPosition])>,
     {
+    }
+
+    fn compile_evaluator<'c, C>(&self, constraints: impl IntoIterator<Item = C>) -> Self::Evaluator
+    where
+        C: Into<(&'c CharacterPredicate, &'c [StringPatternPosition])>,
+    {
+        let constraints = constraints.into_iter().map(|c| c.into()).collect_vec();
+        ConstraintSelector::from_constraints(constraints)
     }
 }
 

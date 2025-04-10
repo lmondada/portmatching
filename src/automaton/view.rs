@@ -56,8 +56,8 @@ pub(super) trait GraphView<K: IndexKey, B> {
             .map(|transition| self.parent(transition))
     }
 
-    fn branch_selector(&self, state: StateID) -> Option<&B> {
-        self.node_weight(state).branch_selector.as_ref()
+    fn constraint_evaluator(&self, state: StateID) -> Option<&B> {
+        self.node_weight(state).constraint_evaluator.as_ref()
     }
 
     fn min_scope<'a>(&'a self, state: StateID) -> &'a [K]

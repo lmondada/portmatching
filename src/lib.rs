@@ -2,7 +2,6 @@
 #![warn(missing_docs)]
 
 pub mod automaton;
-pub mod branch_selector;
 pub mod concrete;
 pub mod constraint;
 pub mod indexing;
@@ -10,9 +9,9 @@ pub mod matcher;
 pub mod pattern;
 pub mod utils;
 
-pub use branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector};
 pub use constraint::{
-    ArityPredicate, ConditionalPredicate, Constraint, ConstraintTag, EvaluatePredicate, Tag,
+    ArityPredicate, ConditionalPredicate, Constraint, ConstraintEvaluator, ConstraintTag,
+    EvaluateConstraints, EvaluatePredicate, Tag,
 };
 pub use indexing::{BindMap, IndexedData, IndexingScheme};
 pub use matcher::{

@@ -8,7 +8,7 @@ use portgraph::{LinkView, NodeIndex, PortGraph, PortOffset, SecondaryMap, Unmana
 use crate::{
     constraint::{
         tag::{ConstraintTag, Tag},
-        ArityPredicate,
+        ArityPredicate, DeterministicConstraintEvaluator,
     },
     pattern::Satisfiable,
     ConditionalPredicate, Constraint, EvaluatePredicate,
@@ -216,8 +216,10 @@ impl<W: Ord + Clone> ConstraintTag<PGIndexKey> for PGPredicate<W> {
     }
 }
 
-impl<W> Tag<PGIndexKey, PGPredicate<W>> for PGTag {
+impl<W: Clone> Tag<PGIndexKey, PGPredicate<W>> for PGTag {
     type ExpansionFactor = u64;
+
+    type Evaluator = DeterministicConstraintEvaluator<PGIndexKey, PGPredicate<W>>;
 
     fn expansion_factor<'c, C>(
         &self,
@@ -238,6 +240,15 @@ impl<W> Tag<PGIndexKey, PGPredicate<W>> for PGTag {
             // (+ 2 so the others are always preferred)
             IsNotEqual(..) => 2 + constraints.into_iter().count() as u64,
         }
+    }
+
+    fn compile_evaluator<'c, C>(&self, constraints: impl IntoIterator<Item = C>) -> Self::Evaluator
+    where
+        PGPredicate<W>: 'c,
+        C: Into<(&'c PGPredicate<W>, &'c [PGIndexKey])>,
+    {
+        let constraints = constraints.into_iter().map(|c| c.into()).collect_vec();
+        Self::Evaluator::from_constraints(constraints)
     }
 }
 

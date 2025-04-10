@@ -3,8 +3,8 @@ source: src/automaton/builder.rs
 expression: matcher.dot_string()
 ---
 digraph {
-    0 [ label = "One(key1, key2)\l" ]
-    1 [ label = "Two(key1, key2)\l" ]
+    0 [ label = "One(\"key1\", \"key2\")\l" ]
+    1 [ label = "Two(\"key1\", \"key2\")\l" ]
     2 [ label = "\lID(0): [\"key2\", \"key1\"]" ]
     3 [ label = "Three\l" ]
     4 [ label = "\lID(1): [\"key2\", \"key1\"]" ]

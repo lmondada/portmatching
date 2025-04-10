@@ -2,7 +2,9 @@
 
 use std::iter;
 
-use super::{indexing::PGIndexKey, PGConstraint, PGPredicate};
+use super::{
+    indexing::PGIndexKey, predicate::PGTag, ConstraintSelector, PGConstraint, PGPredicate,
+};
 use crate::{
     constraint::{ConstraintPattern, PartialConstraintPattern},
     utils::{is_connected, portgraph::line_partition},
@@ -25,10 +27,14 @@ pub struct PGPattern<G> {
 }
 
 impl Pattern for PGPattern<PortGraph> {
-    type Key = PGIndexKey;
-    type Predicate = PGPredicate;
     type PartialPattern = PartialConstraintPattern<PGIndexKey, PGPredicate>;
     type Error = PGPatternError;
+
+    // Type aliases
+    type Key = PGIndexKey;
+    type Predicate = PGPredicate;
+    type Tag = PGTag;
+    type Evaluator = ConstraintSelector;
 
     fn required_bindings(&self) -> Vec<Self::Key> {
         // TODO: this is not very efficient...

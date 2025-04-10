@@ -10,37 +10,27 @@ pub use pattern::PGPattern;
 pub use predicate::PGPredicate;
 
 use crate::{
-    branch_selector::DisplayBranchSelector, constraint::DeterministicConstraintSelector,
-    Constraint, ManyMatcher, NaiveManyMatcher, SinglePatternMatcher,
+    constraint::DeterministicConstraintEvaluator, Constraint, ManyMatcher, NaiveManyMatcher,
+    SinglePatternMatcher,
 };
 
 use portgraph::PortGraph;
 
 use self::indexing::PGIndexKey;
 
-type BranchSelector = DeterministicConstraintSelector<PGIndexKey, PGPredicate>;
-
-impl DisplayBranchSelector for BranchSelector {
-    fn fmt_tag(&self) -> String {
-        format!("{:?}", self.get_tag().unwrap())
-    }
-
-    fn fmt_nth_constraint(&self, n: usize) -> String {
-        format!("{:?}, {:?}", self.predicates()[n], self.keys(n))
-    }
-}
+type ConstraintSelector = DeterministicConstraintEvaluator<PGIndexKey, PGPredicate>;
 
 /// A constraint on a port graph.
 pub type PGConstraint<W = ()> = Constraint<PGIndexKey, PGPredicate<W>>;
 
 /// A matcher for a single port graph pattern.
-pub type PGSinglePatternMatcher = SinglePatternMatcher<PGIndexKey, BranchSelector>;
+pub type PGSinglePatternMatcher = SinglePatternMatcher<PGIndexKey, ConstraintSelector>;
 /// An automaton-based matcher for many port graph patterns.
-pub type PGManyPatternMatcher = ManyMatcher<PGPattern<PortGraph>, PGIndexKey, BranchSelector>;
+pub type PGManyPatternMatcher = ManyMatcher<PGPattern<PortGraph>, PGIndexKey, ConstraintSelector>;
 /// A naive matcher for many port graph patterns.
 ///
 /// Use for testing only.
-pub type PGNaiveManyPatternMatcher = NaiveManyMatcher<PGIndexKey, BranchSelector>;
+pub type PGNaiveManyPatternMatcher = NaiveManyMatcher<PGIndexKey, ConstraintSelector>;
 
 #[cfg(test)]
 mod tests {
