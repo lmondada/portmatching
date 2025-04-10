@@ -78,7 +78,11 @@ impl<B: ConstraintEvaluator> SinglePatternMatcher<B::Key, B> {
         let constraint_evaluators = constraints
             .into_iter()
             .map(|c| {
-                let first_tag = c.get_tags().into_iter().next().unwrap();
+                let first_tag = c
+                    .get_tags()
+                    .into_iter()
+                    .next()
+                    .expect("must have at least one tag");
                 first_tag.compile_evaluator([&c])
             })
             .collect_vec();
@@ -123,8 +127,8 @@ where
         let Some(constraint) = find_best_constraint(&pattern) else {
             unimplemented!("SinglePatternMatcher currently only supports patterns that nominate a single constraint per tag");
         };
-        let cls = constraint.get_tags().into_iter().next().unwrap();
-        let new_patterns = pattern.apply_transitions(&[constraint.clone()], &cls);
+        let tag = constraint.get_tags().into_iter().next().unwrap();
+        let new_patterns = pattern.apply_transitions(&[constraint.clone()], &tag);
 
         // Only support patterns with a single nominated constraint per tag
         let new_pattern = new_patterns

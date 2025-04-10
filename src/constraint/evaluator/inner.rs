@@ -45,8 +45,7 @@ impl<K: IndexKey, P: Clone> InnerEvaluator<K, P> {
         for constraint in transitions {
             let (pred, reqs) = constraint.into();
 
-            let mut indices = Vec::new();
-            indices.reserve(reqs.len());
+            let mut indices = Vec::with_capacity(reqs.len());
 
             for &req in reqs {
                 let pos = all_required_bindings.iter().position(|&k| k == req);

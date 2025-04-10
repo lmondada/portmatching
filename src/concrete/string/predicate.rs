@@ -119,7 +119,7 @@ impl Tag<StringPatternPosition, CharacterPredicate> for StringTag<StringPatternP
     where
         C: Into<(&'c CharacterPredicate, &'c [StringPatternPosition])>,
     {
-        ()
+        
     }
 
     fn compile_evaluator<'c, C>(&self, constraints: impl IntoIterator<Item = C>) -> Self::Evaluator

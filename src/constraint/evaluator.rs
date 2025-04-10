@@ -39,7 +39,7 @@ pub trait ConstraintEvaluator {
 
     /// A short string summary of the constraint evaluator tag.
     fn summary(&self) -> String {
-        format!("ConstraintEvaluator")
+        "ConstraintEvaluator".to_string()
     }
 }
 
