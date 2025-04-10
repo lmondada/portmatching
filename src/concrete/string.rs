@@ -26,38 +26,20 @@ use derive_more::{From, Into};
 use itertools::Itertools;
 
 use crate::{
-    branch_selector::DisplayBranchSelector,
-    constraint::DeterministicConstraintSelector,
-    indexing::{Binding, IndexKey, IndexedData},
+    constraint::DeterministicConstraintEvaluator,
+    indexing::{Binding, IndexedData},
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher,
 };
 pub use pattern::{CharVar, StringPattern};
 pub use predicate::{CharacterPredicate, StringTag};
 
-type BranchSelector = DeterministicConstraintSelector<StringPatternPosition, CharacterPredicate>;
-
-impl<K: IndexKey> DisplayBranchSelector for DeterministicConstraintSelector<K, CharacterPredicate> {
-    fn fmt_tag(&self) -> String {
-        let Some(tag) = self.get_tag() else {
-            return String::new();
-        };
-        match tag {
-            StringTag::Position(pos) => format!("Position({pos:?})"),
-        }
-    }
-
-    fn fmt_nth_constraint(&self, n: usize) -> String {
-        match &self.predicates()[n] {
-            CharacterPredicate::BindingEq => format!(" == {:?}", self.keys(n)[0]),
-            CharacterPredicate::ConstVal(c) => format!(" == {:?}", c),
-        }
-    }
-}
+type ConstraintSelector =
+    DeterministicConstraintEvaluator<StringPatternPosition, CharacterPredicate>;
 
 /// Default matcher for strings.
-pub type StringManyMatcher = ManyMatcher<StringPattern, StringPatternPosition, BranchSelector>;
+pub type StringManyMatcher = ManyMatcher<StringPattern, StringPatternPosition, ConstraintSelector>;
 /// A naive matcher for strings.
-pub type StringNaiveManyMatcher = NaiveManyMatcher<StringPatternPosition, BranchSelector>;
+pub type StringNaiveManyMatcher = NaiveManyMatcher<StringPatternPosition, ConstraintSelector>;
 
 /// Simple indexing scheme for strings.
 ///

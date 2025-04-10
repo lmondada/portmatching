@@ -14,7 +14,7 @@ use itertools::Itertools;
 
 use crate::{
     concrete::string::CharacterPredicate,
-    constraint::{DeterministicConstraintSelector, EvaluatePredicate},
+    constraint::{DeterministicConstraintEvaluator, EvaluatePredicate},
     indexing::{Binding, IndexedData},
     BindMap, IndexingScheme, ManyMatcher, NaiveManyMatcher,
 };
@@ -45,14 +45,15 @@ impl<S: AsRef<str>> From<S> for MatrixString {
 /// indexing.
 pub type MatrixConstraint = crate::Constraint<MatrixPatternPosition, CharacterPredicate>;
 
-type BranchSelector = DeterministicConstraintSelector<MatrixPatternPosition, CharacterPredicate>;
+type ConstraintSelector =
+    DeterministicConstraintEvaluator<MatrixPatternPosition, CharacterPredicate>;
 
 /// A matcher for 2D character matrices.
-pub type MatrixManyMatcher = ManyMatcher<MatrixPattern, MatrixPatternPosition, BranchSelector>;
+pub type MatrixManyMatcher = ManyMatcher<MatrixPattern, MatrixPatternPosition, ConstraintSelector>;
 /// A naive matcher for 2D character matrices.
 ///
 /// Only use for testing, as it is too slow for practical purposes.
-pub type MatrixNaiveManyMatcher = NaiveManyMatcher<MatrixPatternPosition, BranchSelector>;
+pub type MatrixNaiveManyMatcher = NaiveManyMatcher<MatrixPatternPosition, ConstraintSelector>;
 
 impl EvaluatePredicate<MatrixString, MatrixSubjectPosition> for CharacterPredicate {
     fn check(&self, args: &[impl Borrow<MatrixSubjectPosition>], data: &MatrixString) -> bool {

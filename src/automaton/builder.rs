@@ -5,11 +5,11 @@ use petgraph::acyclic::Acyclic;
 
 use crate::{
     automaton::{ConstraintAutomaton, StateID},
-    branch_selector::CreateBranchSelector,
     constraint::Tag,
     indexing::IndexKey,
-    pattern::{PartialPatternConstraint, PartialPatternTag, Pattern, Satisfiable},
-    Constraint, HashSet, IndexingScheme, PartialPattern, PatternFallback, PatternID,
+    pattern::{Pattern, Satisfiable},
+    Constraint, ConstraintEvaluator, HashSet, IndexingScheme, PartialPattern, PatternFallback,
+    PatternID,
 };
 
 mod modify;
@@ -109,10 +109,7 @@ struct BuildState<P: PartialPattern> {
     satisfied_constraints: BTreeSet<Constraint<P::Key, P::Predicate>>,
 }
 
-impl<P: PartialPattern, B> AutomatonBuilder<P, P::Key, B>
-where
-    B: CreateBranchSelector<Constraint<P::Key, P::Predicate>, Key = P::Key>,
-{
+impl<P: PartialPattern> AutomatonBuilder<P, P::Key, P::Evaluator> {
     /// Construct the automaton.
     ///
     /// The returned automaton will be able to match `self.patterns` and will
@@ -126,7 +123,7 @@ where
     pub fn build(
         mut self,
         config: BuildConfig<impl IndexingScheme<Key = P::Key>>,
-    ) -> (ConstraintAutomaton<P::Key, B>, Vec<PatternID>) {
+    ) -> (ConstraintAutomaton<P::Key, P::Evaluator>, Vec<PatternID>) {
         // Turn patterns into a transition graph
         let pattern_ids = self.construct_graph(config.indexing_scheme);
 
@@ -241,11 +238,11 @@ where
                 }
             }
 
-            // 4. Consume constraints to create the branch selector
-            let br = B::create_branch_selector(best_constraints);
-            self.set_branch_selector(state, br);
+            // 4. Consume constraints to create the constraint evaluator
+            let evaluator = best_tag.compile_evaluator(&best_constraints);
+            self.set_constraint_evaluator(state, evaluator);
 
-            // 5. Compute the minimum scope for the state (requires branch selector).
+            // 5. Compute the minimum scope for the state (requires constraint evaluator).
             self.populate_min_scope(state, &indexing);
         }
 
@@ -295,8 +292,8 @@ where
     }
 
     fn required_bindings(&self, state: StateID) -> impl Iterator<Item = P::Key> + '_ {
-        if let Some(br) = self.branch_selector(state) {
-            Some(br.required_bindings().iter().copied())
+        if let Some(evaluator) = self.constraint_evaluator(state) {
+            Some(evaluator.required_bindings().iter().copied())
                 .into_iter()
                 .flatten()
         } else {
@@ -306,7 +303,7 @@ where
 }
 
 fn retain_non_empty<P: PartialPattern>(
-    constraints: &mut Vec<PartialPatternConstraint<P>>,
+    constraints: &mut Vec<Constraint<P::Key, P::Predicate>>,
     next_patterns: &mut Vec<PatternsInProgress<P>>,
     next_matches: &mut Vec<Matches>,
 ) {
@@ -330,8 +327,8 @@ fn retain_non_empty<P: PartialPattern>(
 
 fn apply_transitions<P: PartialPattern>(
     patterns: PatternsInProgress<P>,
-    transitions: &[PartialPatternConstraint<P>],
-    cls: &PartialPatternTag<P>,
+    transitions: &[Constraint<P::Key, P::Predicate>],
+    tag: &P::Tag,
 ) -> (
     Vec<PatternsInProgress<P>>,
     Vec<Matches>,
@@ -343,7 +340,7 @@ fn apply_transitions<P: PartialPattern>(
     let mut next_matches = vec![BTreeSet::default(); transitions.len()];
     let mut skip_patterns = BTreeSet::default();
     for (id, pattern) in patterns {
-        let new_patterns = pattern.apply_transitions(transitions, cls);
+        let new_patterns = pattern.apply_transitions(transitions, tag);
         if new_patterns.is_empty() {
             skip_patterns.insert((id, pattern));
             continue;
@@ -383,8 +380,8 @@ impl<P, K: IndexKey, B> Default for AutomatonBuilder<P, K, B> {
 pub(super) mod tests {
 
     use crate::{
-        branch_selector::tests::TestBranchSelector,
         constraint::{
+            evaluator::tests::TestConstraintEvaluator,
             tests::{TestConstraint, TestKey, TestPartialPattern, TestPattern, TestPredicate},
             ConstraintPattern,
         },
@@ -419,7 +416,8 @@ pub(super) mod tests {
         }
     }
 
-    pub(crate) type TestBuilder = AutomatonBuilder<TestPartialPattern, TestKey, TestBranchSelector>;
+    pub(crate) type TestBuilder =
+        AutomatonBuilder<TestPartialPattern, TestKey, TestConstraintEvaluator>;
     pub(crate) type TestBuildConfig = BuildConfig<TestStrIndexingScheme>;
 
     #[test]

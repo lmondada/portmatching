@@ -11,8 +11,7 @@ use petgraph::dot::Dot;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::stable_graph::StableDiGraph;
 
-use crate::branch_selector::DisplayBranchSelector;
-use crate::HashMap;
+use crate::{ConstraintEvaluator, HashMap};
 use std::collections::BTreeSet;
 use std::fmt::{self, Debug};
 use std::hash::Hash;
@@ -96,7 +95,7 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
     pub fn dot_string(&self) -> String
     where
         K: IndexKey,
-        B: DisplayBranchSelector,
+        B: ConstraintEvaluator,
     {
         let str_graph = self.graph.map(&fmt_node, &fmt_edge(&self.graph));
         format!("{}", Dot::new(&str_graph))
@@ -113,11 +112,11 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
     }
 }
 
-fn fmt_node<K: IndexKey, B: DisplayBranchSelector>(_: NodeIndex, weight: &State<K, B>) -> String {
+fn fmt_node<K: IndexKey, B: ConstraintEvaluator>(_: NodeIndex, weight: &State<K, B>) -> String {
     let br = weight
-        .branch_selector
+        .constraint_evaluator
         .as_ref()
-        .map(|br| br.fmt_tag())
+        .map(|br| br.summary())
         .unwrap_or_default();
     let matches = weight
         .matches
@@ -128,7 +127,7 @@ fn fmt_node<K: IndexKey, B: DisplayBranchSelector>(_: NodeIndex, weight: &State<
     format!("{br}\n{matches}")
 }
 
-fn fmt_edge<'t, K: IndexKey, B: DisplayBranchSelector + 't>(
+fn fmt_edge<'t, K: IndexKey, B: ConstraintEvaluator + 't>(
     graph: &TransitionGraph<K, B>,
 ) -> impl Fn(EdgeIndex, &()) -> String + '_ {
     |edge, &()| {
@@ -137,9 +136,9 @@ fn fmt_edge<'t, K: IndexKey, B: DisplayBranchSelector + 't>(
         let src_weight = graph.node_weight(src).unwrap();
         if let Some(pos) = src_weight.edge_order.iter().position(|&e| e == edge_id) {
             let br = src_weight
-                .branch_selector
+                .constraint_evaluator
                 .as_ref()
-                .expect("non trivial transition but no branch selector");
+                .expect("non trivial transition but no constraint evaluator");
             br.fmt_nth_constraint(pos).to_string()
         } else {
             "FAIL".to_string()
@@ -147,7 +146,7 @@ fn fmt_edge<'t, K: IndexKey, B: DisplayBranchSelector + 't>(
     }
 }
 
-impl<K: IndexKey, P: DisplayBranchSelector> Debug for ConstraintAutomaton<K, P> {
+impl<K: IndexKey, P: ConstraintEvaluator> Debug for ConstraintAutomaton<K, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.dot_string())
     }
@@ -181,10 +180,10 @@ struct State<K: Ord, B> {
     ///
     /// The requried bindings are stored topological order.
     matches: HashMap<PatternID, Vec<K>>,
-    /// The branch selector for the state
+    /// The constraint evaluator for the state
     ///
     /// None if the state has no child
-    branch_selector: Option<B>,
+    constraint_evaluator: Option<B>,
     /// The order of the outgoing contraint transitions. Must map one-to-one to
     /// the outgoing constraint edges, i.e. the edges with non-None weights.
     edge_order: Vec<TransitionID>,

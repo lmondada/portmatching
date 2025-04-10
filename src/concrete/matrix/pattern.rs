@@ -1,10 +1,12 @@
 use std::{fmt, iter};
 
-use crate::concrete::string::CharVar;
-use crate::constraint::{ConstraintPattern, PartialConstraintPattern};
-use crate::{Constraint, HashMap, Pattern};
+use itertools::Itertools;
 
-use super::{CharacterPredicate, MatrixPatternPosition};
+use crate::concrete::string::{CharVar, StringTag};
+use crate::constraint::{ConstraintPattern, PartialConstraintPattern};
+use crate::{ArityPredicate, Constraint, ConstraintTag, HashMap, Pattern, Tag};
+
+use super::{CharacterPredicate, ConstraintSelector, MatrixPatternPosition};
 
 /// A pattern for matching a matrix of characters.
 ///
@@ -124,11 +126,55 @@ impl MatrixPattern {
     }
 }
 
+impl ConstraintTag<MatrixPatternPosition> for CharacterPredicate {
+    type Tag = StringTag<MatrixPatternPosition>;
+
+    fn get_tags(&self, keys: &[MatrixPatternPosition]) -> Vec<Self::Tag> {
+        use CharacterPredicate::*;
+        assert_eq!(self.arity(), keys.len());
+
+        match self {
+            BindingEq => {
+                vec![StringTag::Position(keys[0]), StringTag::Position(keys[1])]
+            }
+            ConstVal(_) => vec![StringTag::Position(keys[0])],
+        }
+    }
+}
+
+impl Tag<MatrixPatternPosition, CharacterPredicate> for StringTag<MatrixPatternPosition> {
+    type ExpansionFactor = ();
+
+    type Evaluator = ConstraintSelector;
+
+    fn expansion_factor<'c, C>(
+        &self,
+        _constraints: impl IntoIterator<Item = C>,
+    ) -> Self::ExpansionFactor
+    where
+        C: Into<(&'c CharacterPredicate, &'c [MatrixPatternPosition])>,
+    {
+        ()
+    }
+
+    fn compile_evaluator<'c, C>(&self, constraints: impl IntoIterator<Item = C>) -> Self::Evaluator
+    where
+        C: Into<(&'c CharacterPredicate, &'c [MatrixPatternPosition])>,
+    {
+        let constraints = constraints.into_iter().map(|c| c.into()).collect_vec();
+        ConstraintSelector::from_constraints(constraints)
+    }
+}
+
 impl Pattern for MatrixPattern {
-    type Key = MatrixPatternPosition;
     type PartialPattern = PartialConstraintPattern<MatrixPatternPosition, CharacterPredicate>;
-    type Predicate = CharacterPredicate;
     type Error = ();
+
+    // Type aliases
+    type Key = MatrixPatternPosition;
+    type Predicate = CharacterPredicate;
+    type Tag = StringTag<MatrixPatternPosition>;
+    type Evaluator = ConstraintSelector;
 
     fn required_bindings(&self) -> Vec<Self::Key> {
         (0..self.n_rows())

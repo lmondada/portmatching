@@ -8,6 +8,8 @@
 //! other. Except we do not enforce independence (you just won't be able to
 //! make use of that dependency), and the sets do not need to be disjoint.
 
+use super::ConstraintEvaluator;
+
 /// Implement on a predicate to define the constraint tags that constraints
 /// belongs to.
 pub trait ConstraintTag<K>: Sized {
@@ -22,7 +24,7 @@ pub trait ConstraintTag<K>: Sized {
 }
 
 /// A tag for a constraint type.
-pub trait Tag<K, P>: Ord {
+pub trait Tag<K, P>: Ord + std::fmt::Debug {
     /// Type for expansion factors.
     ///
     /// This would most naturally be a floating point number, but should have a
@@ -31,6 +33,9 @@ pub trait Tag<K, P>: Ord {
     /// long as the factor is the same across all constraints, then it does
     /// not matter what the constant is.
     type ExpansionFactor: Ord;
+
+    /// The type of constraint evaluator for this tag.
+    type Evaluator: ConstraintEvaluator<Key = K>;
 
     /// Compute the expansion factor of the constraints.
     ///
@@ -46,6 +51,15 @@ pub trait Tag<K, P>: Ord {
         &self,
         constraints: impl IntoIterator<Item = C>,
     ) -> Self::ExpansionFactor
+    where
+        K: 'c,
+        P: 'c,
+        C: Into<(&'c P, &'c [K])>;
+
+    /// Construct an evaluator for the list of constraints.
+    ///
+    /// All constraints are guaranteed to have the tag `self`.
+    fn compile_evaluator<'c, C>(&self, constraints: impl IntoIterator<Item = C>) -> Self::Evaluator
     where
         K: 'c,
         P: 'c,

@@ -7,7 +7,7 @@
 //! - The `ConcretePattern` trait, for patterns that can themselves be matched on.
 //! - Error types related to pattern matching operations.
 
-use crate::{constraint::ConstraintTag, indexing::IndexKey, Constraint};
+use crate::{constraint::ConstraintTag, indexing::IndexKey, Constraint, ConstraintEvaluator, Tag};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Represents whether a pattern or constraint is satisfiable
@@ -29,22 +29,29 @@ pub enum PredicateSelection<P> {
     Some(Vec<P>),
 }
 
-/// Type alias for the constraint type for a pattern.
-pub type PatternConstraint<P> = Constraint<<P as Pattern>::Key, <P as Pattern>::Predicate>;
-
 /// A pattern for pattern matching.
 pub trait Pattern {
     /// The type for partially satisfied patterns.
-    type PartialPattern: PartialPattern<Predicate = Self::Predicate, Key = Self::Key>;
+    type PartialPattern: PartialPattern<
+        Predicate = Self::Predicate,
+        Key = Self::Key,
+        Evaluator = Self::Evaluator,
+        Tag = Self::Tag,
+    >;
     /// Error for conversion to partial pattern failure
     type Error: std::fmt::Debug;
 
-    // These three types are just aliases that can be derived from the above
+    // These four types are just aliases that can be derived from the above
     // types but simplify user code.
+
     /// The type of predicates used in the pattern.
-    type Predicate;
+    type Predicate: ConstraintTag<Self::Key, Tag = Self::Tag>;
     /// The type of keys used in the pattern.
     type Key: IndexKey;
+    /// The type of tags for the pattern.
+    type Tag: Tag<Self::Key, Self::Predicate, Evaluator = Self::Evaluator>;
+    /// The type of evaluator for the pattern.
+    type Evaluator: ConstraintEvaluator<Key = Self::Key>;
 
     /// List of required bindings to match the pattern.
     fn required_bindings(&self) -> Vec<Self::Key>;
@@ -53,23 +60,23 @@ pub trait Pattern {
     fn try_into_partial_pattern(self) -> Result<Self::PartialPattern, Self::Error>;
 }
 
-/// Type alias for the constraint type for a partial pattern.
-pub type PartialPatternConstraint<P> =
-    Constraint<<P as PartialPattern>::Key, <P as PartialPattern>::Predicate>;
-
-/// Type alias for the tag type for a partial pattern.
-pub type PartialPatternTag<P> =
-    <<P as PartialPattern>::Predicate as ConstraintTag<<P as PartialPattern>::Key>>::Tag;
-
 /// Partially satisfied patterns.
 ///
 /// Provide the logic for constructing and simplifying patterns as constraints
 /// get applied to it.
 pub trait PartialPattern: Ord + Clone {
     /// The type of predicates used in the pattern.
-    type Predicate: Ord + Clone + ConstraintTag<Self::Key>;
+    type Predicate: Ord + Clone + ConstraintTag<Self::Key, Tag = Self::Tag>;
     /// The constraint key type.
     type Key: IndexKey;
+
+    // These two types are just aliases that can be derived from the above
+    // types but simplify user code.
+
+    /// The type of tags for the pattern.
+    type Tag: Tag<Self::Key, Self::Predicate, Evaluator = Self::Evaluator>;
+    /// The type of evaluator for the pattern.
+    type Evaluator: ConstraintEvaluator<Key = Self::Key>;
 
     /// Get all constraints that are useful for pattern matching `self`.
     fn nominate(&self) -> impl Iterator<Item = Constraint<Self::Key, Self::Predicate>> + '_;
@@ -89,8 +96,8 @@ pub trait PartialPattern: Ord + Clone {
     /// the same length as `transitions`, or be empty.
     fn apply_transitions(
         &self,
-        transitions: &[PartialPatternConstraint<Self>],
-        cls: &PartialPatternTag<Self>,
+        transitions: &[Constraint<Self::Key, Self::Predicate>],
+        cls: &Self::Tag,
     ) -> Vec<Satisfiable<Self>>;
 
     /// Check whether the partial pattern is satisfiable.

@@ -3,16 +3,15 @@ use std::fmt::{self, Debug};
 use itertools::Itertools;
 
 use crate::automaton::BuildConfig;
-use crate::branch_selector::{CreateBranchSelector, DisplayBranchSelector, EvaluateBranchSelector};
 use crate::indexing::IndexedData;
-use crate::pattern::{Pattern, PatternConstraint};
-use crate::IndexingScheme;
+use crate::pattern::Pattern;
 use crate::{
     automaton::{AutomatonBuilder, ConstraintAutomaton},
     indexing::IndexKey,
     matcher::PatternMatch,
     HashMap, PatternID, PortMatcher,
 };
+use crate::{EvaluateConstraints, IndexingScheme};
 
 /// A graph pattern matcher using scope automata.
 #[derive(Clone)]
@@ -26,7 +25,7 @@ impl<PT, D, B, K> PortMatcher<D> for ManyMatcher<PT, K, B>
 where
     K: IndexKey,
     D: IndexedData<K>,
-    B: EvaluateBranchSelector<D, D::Value, Key = K>,
+    B: EvaluateConstraints<D, D::Value, Key = K>,
 {
     type Match = D::BindMap;
 
@@ -48,7 +47,7 @@ pub enum PatternFallback {
     Fail,
 }
 
-impl<PT: Pattern + Clone, B> ManyMatcher<PT, PT::Key, B> {
+impl<PT: Pattern + Clone> ManyMatcher<PT, PT::Key, PT::Evaluator> {
     /// Create a new matcher from patterns.
     ///
     /// The patterns are converted to constraints. Uses the deterministic
@@ -59,7 +58,6 @@ impl<PT: Pattern + Clone, B> ManyMatcher<PT, PT::Key, B> {
     ) -> Result<Self, PT::Error>
     where
         I: IndexingScheme<Key = PT::Key> + Default,
-        B: CreateBranchSelector<PatternConstraint<PT>, Key = PT::Key>,
     {
         Self::try_from_patterns_with_config(patterns, BuildConfig::<I>::default(), fallback)
     }
@@ -70,10 +68,7 @@ impl<PT: Pattern + Clone, B> ManyMatcher<PT, PT::Key, B> {
         patterns: Vec<PT>,
         config: BuildConfig<impl IndexingScheme<Key = PT::Key>>,
         fallback: PatternFallback,
-    ) -> Result<Self, PT::Error>
-    where
-        B: CreateBranchSelector<PatternConstraint<PT>, Key = PT::Key>,
-    {
+    ) -> Result<Self, PT::Error> {
         let builder = AutomatonBuilder::try_from_patterns(patterns.iter().cloned(), fallback)?;
         let (automaton, ids) = builder.build(config);
 
@@ -113,7 +108,7 @@ impl<PT, K: IndexKey, B> ManyMatcher<PT, K, B> {
     }
 }
 
-impl<PT, K: IndexKey, B: DisplayBranchSelector> ManyMatcher<PT, K, B> {
+impl<PT: Pattern, K: IndexKey> ManyMatcher<PT, K, PT::Evaluator> {
     /// A dotstring representation of the trie.
     pub fn dot_string(&self) -> String {
         self.automaton.dot_string()

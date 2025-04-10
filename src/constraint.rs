@@ -17,18 +17,21 @@
 //! [`ConstraintPattern`] to simplify the definition of patterns. These patterns
 //! are defined by a set of constraints.
 //!
-//! ## Branch selectors
-//! The types [`DefaultConstraintSelector`] and [`DeterministicConstraintSelector`]
-//! define simple branch selectors that can be provided to pattern matcher.
+//! ## Constraint selectors
+//! The types [`DefaultConstraintEvaluator`] and [`DeterministicConstraintEvaluator`]
+//! define simple constraint evaluators that can be provided to pattern matcher.
 
+pub mod evaluator;
 pub mod pattern;
 pub mod predicate;
-pub mod selector;
 pub mod tag;
 
+pub use evaluator::{
+    ConstraintEvaluator, DefaultConstraintEvaluator, DeterministicConstraintEvaluator,
+    EvaluateConstraints,
+};
 pub use pattern::{ConstraintPattern, PartialConstraintPattern};
 pub use predicate::{ArityPredicate, ConditionalPredicate, EvaluatePredicate};
-pub use selector::{DefaultConstraintSelector, DeterministicConstraintSelector};
 pub use tag::{ConstraintTag, Tag};
 
 use std::{collections::BTreeSet, fmt::Debug};

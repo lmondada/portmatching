@@ -10,10 +10,10 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-    branch_selector::{BranchSelector, CreateBranchSelector, EvaluateBranchSelector},
     indexing::{bindings_hash, Binding, IndexKey, IndexedData},
-    pattern::{PartialPattern, PartialPatternConstraint, Pattern, PatternConstraint, Satisfiable},
-    BindMap, HashSet, IndexingScheme, PatternID, Tag,
+    pattern::{PartialPattern, Pattern, Satisfiable},
+    BindMap, Constraint, ConstraintEvaluator, EvaluateConstraints, HashSet, IndexingScheme,
+    PatternID, Tag,
 };
 
 use super::{PatternMatch, PortMatcher};
@@ -22,8 +22,8 @@ use super::{PatternMatch, PortMatcher};
 #[derive(Debug, Clone)]
 pub struct SinglePatternMatcher<K, B> {
     /// The constraints forming the pattern
-    branch_selectors: Vec<B>,
-    /// For each branch selector, the keys that must be bound
+    constraint_evaluators: Vec<B>,
+    /// For each constraint evaluator, the keys that must be bound
     scopes: Vec<Vec<K>>,
     /// The bindings that must be present in the final matches
     required_bindings: BTreeSet<K>,
@@ -31,9 +31,9 @@ pub struct SinglePatternMatcher<K, B> {
 
 impl<B, D, K> PortMatcher<D> for SinglePatternMatcher<K, B>
 where
-    K: IndexKey,
     D: IndexedData<K>,
-    B: EvaluateBranchSelector<D, D::Value, Key = K>,
+    B: EvaluateConstraints<D, D::Value, Key = K>,
+    K: IndexKey,
 {
     type Match = D::BindMap;
 
@@ -47,16 +47,14 @@ where
     }
 }
 
-impl<K, B> SinglePatternMatcher<K, B> {
+impl<B: ConstraintEvaluator> SinglePatternMatcher<B::Key, B> {
     /// Create a matcher from a vector of constraints.
     ///
     /// The host indexing scheme is the type's default.
     pub fn try_from_pattern<I, PT>(pattern: PT) -> Result<Self, PT::Error>
     where
-        PT: Pattern<Key = K>,
-        B: CreateBranchSelector<PatternConstraint<PT>, Key = K>,
-        K: IndexKey,
-        I: IndexingScheme<Key = K> + Default,
+        PT: Pattern<Evaluator = B, Key = B::Key>,
+        I: IndexingScheme<Key = B::Key> + Default,
     {
         Self::try_from_pattern_with_indexing(pattern, &I::default())
     }
@@ -64,12 +62,10 @@ impl<K, B> SinglePatternMatcher<K, B> {
     /// Create a matcher from a vector of constraints with specified host indexing scheme.
     pub fn try_from_pattern_with_indexing<PT>(
         pattern: PT,
-        indexing: &impl IndexingScheme<Key = K>,
+        indexing: &impl IndexingScheme<Key = B::Key>,
     ) -> Result<Self, PT::Error>
     where
-        PT: Pattern<Key = K>,
-        B: CreateBranchSelector<PatternConstraint<PT>, Key = K>,
-        K: IndexKey,
+        PT: Pattern<Evaluator = B, Key = B::Key>,
     {
         // The set of keys that must be bound
         let required_bindings = BTreeSet::from_iter(pattern.required_bindings());
@@ -77,18 +73,21 @@ impl<K, B> SinglePatternMatcher<K, B> {
         // Break pattern into predicates
         let constraints = decompose_constraints(pattern.try_into_partial_pattern()?);
 
-        // Turn predicates into branch selectors (with only one branch -- they
+        // Turn predicates into constraint evaluator (with only one branch -- they
         // are just predicate evaluators in this case)
-        let branch_selectors = constraints
+        let constraint_evaluators = constraints
             .into_iter()
-            .map(|p| B::create_branch_selector(vec![p]))
+            .map(|c| {
+                let first_tag = c.get_tags().into_iter().next().unwrap();
+                first_tag.compile_evaluator([&c])
+            })
             .collect_vec();
 
         // Compute each step of the way which bindings are required
-        let mut scopes = Vec::<Vec<K>>::with_capacity(branch_selectors.len());
+        let mut scopes = Vec::<Vec<B::Key>>::with_capacity(constraint_evaluators.len());
         let mut known_bindings = HashSet::default();
 
-        for br in &branch_selectors {
+        for br in &constraint_evaluators {
             let reqs = br.required_bindings().iter().copied();
             let new_keys = indexing.all_missing_bindings(reqs, known_bindings.iter().copied());
             known_bindings.extend(new_keys.iter().copied());
@@ -101,14 +100,14 @@ impl<K, B> SinglePatternMatcher<K, B> {
         scopes.push(new_keys);
 
         Ok(Self {
-            branch_selectors,
+            constraint_evaluators,
             required_bindings,
             scopes,
         })
     }
 }
 
-fn decompose_constraints<P>(mut pattern: P) -> Vec<PartialPatternConstraint<P>>
+fn decompose_constraints<P>(mut pattern: P) -> Vec<Constraint<P::Key, P::Predicate>>
 where
     P: PartialPattern,
 {
@@ -149,7 +148,9 @@ where
     all_constraints
 }
 
-fn find_best_constraint<P: PartialPattern>(pattern: &P) -> Option<PartialPatternConstraint<P>> {
+fn find_best_constraint<P: PartialPattern>(
+    pattern: &P,
+) -> Option<Constraint<P::Key, P::Predicate>> {
     let mut tag_to_constraints: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
     for c in pattern.nominate() {
         for cls in c.get_tags() {
@@ -163,13 +164,13 @@ fn find_best_constraint<P: PartialPattern>(pattern: &P) -> Option<PartialPattern
     best_constraints.into_iter().exactly_one().ok()
 }
 
-impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
+impl<K: IndexKey, B: ConstraintEvaluator> SinglePatternMatcher<K, B> {
     /// Whether `self` matches `host` anchored at `root`.
     ///
     /// Check whether each edge of the pattern is valid in the host
     pub fn match_exists<D>(&self, host: &D) -> bool
     where
-        B: EvaluateBranchSelector<D, D::Value, Key = K>,
+        B: EvaluateConstraints<D, D::Value, Key = K>,
         D: IndexedData<K>,
     {
         !self.get_all_bindings(host).is_empty()
@@ -178,12 +179,12 @@ impl<K: IndexKey, B: BranchSelector> SinglePatternMatcher<K, B> {
     /// Get the valid scope assignments as a map from variable names to host nodes.
     fn get_all_bindings<D>(&self, host: &D) -> Vec<D::BindMap>
     where
-        B: EvaluateBranchSelector<D, D::Value, Key = K>,
+        B: EvaluateConstraints<D, D::Value, Key = K>,
         D: IndexedData<K>,
     {
         let mut all_bindings = vec![D::BindMap::default()];
 
-        for (br, scope) in self.branch_selectors.iter().zip(&self.scopes) {
+        for (br, scope) in self.constraint_evaluators.iter().zip(&self.scopes) {
             // Add new required keys
             all_bindings = all_bindings
                 .into_iter()
@@ -237,14 +238,16 @@ mod tests {
     use itertools::Itertools;
 
     use crate::{
-        branch_selector::tests::TestBranchSelector,
-        constraint::tests::{TestConstraint, TestPattern, TestPredicate},
+        constraint::{
+            evaluator::tests::TestConstraintEvaluator,
+            tests::{TestConstraint, TestPattern, TestPredicate},
+        },
         indexing::tests::{TestData, TestStrIndexingScheme},
     };
 
     use super::*;
 
-    type TestMatcher = SinglePatternMatcher<&'static str, TestBranchSelector>;
+    type TestMatcher = SinglePatternMatcher<&'static str, TestConstraintEvaluator>;
 
     #[test]
     fn test_single_pattern_matcher() {

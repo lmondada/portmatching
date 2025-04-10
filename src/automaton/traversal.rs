@@ -2,8 +2,8 @@ use std::{borrow::Borrow, collections::VecDeque};
 
 use itertools::Itertools;
 
-use crate::branch_selector::EvaluateBranchSelector;
 use crate::indexing::{bindings_hash, Binding, IndexedData};
+use crate::EvaluateConstraints;
 use crate::{indexing::IndexKey, BindMap, HashMap, HashSet, PatternID};
 
 use super::view::GraphView;
@@ -44,9 +44,9 @@ impl<K: IndexKey, B> ConstraintAutomaton<K, B> {
     ) -> impl Iterator<Item = TraversalState<D::BindMap>> + 'a
     where
         D: IndexedData<K>,
-        B: EvaluateBranchSelector<D, D::Value, Key = K>,
+        B: EvaluateConstraints<D, D::Value, Key = K>,
     {
-        let Some(br) = self.branch_selector(state.state_id) else {
+        let Some(br) = self.constraint_evaluator(state.state_id) else {
             return None.into_iter().flatten();
         };
         let reqs = br.required_bindings();
@@ -196,7 +196,7 @@ impl<B, D, K> Iterator for AutomatonTraverser<'_, '_, K, B, D::BindMap, D>
 where
     K: IndexKey,
     D: IndexedData<K>,
-    B: EvaluateBranchSelector<D, D::Value, Key = K>,
+    B: EvaluateConstraints<D, D::Value, Key = K>,
 {
     type Item = (PatternID, D::BindMap);
 

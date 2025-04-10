@@ -1,9 +1,8 @@
 use crate::{
-    branch_selector::{CreateBranchSelector, EvaluateBranchSelector},
     indexing::{IndexKey, IndexedData},
     matcher::{PatternMatch, PortMatcher, SinglePatternMatcher},
-    pattern::{Pattern, PatternConstraint},
-    IndexingScheme,
+    pattern::Pattern,
+    ConstraintEvaluator, EvaluateConstraints, IndexingScheme,
 };
 
 /// A simple matcher for matching multiple patterns.
@@ -17,7 +16,7 @@ pub struct NaiveManyMatcher<K, B> {
     matchers: Vec<SinglePatternMatcher<K, B>>,
 }
 
-impl<K, B> NaiveManyMatcher<K, B> {
+impl<B: ConstraintEvaluator> NaiveManyMatcher<B::Key, B> {
     /// Create a new naive matcher from patterns.
     ///
     /// Use [`IndexingScheme::default`] as the indexing scheme.
@@ -25,10 +24,8 @@ impl<K, B> NaiveManyMatcher<K, B> {
         patterns: impl IntoIterator<Item = PT>,
     ) -> Result<Self, PT::Error>
     where
-        PT: Pattern<Key = K>,
-        B: CreateBranchSelector<PatternConstraint<PT>, Key = K>,
-        K: IndexKey,
-        I: IndexingScheme<Key = K> + Default,
+        PT: Pattern<Evaluator = B, Key = B::Key>,
+        I: IndexingScheme<Key = B::Key> + Default,
     {
         let matchers = patterns
             .into_iter()
@@ -40,12 +37,10 @@ impl<K, B> NaiveManyMatcher<K, B> {
     /// Create a new naive matcher from patterns, using a custom indexing scheme.
     pub fn try_from_patterns_with_indexing<PT>(
         patterns: impl IntoIterator<Item = PT>,
-        host_indexing: &impl IndexingScheme<Key = K>,
+        host_indexing: &impl IndexingScheme<Key = B::Key>,
     ) -> Result<Self, PT::Error>
     where
-        PT: Pattern<Key = K>,
-        B: CreateBranchSelector<PatternConstraint<PT>, Key = K>,
-        K: IndexKey,
+        PT: Pattern<Evaluator = B, Key = B::Key>,
     {
         let matchers = patterns
             .into_iter()
@@ -67,7 +62,7 @@ impl<B, D, K> PortMatcher<D> for NaiveManyMatcher<K, B>
 where
     K: IndexKey,
     D: IndexedData<K>,
-    B: EvaluateBranchSelector<D, D::Value, Key = K>,
+    B: EvaluateConstraints<D, D::Value, Key = K>,
 {
     type Match = D::BindMap;
 

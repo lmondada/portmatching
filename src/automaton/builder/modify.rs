@@ -84,9 +84,9 @@ impl<P, K: IndexKey, B> AutomatonBuilder<P, K, B> {
         weight.min_scope = min_scope;
     }
 
-    pub(super) fn set_branch_selector(&mut self, state: StateID, branch_selector: B) {
+    pub(super) fn set_constraint_evaluator(&mut self, state: StateID, evaluator: B) {
         let weight = self.node_weight_mut(state);
-        weight.branch_selector = Some(branch_selector);
+        weight.constraint_evaluator = Some(evaluator);
     }
 
     pub(super) fn add_matches(
@@ -112,13 +112,8 @@ impl<P, K: Ord, B> AutomatonBuilder<P, K, B> {
 
 #[cfg(test)]
 pub mod tests {
-    // use crate::{
-    //     automaton::{tests::TestAutomaton, AutomatonBuilder},
-    //     branch_selector::tests::TestBranchSelector,
-    //     predicate::tests::{TestKey, TestPattern},
-    // };
 
-    // pub type TestAutomatonBuilder = AutomatonBuilder<TestPattern, TestKey, TestBranchSelector>;
+    // pub type TestAutomatonBuilder = AutomatonBuilder<TestPattern, TestKey, TestConstraintEvaluator>;
 
     // impl TestAutomatonBuilder {
     //     pub(crate) fn from_matcher(automaton: TestAutomaton) -> TestAutomatonBuilder {

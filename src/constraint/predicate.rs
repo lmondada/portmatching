@@ -50,8 +50,8 @@ pub trait ConditionalPredicate<K>: Clone + Ord + Sized {
     /// of the same tag.
     ///
     /// `prev_constraints` is the set of constraints that have been evaluated
-    /// so far (useful for a deterministic branch selector, in which case this
-    /// means they were not satisfied).
+    /// so far (useful for a deterministic constraint evaluator, in which case
+    /// this means they were not satisfied).
     fn condition_on(
         &self,
         keys: &[K],
@@ -111,7 +111,7 @@ pub(crate) mod tests {
     pub type TestPattern = ConstraintPattern<TestKey, TestPredicate>;
     pub type TestPartialPattern = PartialConstraintPattern<TestKey, TestPredicate>;
 
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub(crate) enum TestPredicate {
         // Tag One
         AreEqualOne,
@@ -122,6 +122,19 @@ pub(crate) mod tests {
         // Tag Three
         NeverTrueThree,  // take one arg
         AlwaysTrueThree, // take one arg
+    }
+
+    impl std::fmt::Debug for TestPredicate {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                TestPredicate::AreEqualOne => write!(f, "=="),
+                TestPredicate::NotEqualOne => write!(f, "!="),
+                TestPredicate::AreEqualTwo => write!(f, "=="),
+                TestPredicate::AlwaysTrueTwo => write!(f, "TRUE"),
+                TestPredicate::NeverTrueThree => write!(f, "FALSE"),
+                TestPredicate::AlwaysTrueThree => write!(f, "TRUE"),
+            }
+        }
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
