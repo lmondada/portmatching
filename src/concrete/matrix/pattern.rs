@@ -154,7 +154,6 @@ impl Tag<MatrixPatternPosition, CharacterPredicate> for StringTag<MatrixPatternP
     where
         C: Into<(&'c CharacterPredicate, &'c [MatrixPatternPosition])>,
     {
-        
     }
 
     fn compile_evaluator<'c, C>(&self, constraints: impl IntoIterator<Item = C>) -> Self::Evaluator
