@@ -11,10 +11,32 @@ use portgraph::{Direction, LinkView, NodeIndex, PortOffset, SecondaryMap};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "U: Universe + serde::Serialize, PNode: serde::Serialize, PEdge: serde::Serialize + Eq + Hash + Ord"
+    ))
+)]
 pub struct Pattern<U: Universe, PNode, PEdge: Eq + Hash> {
     nodes: HashMap<U, PNode>,
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_as_btree_map"))]
     edges: HashMap<(U, PEdge), U>,
     root: Option<U>,
+}
+
+#[cfg(feature = "serde")]
+fn serialize_as_btree_map<S, K, V>(edges: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+    K: serde::Serialize + Ord,
+    V: serde::Serialize + Ord,
+{
+    use std::collections::BTreeMap;
+
+    let edges: BTreeMap<_, _> = edges.iter().collect();
+    println!("serializing as btree map");
+
+    serde::Serialize::serialize(&edges, serializer)
 }
 
 impl<U: Universe, PNode, PEdge: Eq + Hash> Pattern<U, PNode, PEdge> {
