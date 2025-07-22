@@ -1,6 +1,6 @@
 [package]
 name = "portmatching"
-version = "0.3.1"
+version = "0.3.2"
 license = "MIT"
 
 readme = "README.md"
@@ -15,9 +15,7 @@ authors = ["Luca Mondada"]
 edition = "2021"
 rust-version = "1.70"
 
-exclude = [
-    "tests/legacy_saved_patterns/*",
-]
+exclude = ["tests/legacy_saved_patterns/*"]
 [lib]
 bench = false
 name = "portmatching"
@@ -44,7 +42,14 @@ petgraph = { version = "0.6.3", default-features = false }
 
 [features]
 serde = ["dep:serde", "portgraph/serde", "smallvec/serde"]
-datagen = ["dep:rand", "dep:serde_json", "dep:clap", "dep:rmp-serde", "dep:glob", "dep:csv"]
+datagen = [
+    "dep:rand",
+    "dep:serde_json",
+    "dep:clap",
+    "dep:rmp-serde",
+    "dep:glob",
+    "dep:csv",
+]
 
 [dev-dependencies]
 proptest = "1.1.0"
